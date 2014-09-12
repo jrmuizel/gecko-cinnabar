@@ -204,6 +204,7 @@ protected:
   RefPtr<DataTextureSourceD3D11> mTextureSource;
   RefPtr<CompositorD3D11> mCompositor;
   gfx::IntSize mSize;
+  RefPtr<IDirect3DDevice9> mDevice;
   WindowsHandle mHandle;
   gfx::SurfaceFormat mFormat;
   bool mIsLocked;
