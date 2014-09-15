@@ -50,6 +50,13 @@ SharedSurface_Basic::Create(GLContext* gl,
     case LOCAL_GL_RGBA8:
         format = SurfaceFormat::B8G8R8A8;
         break;
+    case LOCAL_GL_BGR:
+        format = SurfaceFormat::B8G8R8X8;
+        break;
+    case LOCAL_GL_BGRA_EXT:
+    case LOCAL_GL_BGRA8_EXT:
+        format = SurfaceFormat::B8G8R8A8;
+        break;
     default:
         MOZ_CRASH("Unhandled Tex format.");
     }
