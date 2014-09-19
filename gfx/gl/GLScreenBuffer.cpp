@@ -448,6 +448,7 @@ GLScreenBuffer::Swap(const gfx::IntSize& size)
         NS_WARNING("SwapProd failed for sophisticated Factory type, fell back to Basic.");
     }
     MOZ_ASSERT(nextSurf);
+    nextSurf->AcquireProducer();
 
     return Attach(nextSurf, size);
 }

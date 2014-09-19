@@ -1518,9 +1518,13 @@ GLContext::ChooseGLFormats(const SurfaceCaps& caps) const
         if (caps.alpha) {
             formats.color_texFormat = IsANGLE() ? LOCAL_GL_BGRA_EXT : LOCAL_GL_RGBA;
             formats.color_rbFormat = IsANGLE() ? LOCAL_GL_BGRA8_EXT : LOCAL_GL_RGBA8;
+            formats.color_texFormat =  LOCAL_GL_RGBA;
+            formats.color_rbFormat = LOCAL_GL_RGBA8;
         } else {
             formats.color_texFormat = IsANGLE() ? LOCAL_GL_BGR : LOCAL_GL_RGB;
             formats.color_rbFormat = IsANGLE() ? LOCAL_GL_BGRA8_EXT : LOCAL_GL_RGB8;
+            formats.color_texFormat = LOCAL_GL_RGB;
+            formats.color_rbFormat = LOCAL_GL_RGB8;
         }
 
         formats.color_texInternalFormat = IsGLES() ? formats.color_texFormat : formats.color_rbFormat;

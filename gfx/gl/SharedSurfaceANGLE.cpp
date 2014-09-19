@@ -4,10 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "SharedSurfaceANGLE.h"
-
+#include <mmsystem.h>
 #include "GLContextEGL.h"
 #include "GLLibraryEGL.h"
-
+int sync_count;
 namespace mozilla {
 namespace gl {
 
@@ -24,6 +24,7 @@ SharedSurface_ANGLEShareHandle::SharedSurface_ANGLEShareHandle(GLContext* gl,
                                                                EGLContext context,
                                                                EGLSurface pbuffer,
                                                                HANDLE shareHandle,
+                                                               IDXGIKeyedMutex *keyedMutex,
                                                                GLuint fence)
     : SharedSurface(SharedSurfaceType::EGLSurfaceANGLE,
                     AttachmentType::Screen,
@@ -34,6 +35,7 @@ SharedSurface_ANGLEShareHandle::SharedSurface_ANGLEShareHandle(GLContext* gl,
     , mContext(context)
     , mPBuffer(pbuffer)
     , mShareHandle(shareHandle)
+    , mKeyedMutex(keyedMutex)
     , mFence(fence)
 {
 }
@@ -63,12 +65,20 @@ SharedSurface_ANGLEShareHandle::UnlockProdImpl()
 void
 SharedSurface_ANGLEShareHandle::Fence()
 {
+    if (mKeyedMutex) {
+      mGL->fFlush();
+    //mGL->fFinish();
+        printf("%d Content ReleaseSync %x %d\n", sync_count++, mShareHandle, timeGetTime());
+        mKeyedMutex->ReleaseSync(0);
+        return;
+    }
     mGL->fFinish();
 }
 
 bool
 SharedSurface_ANGLEShareHandle::WaitSync()
 {
+  __asm mov eax, eax;
     return true;
 }
 
@@ -79,9 +89,27 @@ SharedSurface_ANGLEShareHandle::PollSync()
 }
 
 void
+SharedSurface_ANGLEShareHandle::AcquireProducer()
+{
+  DWORD start = timeGetTime();
+  printf("%d Content AcquireSync %x %d\n", sync_count++, mShareHandle, start);
+  if (mKeyedMutex)
+    mKeyedMutex->AcquireSync(0, INFINITE);
+  printf("%d Content AcquireSync Success %x %d\n", sync_count++, mShareHandle, timeGetTime() - start);
+}
+
+void
 SharedSurface_ANGLEShareHandle::Fence_ContentThread_Impl()
 {
+    if (mKeyedMutex) {
+        mGL->fFlush();
+        //mGL->fFinish();
+        printf("%d Content ReleaseSync %x\n", sync_count++, mShareHandle);
+        mKeyedMutex->ReleaseSync(0);
+        return;
+    } else
     if (mFence) {
+        //ReleaseProducer();
         MOZ_ASSERT(mGL->IsExtensionSupported(GLContext::NV_fence));
         mGL->fSetFence(mFence, LOCAL_GL_ALL_COMPLETED_NV);
         mGL->fFlush();
@@ -95,6 +123,7 @@ bool
 SharedSurface_ANGLEShareHandle::WaitSync_ContentThread_Impl()
 {
     if (mFence) {
+        //AcquireSync();
         mGL->MakeCurrent();
         mGL->fFinishFence(mFence);
         return true;
@@ -272,6 +301,11 @@ SharedSurface_ANGLEShareHandle::Create(GLContext* gl,
         egl->fDestroySurface(egl->Display(), pbuffer);
         return nullptr;
     }
+    void *keyedMutex = nullptr;
+    egl->fQuerySurfacePointerANGLE(display,
+                                   pbuffer,
+                                   LOCAL_EGL_D3D_TEXTURE_2D_KEYED_MUTEX_ANGLE,
+                                   &keyedMutex);
 
     GLuint fence = 0;
     if (gl->IsExtensionSupported(GLContext::NV_fence)) {
@@ -281,7 +315,7 @@ SharedSurface_ANGLEShareHandle::Create(GLContext* gl,
 
     typedef SharedSurface_ANGLEShareHandle ptrT;
     UniquePtr<ptrT> ret( new ptrT(gl, egl, size, hasAlpha, context,
-                                  pbuffer, shareHandle, fence) );
+                                  pbuffer, shareHandle, static_cast<IDXGIKeyedMutex*>(keyedMutex), fence) );
     return Move(ret);
 }
 

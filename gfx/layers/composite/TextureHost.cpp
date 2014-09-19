@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "TextureHost.h"
-
+#include <mmsystem.h>
 #include "CompositableHost.h"           // for CompositableHost
 #include "LayersLogging.h"              // for AppendToString
 #include "gfx2DGlue.h"                  // for ToIntSize
@@ -28,6 +28,7 @@
 #include "SharedSurfaceGL.h"
 #include "SurfaceStream.h"
 #include "../opengl/CompositorOGL.h"
+#include <DXGI.h>
 
 #ifdef MOZ_ENABLE_D3D10_LAYER
 #include "../d3d11/CompositorD3D11.h"
@@ -52,6 +53,8 @@
 #include "SharedSurfaceANGLE.h"
 #include "mozilla/layers/TextureDIB.h"
 #endif
+
+extern int sync_count;
 
 #if 0
 #define RECYCLE_LOG(...) printf_stderr(__VA_ARGS__)
@@ -946,6 +949,18 @@ StreamTextureHost::Lock()
         HRESULT hr = d3d->OpenSharedResource(shareHandle,
                                              __uuidof(ID3D11Texture2D),
                                              getter_AddRefs(tex));
+        DWORD start = timeGetTime();
+	
+	printf("%d Compositor AcquireSync %x %x %d\n", sync_count++, shareHandle, tex.get(), start);
+        fflush(stdout);
+	D3D11_TEXTURE2D_DESC desc;
+	tex->GetDesc(&desc);
+	printf("format: %x count %d quality %d\n", desc.Format, desc.SampleDesc.Count, desc.SampleDesc.Quality);
+        RefPtr<IDXGIKeyedMutex> mutex;
+	tex->QueryInterface((IDXGIKeyedMutex**)byRef(mutex));
+	mutex->AcquireSync(0, INFINITE);
+	printf("%d Compositor AcquireSync Success %x %x %d\n", sync_count++, shareHandle, tex.get(), timeGetTime() - start);
+        fflush(stdout);
         if (FAILED(hr)) {
           NS_WARNING("Failed to open shared resource.");
           break;
@@ -1010,6 +1025,15 @@ StreamTextureHost::Lock()
 void
 StreamTextureHost::Unlock()
 {
+    DataTextureSourceD3D11* p = (DataTextureSourceD3D11*)mTextureSource.get();
+            nsRefPtr<ID3D11Texture2D> tex = p->GetD3D11Texture();
+
+	RefPtr<IDXGIKeyedMutex> mutex;
+	HRESULT hr = tex->QueryInterface((IDXGIKeyedMutex**)byRef(mutex));
+	if (hr == 0) {
+	printf("%d Compositor ReleaseSync %x %d\n", sync_count++, tex.get(), timeGetTime());
+		mutex->ReleaseSync(0);
+        }
 }
 
 void

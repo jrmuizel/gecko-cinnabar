@@ -59,8 +59,8 @@ namespace rx
 {
 static const DXGI_FORMAT RenderTargetFormats[] =
     {
-        DXGI_FORMAT_B8G8R8A8_UNORM,
-        DXGI_FORMAT_R8G8B8A8_UNORM
+        DXGI_FORMAT_R8G8B8A8_UNORM,
+        DXGI_FORMAT_B8G8R8A8_UNORM
     };
 
 static const DXGI_FORMAT DepthStencilFormats[] =
@@ -191,7 +191,7 @@ EGLint Renderer11::initialize()
         result = D3D11CreateDevice(NULL,
                                    driverType,
                                    NULL,
-                                   0,
+                               D3D11_CREATE_DEVICE_DEBUG,
                                    featureLevels,
                                    ArraySize(featureLevels),
                                    D3D11_SDK_VERSION,
@@ -1673,11 +1673,11 @@ bool Renderer11::testDeviceResettable()
     HRESULT result = D3D11CreateDevice(NULL,
                                        D3D_DRIVER_TYPE_HARDWARE,
                                        NULL,
-                                       #if defined(_DEBUG)
+                          //             #if defined(_DEBUG)
                                        D3D11_CREATE_DEVICE_DEBUG,
-                                       #else
-                                       0,
-                                       #endif
+                          //             #else
+                          //             0,
+                          //             #endif
                                        featureLevels,
                                        ArraySize(featureLevels),
                                        D3D11_SDK_VERSION,

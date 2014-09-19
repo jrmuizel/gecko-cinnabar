@@ -7,7 +7,7 @@
 #define SHARED_SURFACE_ANGLE_H_
 
 #include <windows.h>
-
+#include <DXGI.h>
 #include "SharedSurface.h"
 
 namespace mozilla {
@@ -37,6 +37,7 @@ protected:
     const EGLContext mContext;
     const EGLSurface mPBuffer;
     const HANDLE mShareHandle;
+    IDXGIKeyedMutex *mKeyedMutex;
     const GLuint mFence;
 
     SharedSurface_ANGLEShareHandle(GLContext* gl,
@@ -46,6 +47,7 @@ protected:
                                    EGLContext context,
                                    EGLSurface pbuffer,
                                    HANDLE shareHandle,
+                                   IDXGIKeyedMutex* keyedMutex,
                                    GLuint fence);
 
     EGLDisplay Display();
@@ -57,6 +59,7 @@ public:
     virtual void UnlockProdImpl() MOZ_OVERRIDE;
 
     virtual void Fence() MOZ_OVERRIDE;
+    virtual void AcquireProducer() MOZ_OVERRIDE;
     virtual bool WaitSync() MOZ_OVERRIDE;
     virtual bool PollSync() MOZ_OVERRIDE;
 

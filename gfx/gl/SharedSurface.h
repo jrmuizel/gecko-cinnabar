@@ -79,6 +79,7 @@ public:
     virtual void Fence() = 0;
     virtual bool WaitSync() = 0;
     virtual bool PollSync() = 0;
+    virtual void AcquireProducer() {}
 
     // Use these if you can. They can only be called from the Content
     // thread, though!

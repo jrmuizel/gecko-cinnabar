@@ -158,7 +158,8 @@ EGLint SwapChain11::resetOffscreenTexture(int backbufferWidth, int backbufferHei
         offscreenTextureDesc.Usage = D3D11_USAGE_DEFAULT;
         offscreenTextureDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
         offscreenTextureDesc.CPUAccessFlags = 0;
-        offscreenTextureDesc.MiscFlags = useSharedResource ? D3D11_RESOURCE_MISC_SHARED : 0;
+        offscreenTextureDesc.MiscFlags = useSharedResource ? D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX : 0;
+        //offscreenTextureDesc.MiscFlags = useSharedResource ? D3D11_RESOURCE_MISC_SHARED : 0;
 
         HRESULT result = device->CreateTexture2D(&offscreenTextureDesc, NULL, &mOffscreenTexture);
 
@@ -202,6 +203,19 @@ EGLint SwapChain11::resetOffscreenTexture(int backbufferWidth, int backbufferHei
                 }
             }
         }
+        IDXGIKeyedMutex *keyedMutex = NULL;
+        result = mOffscreenTexture->QueryInterface(__uuidof(IDXGIKeyedMutex), (void**)&keyedMutex);
+
+        // Fall back to no share handle on failure
+        if (FAILED(result))
+        {
+          mKeyedMutex = NULL;
+        }
+        else
+        {
+          mKeyedMutex = keyedMutex;
+        }
+
     }
 
 
