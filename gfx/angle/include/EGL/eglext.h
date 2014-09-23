@@ -436,7 +436,6 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQuerySurfacePointerANGLE (EGLDisplay dpy, EGLSu
 
 #ifndef EGL_ANGLE_surface_d3d_texture_2d_share_handle
 #define EGL_ANGLE_surface_d3d_texture_2d_share_handle 1
-<<<<<<< HEAD
 #endif /* EGL_ANGLE_surface_d3d_texture_2d_share_handle */
 
 #ifndef EGL_ANGLE_platform_angle
@@ -467,7 +466,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglQuerySurfacePointerANGLE (EGLDisplay dpy, EGLSu
 
 #ifndef EGL_ANGLE_d3d_keyed_mutex_client_buffer
 #define EGL_ANGLE_d3d_keyed_mutxt_client_buffer 1
-#define EGL_D3D_TEXTURE_2D_KEYEDMUTEX 0x3209
+#define EGL_D3D_TEXTURE_2D_KEYED_MUTEX 0x3209
 #endif /* EGL_ANGLE_d3d_keyed_mutex_client_buffer */
 
 #ifndef EGL_EXT_buffer_age

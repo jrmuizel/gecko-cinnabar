@@ -3038,9 +3038,10 @@ WebGLContext::CompileShader(WebGLShader *shader)
     if (IsExtensionEnabled(WebGLExtensionID::OES_standard_derivatives))
         resources.OES_standard_derivatives = 1;
 
-    if (IsExtensionEnabled(WebGLExtensionID::WEBGL_draw_buffers))
+    /*if (IsExtensionEnabled(WebGLExtensionID::WEBGL_draw_buffers))
         resources.EXT_draw_buffers = 1;
-
+*/
+        resources.EXT_draw_buffers = 0;
     if (IsExtensionEnabled(WebGLExtensionID::EXT_shader_texture_lod))
         resources.EXT_shader_texture_lod = 1;
 

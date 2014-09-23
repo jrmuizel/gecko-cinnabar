@@ -664,7 +664,7 @@ bool DynamicHLSL::generateShaderLinkHLSL(InfoLog &infoLog, int registers, const 
     // - with a 3.0 context, the output color is copied to channel 0
     // - with a 2.0 context, the output color is broadcast to all channels
     const bool broadcast = (fragmentShader->mUsesFragColor && mRenderer->getCurrentClientVersion() < 3);
-    const unsigned int numRenderTargets = (broadcast || usesMRT ? mRenderer->getRendererCaps().maxDrawBuffers : 1);
+    const unsigned int numRenderTargets = 1;//(broadcast || usesMRT ? mRenderer->getRendererCaps().maxDrawBuffers : 1);
 
     int shaderVersion = vertexShader->getShaderVersion();
 

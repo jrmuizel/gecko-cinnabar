@@ -5187,7 +5187,7 @@
 #define LOCAL_EGL_COVERAGE_SAMPLE_RESOLVE_NONE_NV            0x3133
 #define LOCAL_EGL_COVERAGE_SAMPLE_RESOLVE_NV                 0x3131
 #define LOCAL_EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE          0x3200
-#define LOCAL_EGL_D3D_TEXTURE_2D_KEYED_MUTEX_ANGLE           0x3201
+#define LOCAL_EGL_D3D_TEXTURE_2D_KEYED_MUTEX_ANGLE           0x3209
 #define LOCAL_EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE              ((EGLNativeDisplayType)-2)
 #define LOCAL_EGL_D3D11_ONLY_DISPLAY_ANGLE                   ((EGLNativeDisplayType)-3)
 #define LOCAL_EGL_DEFAULT_DISPLAY                            ((EGLNativeDisplayType)0)
