@@ -3,11 +3,28 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+        xmlns:html="http://www.w3.org/1999/xhtml"
         id="recording-window"
         hidechrome="true"
         onload="OnRecordingLoad();"
         style="background:white; overflow:hidden; width:800px; height:600px;"
         >
-    <script type="application/ecmascript" src="recording.js" />
-  <browser id="browser" type="content-primary" style="min-width: 1024px; min-height: 768px; max-width: 1024px; max-height: 768px"/>
+
+<html:body>
+<html:style>
+body {
+    background: #867e7b;
+}
+section {
+    position: absolute;
+    background: white;
+    border: solid #404040 1px;
+    box-shadow: black 0 0 4px;
+    opacity: 0.5;
+}
+</html:style>
+</html:body>
+<script type="application/ecmascript" src="recording.js" />
+
+
 </window>
