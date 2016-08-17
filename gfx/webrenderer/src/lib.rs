@@ -2,14 +2,52 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#![feature(step_by)]
 //#![feature(mpsc_select)]
+
+//! A GPU based Webrender.
+//!
+//! It serves as an experimental render backend for [Servo](https://servo.org/),
+//! but it can also be used as such in a standalone application.
+//!
+//! # External dependencies
+//! Webrender currently depends on [FreeType](https://www.freetype.org/)
+//!
+//! # Api Structure
+//! The main entry point to webrender is the `webrender::renderer::Renderer`.
+//!
+//! By calling `Renderer::new(...)` you get a `Renderer`, as well as a `RenderApiSender`.
+//! Your `Renderer` is responsible to render the previously processed frames onto the screen.
+//!
+//! By calling `yourRenderApiSenderInstance.create_api()`, you'll get a `RenderApi` instance,
+//! which is responsible for the processing of new frames. A worker thread is used internally to
+//! untie the workload from the application thread and therefore be able
+//! to make better use of multicore systems.
+//!
+//! What is referred to as a `frame`, is the current geometry on the screen.
+//! A new Frame is created by calling [set_root_stacking_context()][newframe] on the `RenderApi`.
+//! When the geometry is processed, the application will be informed via a `RenderNotifier`,
+//! a callback which you employ with [set_render_notifier][notifier] on the `Renderer`
+//! More information about [stacking contexts][stacking_contexts].
+//!
+//! `set_root_stacking_context()` also needs to be supplied with `BuiltDisplayList`s.
+//! These are obtained by finalizing a `DisplayListBuilder`. These are used to draw your geometry.
+//! But it doesn't only contain trivial geometry, it can also store another StackingContext, as
+//! they're nestable.
+//!
+//! Remember to insert the DisplayListId into the StackingContext as well, as they'll be referenced
+//! from there. An Id for your DisplayList can be obtained by calling
+//! `yourRenderApiInstance.next_display_list_id();`
+//!
+//! [stacking_contexts]: https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Positioning/Understanding_z_index/The_stacking_context
+//! [newframe]: ../webrender_traits/struct.RenderApi.html#method.set_root_stacking_context
+//! [notifier]: struct.Renderer.html#method.set_render_notifier
 
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
 
-mod aabbtree;
 mod batch;
 mod batch_builder;
 mod debug_font_data;
@@ -20,15 +58,14 @@ mod freelist;
 mod geometry;
 mod internal_types;
 mod layer;
-mod node_compiler;
 mod profiler;
 mod render_backend;
 mod resource_cache;
 mod resource_list;
 mod scene;
 mod spring;
-mod tessellator;
 mod texture_cache;
+mod tiling;
 mod util;
 
 mod platform {
@@ -70,7 +107,6 @@ extern crate time;
 extern crate webrender_traits;
 extern crate offscreen_gl_context;
 extern crate byteorder;
-extern crate bit_set;
 
 pub use renderer::{Renderer, RendererOptions};
 
@@ -155,6 +191,9 @@ impl webrender_traits::RenderNotifier for Notifier {
     fn new_frame_ready(&mut self) {
         self.window_proxy.wakeup_event_loop();
     }
+    fn new_scroll_frame_ready(&mut self, composite_needed: bool) {
+        self.window_proxy.wakeup_event_loop();
+    }
 
     fn pipeline_size_changed(&mut self,
                              _: PipelineId,
@@ -172,7 +211,7 @@ pub struct wrstate {
 #[no_mangle]
 pub extern fn wr_create() -> *mut wrstate {
   println!("Test");
-  let res_path = "/Users/bgirard/mozilla/mozilla-central/tree/gfx/webrenderer/res";
+  let res_path = "/Users/jrmuizel/source/webrender/gfx/webrenderer/res";
 
   let window = glutin::WindowBuilder::new().with_dimensions(1024, 1024).with_gl(glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2))).build().unwrap();
 
@@ -188,7 +227,7 @@ pub extern fn wr_create() -> *mut wrstate {
   };  
 
   println!("OpenGL version new {}", version);
-  println!("Shader resource path: {}", "/Users/bgirard/mozilla/mozilla-central/tree/gfx/webrenderer/res");
+  println!("Shader resource path: {}", res_path);
 
     let (width, height) = window.get_inner_size().unwrap();
 
@@ -198,6 +237,7 @@ pub extern fn wr_create() -> *mut wrstate {
         enable_aa: false,
         enable_msaa: false,
         enable_profiler: true,
+        debug: false,
     };
 
     let (mut renderer, sender) = renderer::Renderer::new(opts);
@@ -286,7 +326,7 @@ pub extern fn wr_dp_end(state:&mut wrstate) {
 
 #[no_mangle]
 pub extern fn wr_dp_push_rect(state:&mut wrstate, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) {
-    if (state.dl_builder.len() == 0) {
+    if state.dl_builder.len() == 0 {
       return;
     }
     let (width, height) = state.window.get_inner_size().unwrap();

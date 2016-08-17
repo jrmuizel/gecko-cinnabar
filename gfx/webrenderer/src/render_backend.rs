@@ -3,7 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use euclid::Matrix4D;
 use frame::Frame;
 use internal_types::{FontTemplate, ResultMsg, RendererFrame};
 use ipc_channel::ipc::{IpcBytesReceiver, IpcBytesSender, IpcReceiver};
@@ -15,12 +14,14 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
-use texture_cache::{TextureCache, TextureCacheItemId};
-use webrender_traits::{ApiMsg, AuxiliaryLists, BuiltDisplayList, IdNamespace, RenderNotifier};
-use webrender_traits::{PipelineId, WebGLContextId, ScrollLayerId};
+use texture_cache::TextureCache;
+use webrender_traits::{ApiMsg, AuxiliaryLists, BuiltDisplayList, IdNamespace};
+use webrender_traits::{PipelineId, RenderNotifier, WebGLContextId};
 use batch::new_id;
 use device::TextureId;
-use offscreen_gl_context::{NativeGLContext, GLContext, ColorAttachmentType, NativeGLContextMethods, NativeGLContextHandle};
+use tiling::FrameBuilderConfig;
+use offscreen_gl_context::{ColorAttachmentType, GLContext};
+use offscreen_gl_context::{NativeGLContext, NativeGLContextHandle};
 
 pub struct RenderBackend {
     api_rx: IpcReceiver<ApiMsg>,
@@ -49,18 +50,16 @@ impl RenderBackend {
                payload_tx: IpcBytesSender,
                result_tx: Sender<ResultMsg>,
                device_pixel_ratio: f32,
-               white_image_id: TextureCacheItemId,
-               dummy_mask_image_id: TextureCacheItemId,
                texture_cache: TextureCache,
                enable_aa: bool,
                notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
-               webrender_context_handle: Option<NativeGLContextHandle>) -> RenderBackend {
+               webrender_context_handle: Option<NativeGLContextHandle>,
+               config: FrameBuilderConfig,
+               debug: bool) -> RenderBackend {
         let mut thread_pool = scoped_threadpool::Pool::new(8);
 
         let resource_cache = ResourceCache::new(&mut thread_pool,
                                                 texture_cache,
-                                                white_image_id,
-                                                dummy_mask_image_id,
                                                 device_pixel_ratio,
                                                 enable_aa);
 
@@ -73,7 +72,7 @@ impl RenderBackend {
             device_pixel_ratio: device_pixel_ratio,
             resource_cache: resource_cache,
             scene: Scene::new(),
-            frame: Frame::new(),
+            frame: Frame::new(debug, config),
             next_namespace_id: IdNamespace(1),
             notifier: notifier,
             webrender_context_handle: webrender_context_handle,
@@ -113,6 +112,9 @@ impl RenderBackend {
                                                                       height,
                                                                       format,
                                                                       bytes);
+                        }
+                        ApiMsg::DeleteImage(id) => {
+                            self.resource_cache.delete_image_template(id);
                         }
                         ApiMsg::CloneApi(sender) => {
                             let result = self.next_namespace_id;
@@ -194,7 +196,7 @@ impl RenderBackend {
                                 self.render()
                             });
 
-                            self.publish_frame(frame, &mut profile_counters);
+                            self.publish_frame_and_notify_compositor(frame, &mut profile_counters);
                         }
                         ApiMsg::SetRootPipeline(pipeline_id) => {
                             let frame = profile_counters.total_time.profile(|| {
@@ -208,30 +210,39 @@ impl RenderBackend {
                         }
                         ApiMsg::Scroll(delta, cursor, move_phase) => {
                             let frame = profile_counters.total_time.profile(|| {
-                                self.frame.scroll(delta, cursor, move_phase);
-                                self.render()
+                                if self.frame.scroll(delta, cursor, move_phase) {
+                                    self.build_scene();
+                                    Some(self.render())
+                                } else {
+                                    None
+                                }
                             });
 
-                            self.publish_frame(frame, &mut profile_counters);
+                            match frame {
+                                Some(frame) => {
+                                    self.publish_frame(frame, &mut profile_counters);
+                                    self.notify_compositor_of_new_scroll_frame(true)
+                                }
+                                None => self.notify_compositor_of_new_scroll_frame(false),
+                            }
                         }
                         ApiMsg::TickScrollingBounce => {
                             let frame = profile_counters.total_time.profile(|| {
                                 self.frame.tick_scrolling_bounce_animations();
+                                self.build_scene();
                                 self.render()
                             });
 
-                            self.publish_frame(frame, &mut profile_counters);
+                            self.publish_frame_and_notify_compositor(frame, &mut profile_counters);
                         }
                         ApiMsg::TranslatePointToLayerSpace(point, tx) => {
                             // First, find the specific layer that contains the point.
                             let point = point / self.device_pixel_ratio;
-                            if let (Some(root_pipeline_id), Some(root_scroll_layer_id)) =
+                            if let (Some(..), Some(root_scroll_layer_id)) =
                                     (self.scene.root_pipeline_id,
                                      self.frame.root_scroll_layer_id) {
                                 if let Some(scroll_layer_id) =
-                                        self.frame.get_scroll_layer(&point,
-                                                                    root_scroll_layer_id,
-                                                                    &Matrix4D::identity()) {
+                                        self.frame.get_scroll_layer(&point, root_scroll_layer_id) {
                                     if let Some(layer) = self.frame.layers.get(&scroll_layer_id) {
                                         // Now, because we send a *pipeline ID*, not a layer ID, as
                                         // a response, we need the translated point to be relative
@@ -255,7 +266,7 @@ impl RenderBackend {
                             tx.send((point, PipelineId(0, 0))).unwrap()
                         }
                         ApiMsg::GetScrollLayerState(tx) => {
-                            tx.send(self.frame.get_scroll_layer_state(self.device_pixel_ratio))
+                            tx.send(self.frame.get_scroll_layer_state())
                               .unwrap()
                         }
                         ApiMsg::RequestWebGLContext(size, attributes, tx) => {
@@ -378,10 +389,15 @@ impl RenderBackend {
     fn publish_frame(&mut self,
                      frame: RendererFrame,
                      profile_counters: &mut BackendProfileCounters) {
-        let pending_updates = self.frame.pending_updates();
-        let msg = ResultMsg::NewFrame(frame, pending_updates, profile_counters.clone());
+        let msg = ResultMsg::NewFrame(frame, profile_counters.clone());
         self.result_tx.send(msg).unwrap();
         profile_counters.reset();
+    }
+
+    fn publish_frame_and_notify_compositor(&mut self,
+                                           frame: RendererFrame,
+                                           profile_counters: &mut BackendProfileCounters) {
+        self.publish_frame(frame, profile_counters);
 
         // TODO(gw): This is kindof bogus to have to lock the notifier
         //           each time it's used. This is due to some nastiness
@@ -389,6 +405,15 @@ impl RenderBackend {
         //           cleaner way to do this, or use the OnceMutex on crates.io?
         let mut notifier = self.notifier.lock();
         notifier.as_mut().unwrap().as_mut().unwrap().new_frame_ready();
+    }
+
+    fn notify_compositor_of_new_scroll_frame(&mut self, composite_needed: bool) {
+        // TODO(gw): This is kindof bogus to have to lock the notifier
+        //           each time it's used. This is due to some nastiness
+        //           in initialization order for Servo. Perhaps find a
+        //           cleaner way to do this, or use the OnceMutex on crates.io?
+        let mut notifier = self.notifier.lock();
+        notifier.as_mut().unwrap().as_mut().unwrap().new_scroll_frame_ready(composite_needed);
     }
 }
 
