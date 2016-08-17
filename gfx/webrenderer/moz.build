@@ -5,5 +5,5 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #SOURCES += ['bind.rs',]
-UNIFIED_SOURCES += ['TestRust.cpp',]
+#UNIFIED_SOURCES += ['TestRust.cpp',]
 FINAL_LIBRARY = 'xul'

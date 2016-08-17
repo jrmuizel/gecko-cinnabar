@@ -2,17 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use aabbtree::{AABBTree, NodeIndex};
 use euclid::{Matrix4D, Point2D, Rect, Size2D};
-use internal_types::{BatchUpdate, BatchUpdateList, BatchUpdateOp};
-use internal_types::{DrawListItemIndex, DrawListId, DrawListGroupId};
 use spring::{DAMPING, STIFFNESS, Spring};
-use util::MatrixHelpers;
-use webrender_traits::{PipelineId, ScrollLayerId, ServoStackingContextId, StackingContextId};
+use webrender_traits::{PipelineId, ScrollLayerId, ServoStackingContextId};
 
 pub struct Layer {
-    // TODO: Remove pub from here if possible in the future
-    pub aabb_tree: AABBTree,
     pub scrolling: ScrollingState,
 
     /// The viewable region, in world coordinates.
@@ -26,7 +20,8 @@ pub struct Layer {
     pub layer_size: Size2D<f32>,
     pub world_origin: Point2D<f32>,
     pub local_transform: Matrix4D<f32>,
-    pub world_transform: Matrix4D<f32>,
+    pub local_perspective: Matrix4D<f32>,
+    pub world_transform: Option<Matrix4D<f32>>,
     pub pipeline_id: PipelineId,
     pub stacking_context_id: ServoStackingContextId,
     pub children: Vec<ScrollLayerId>,
@@ -37,22 +32,20 @@ impl Layer {
                layer_size: Size2D<f32>,
                viewport_rect: &Rect<f32>,
                viewport_transform: &Matrix4D<f32>,
-               transform: Matrix4D<f32>,
+               local_transform: &Matrix4D<f32>,
+               local_perspective: &Matrix4D<f32>,
                pipeline_id: PipelineId,
                stacking_context_id: ServoStackingContextId)
                -> Layer {
-        let rect = Rect::new(Point2D::zero(), layer_size);
-        let aabb_tree = AABBTree::new(8192.0, &rect);
-
         Layer {
-            aabb_tree: aabb_tree,
             scrolling: ScrollingState::new(),
             viewport_rect: *viewport_rect,
             viewport_transform: *viewport_transform,
             world_origin: world_origin,
             layer_size: layer_size,
-            local_transform: transform,
-            world_transform: transform,
+            local_transform: *local_transform,
+            local_perspective: *local_perspective,
+            world_transform: None,
             children: Vec::new(),
             pipeline_id: pipeline_id,
             stacking_context_id: stacking_context_id,
@@ -63,45 +56,8 @@ impl Layer {
         self.children.push(child);
     }
 
-    pub fn reset(&mut self, pending_updates: &mut BatchUpdateList) {
-        for node in &mut self.aabb_tree.nodes {
-            if let Some(ref mut compiled_node) = node.compiled_node {
-                let vertex_buffer_id = compiled_node.vertex_buffer_id.take().unwrap();
-                pending_updates.push(BatchUpdate {
-                    id: vertex_buffer_id,
-                    op: BatchUpdateOp::Destroy,
-                });
-            }
-        }
-    }
-
-    #[inline]
-    pub fn insert(&mut self,
-                  rect: Rect<f32>,
-                  draw_list_group_id: DrawListGroupId,
-                  draw_list_id: DrawListId,
-                  item_index: DrawListItemIndex) {
-        self.aabb_tree.insert(rect,
-                              draw_list_group_id,
-                              draw_list_id,
-                              item_index);
-    }
-
     pub fn finalize(&mut self, scrolling: &ScrollingState) {
         self.scrolling = *scrolling;
-        self.aabb_tree.finalize();
-    }
-
-    pub fn cull(&mut self) {
-        let viewport_rect = self.viewport_rect;
-        let adjusted_viewport = viewport_rect.translate(&-self.world_origin)
-                                             .translate(&-self.scrolling.offset);
-        self.aabb_tree.cull(&adjusted_viewport);
-    }
-
-    #[allow(dead_code)]
-    pub fn print(&self) {
-        self.aabb_tree.print(NodeIndex(0), 0);
     }
 
     pub fn overscroll_amount(&self) -> Size2D<f32> {
@@ -136,7 +92,7 @@ impl Layer {
         let finished = self.scrolling.spring.animate();
         self.scrolling.offset = self.scrolling.spring.current();
         if finished {
-            self.scrolling.started_bouncing_back = false;
+            self.scrolling.bouncing_back = false
         }
     }
 }
@@ -146,6 +102,7 @@ pub struct ScrollingState {
     pub offset: Point2D<f32>,
     pub spring: Spring,
     pub started_bouncing_back: bool,
+    pub bouncing_back: bool,
 }
 
 impl ScrollingState {
@@ -154,6 +111,7 @@ impl ScrollingState {
             offset: Point2D::new(0.0, 0.0),
             spring: Spring::at(Point2D::new(0.0, 0.0), STIFFNESS, DAMPING),
             started_bouncing_back: false,
+            bouncing_back: false,
         }
     }
 }

@@ -5,7 +5,7 @@
 use euclid::Point2D;
 
 /// Some arbitrarily small positive number used as threshold value.
-pub const EPSILON: f32 = 0.001;
+pub const EPSILON: f32 = 0.1;
 
 /// The default stiffness factor.
 pub const STIFFNESS: f32 = 0.2;
@@ -101,5 +101,3 @@ fn next(cur: f32, prev: f32, dest: f32, stiffness: f32, damping: f32) -> f32 {
 fn is_resting(cur: f32, prev: f32, dest: f32) -> bool {
     (cur - prev).abs() < EPSILON && (cur - dest).abs() < EPSILON
 }
-
-
