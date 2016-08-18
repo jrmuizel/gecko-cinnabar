@@ -1,0 +1,6 @@
+Using rust nightly
+
+* cd gfx/webrenderer
+* cargo build --release
+* cd ../.. : Go back to the root
+* ./mach build
