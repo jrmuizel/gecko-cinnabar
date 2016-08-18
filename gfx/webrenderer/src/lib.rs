@@ -211,7 +211,8 @@ pub struct wrstate {
 #[no_mangle]
 pub extern fn wr_create() -> *mut wrstate {
   println!("Test");
-  let res_path = "/Users/jrmuizel/source/webrender/gfx/webrenderer/res";
+  // hack to find the directory for the shaders
+  let res_path = concat!(env!("CARGO_MANIFEST_DIR"),"/res");
 
   let window = glutin::WindowBuilder::new().with_dimensions(1024, 1024).with_gl(glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2))).build().unwrap();
 
