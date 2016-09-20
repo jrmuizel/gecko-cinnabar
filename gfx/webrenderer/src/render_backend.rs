@@ -404,7 +404,7 @@ impl RenderBackend {
         //           in initialization order for Servo. Perhaps find a
         //           cleaner way to do this, or use the OnceMutex on crates.io?
         let mut notifier = self.notifier.lock();
-        notifier.as_mut().unwrap().as_mut().unwrap().new_frame_ready();
+        // notifier.as_mut().unwrap().as_mut().unwrap().new_frame_ready();
     }
 
     fn notify_compositor_of_new_scroll_frame(&mut self, composite_needed: bool) {
@@ -413,7 +413,7 @@ impl RenderBackend {
         //           in initialization order for Servo. Perhaps find a
         //           cleaner way to do this, or use the OnceMutex on crates.io?
         let mut notifier = self.notifier.lock();
-        notifier.as_mut().unwrap().as_mut().unwrap().new_scroll_frame_ready(composite_needed);
+        // notifier.as_mut().unwrap().as_mut().unwrap().new_scroll_frame_ready(composite_needed);
     }
 }
 

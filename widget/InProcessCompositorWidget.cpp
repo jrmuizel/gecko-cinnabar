@@ -33,13 +33,13 @@ InProcessCompositorWidget::InProcessCompositorWidget(nsBaseWidget* aWidget)
 }
 
 bool
-InProcessCompositorWidget::PreRender(layers::LayerManagerComposite* aManager)
+InProcessCompositorWidget::PreRender(layers::LayerManager* aManager)
 {
   return mWidget->PreRender(aManager);
 }
 
 void
-InProcessCompositorWidget::PostRender(layers::LayerManagerComposite* aManager)
+InProcessCompositorWidget::PostRender(layers::LayerManager* aManager)
 {
   mWidget->PostRender(aManager);
 }

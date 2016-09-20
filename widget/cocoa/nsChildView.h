@@ -441,8 +441,8 @@ public:
   virtual void CreateCompositor() override;
   virtual void PrepareWindowEffects() override;
   virtual void CleanupWindowEffects() override;
-  virtual bool PreRender(LayerManagerComposite* aManager) override;
-  virtual void PostRender(LayerManagerComposite* aManager) override;
+  virtual bool PreRender(LayerManager* aManager) override;
+  virtual void PostRender(LayerManager* aManager) override;
   virtual void DrawWindowOverlay(LayerManagerComposite* aManager,
                                  LayoutDeviceIntRect aRect) override;
 
