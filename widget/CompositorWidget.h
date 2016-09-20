@@ -18,6 +18,7 @@ namespace mozilla {
 class VsyncObserver;
 namespace layers {
 class Compositor;
+class LayerManager;
 class LayerManagerComposite;
 class Compositor;
 class Composer2D;
@@ -58,7 +59,7 @@ class WidgetRenderingContext
 public:
 #if defined(XP_MACOSX)
   WidgetRenderingContext() : mLayerManager(nullptr) {}
-  layers::LayerManagerComposite* mLayerManager;
+  layers::LayerManager* mLayerManager;
 #elif defined(MOZ_WIDGET_ANDROID)
   WidgetRenderingContext() : mCompositor(nullptr) {}
   layers::Compositor* mCompositor;

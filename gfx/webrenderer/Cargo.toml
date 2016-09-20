@@ -24,6 +24,7 @@ scoped_threadpool = "0.1.6"
 time = "0.1"
 webrender_traits = {git = "https://github.com/servo/webrender_traits", default-features = false}
 glutin ="*"
+core-foundation = "0.2.2"
 
 [target.'cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))'.dependencies]
 freetype = {git = "https://github.com/servo/rust-freetype"}

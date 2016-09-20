@@ -108,6 +108,9 @@ extern crate webrender_traits;
 extern crate offscreen_gl_context;
 extern crate byteorder;
 
+#[cfg(target_os="macos")]
+extern crate core_foundation;
+
 pub use renderer::{Renderer, RendererOptions};
 
 extern crate glutin;
@@ -124,6 +127,12 @@ use std::io::Read;
 use std::env;
 use webrender_traits::DisplayListBuilder;
 use std::mem;
+use std::str::FromStr;
+
+use core_foundation::base::TCFType;
+use core_foundation::string::CFString;
+use core_foundation::bundle::{CFBundleGetBundleWithIdentifier, CFBundleGetFunctionPointerForName};
+
 
 struct Notifier {
     window_proxy: glutin::WindowProxy,
@@ -201,26 +210,35 @@ impl webrender_traits::RenderNotifier for Notifier {
     }
 }
 pub struct wrstate {
-        window: glutin::Window,
+        size: (u32, u32),
+        pipeline_id: PipelineId,
         renderer: Renderer,
         api: webrender_traits::RenderApi,
         frame_builder: WebRenderFrameBuilder,
         dl_builder: Vec<DisplayListBuilder>,
 }
+
+#[cfg(target_os="macos")]
+fn get_proc_address(addr: &str) -> *const () {
+    let symbol_name: CFString = FromStr::from_str(addr).unwrap();
+    let framework_name: CFString = FromStr::from_str("com.apple.opengl").unwrap();
+    let framework = unsafe {
+        CFBundleGetBundleWithIdentifier(framework_name.as_concrete_TypeRef())
+    };
+    let symbol = unsafe {
+        CFBundleGetFunctionPointerForName(framework, symbol_name.as_concrete_TypeRef())
+    };
+    symbol as *const _
+}
  
 #[no_mangle]
-pub extern fn wr_create() -> *mut wrstate {
+pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut wrstate {
   println!("Test");
   // hack to find the directory for the shaders
   let res_path = concat!(env!("CARGO_MANIFEST_DIR"),"/res");
 
-  let window = glutin::WindowBuilder::new().with_dimensions(1024, 1024).with_gl(glutin::GlRequest::Specific(glutin::Api::OpenGl, (3, 2))).build().unwrap();
-
-  unsafe {
-    window.make_current().ok();
-    gl::load_with(|symbol| window.get_proc_address(symbol) as *const _); 
-    gl::clear_color(0.3, 0.0, 0.0, 1.0);
-  }   
+  gl::load_with(|symbol| get_proc_address(symbol) as *const _); 
+  gl::clear_color(0.3, 0.0, 0.0, 1.0);
 
   let version = unsafe {
     let data = CStr::from_ptr(gl::GetString(gl::VERSION) as *const _).to_bytes().to_vec();
@@ -229,8 +247,6 @@ pub extern fn wr_create() -> *mut wrstate {
 
   println!("OpenGL version new {}", version);
   println!("Shader resource path: {}", res_path);
-
-    let (width, height) = window.get_inner_size().unwrap();
 
     let opts = RendererOptions {
         device_pixel_ratio: 1.0,
@@ -248,15 +264,16 @@ pub extern fn wr_create() -> *mut wrstate {
 //     let font_bytes = load_file(font_path);
 //     let font_key = api.add_raw_font(font_bytes);
 
-    let notifier = Box::new(Notifier::new(window.create_window_proxy()));
-    renderer.set_render_notifier(notifier);
+    // let notifier = Box::new(Notifier::new(window.create_window_proxy()));
+    // renderer.set_render_notifier(notifier);
 
-    let pipeline_id = PipelineId(0, 0);
+    let pipeline_id = PipelineId(0, counter);
 
     let builder = WebRenderFrameBuilder::new(pipeline_id);
 
   let mut state = Box::new(wrstate {
-    window: window,
+    size: (width, height),
+    pipeline_id: pipeline_id,
     renderer: renderer,
     api: api,
     frame_builder: builder,
@@ -267,7 +284,8 @@ pub extern fn wr_create() -> *mut wrstate {
 }
 
 #[no_mangle]
-pub extern fn wr_dp_begin(state:&mut wrstate) {
+pub extern fn wr_dp_begin(state:&mut wrstate, width: u32, height: u32) {
+    state.size = (width, height);
     state.dl_builder.clear();
     state.dl_builder.push(webrender_traits::DisplayListBuilder::new());
 
@@ -277,8 +295,8 @@ pub extern fn wr_dp_begin(state:&mut wrstate) {
 pub extern fn wr_dp_end(state:&mut wrstate) {
     let epoch = Epoch(0);
     let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
-    let pipeline_id = PipelineId(0, 0);
-    let (width, height) = state.window.get_inner_size().unwrap();
+    let pipeline_id = state.pipeline_id;
+    let (width, height) = state.size;
     let bounds = Rect::new(Point2D::new(0.0, 0.0), Size2D::new(width as f32, height as f32));
     let root_scroll_layer_id = state.frame_builder.next_scroll_layer_id();
     let servo_id = ServoStackingContextId(FragmentType::FragmentBody, 0);
@@ -320,8 +338,6 @@ pub extern fn wr_dp_end(state:&mut wrstate) {
     state.renderer.update();
 
     state.renderer.render(Size2D::new(width, height));
-
-    state.window.swap_buffers().ok();
 }
 
 
@@ -330,7 +346,7 @@ pub extern fn wr_dp_push_rect(state:&mut wrstate, x: f32, y: f32, w: f32, h: f32
     if state.dl_builder.len() == 0 {
       return;
     }
-    let (width, height) = state.window.get_inner_size().unwrap();
+    let (width, height) = state.size;
     let bounds = Rect::new(Point2D::new(0.0, 0.0), Size2D::new(width as f32, height as f32));
     let clip_region = webrender_traits::ClipRegion::new(&bounds,
                                                         Vec::new(),
@@ -348,8 +364,8 @@ pub extern fn wr_render(state:&mut wrstate) {
 
     let epoch = Epoch(0);
     let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
-    let pipeline_id = PipelineId(0, 0);
-    let (width, height) = state.window.get_inner_size().unwrap();
+    let pipeline_id = state.pipeline_id;
+    let (width, height) = state.size;
     let root_scroll_layer_id = state.frame_builder.next_scroll_layer_id();
 
 
@@ -404,7 +420,7 @@ pub extern fn wr_render(state:&mut wrstate) {
 
     state.renderer.render(Size2D::new(width, height));
 
-    state.window.swap_buffers().ok();
+    // state.window.swap_buffers().ok();
 }
 
 #[no_mangle]

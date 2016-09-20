@@ -17,6 +17,7 @@ class GLContext;
 namespace layers {
 
 class LayerManagerComposite;
+class WebRenderLayerManager;
 
 /**
  * Minimal interface to allow widgets to draw using OpenGL. Abstracts
@@ -27,6 +28,8 @@ class GLManager
 {
 public:
   static GLManager* CreateGLManager(LayerManagerComposite* aManager);
+  static GLManager* CreateGLManager(WebRenderLayerManager* aManager);
+  static GLManager* CreateGLManager(LayerManager* aManager);
 
   virtual ~GLManager() {}
 

@@ -10,6 +10,7 @@
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/layers/Compositor.h"  // for Compositor
 #include "mozilla/layers/LayerManagerComposite.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
 
@@ -57,6 +58,27 @@ private:
   RefPtr<CompositorOGL> mImpl;
 };
 
+class GLManagerGLContext : public GLManager
+{
+public:
+  explicit GLManagerGLContext(GLContext* aGLContext)
+    : mGLContext(aGLContext)
+  {}
+
+  virtual GLContext* gl() const override { return mGLContext; }
+
+  virtual void ActivateProgram(ShaderProgramOGL *aProg) override {}
+  virtual ShaderProgramOGL* GetProgram(GLenum aTarget, gfx::SurfaceFormat aFormat) override { return nullptr; }
+  virtual const gfx::Matrix4x4& GetProjMatrix() const override { return mMatrix; }
+  virtual void BindAndDrawQuad(ShaderProgramOGL *aProg,
+                               const gfx::Rect& aLayerRect,
+                               const gfx::Rect& aTextureRect) override {}
+
+private:
+  RefPtr<GLContext> mGLContext;
+  gfx::Matrix4x4 mMatrix;
+};
+
 /* static */ GLManager*
 GLManager::CreateGLManager(LayerManagerComposite* aManager)
 {
@@ -65,6 +87,30 @@ GLManager::CreateGLManager(LayerManagerComposite* aManager)
   }
   return nullptr;
 }
+
+/* static */ GLManager*
+GLManager::CreateGLManager(WebRenderLayerManager* aManager)
+{
+  if (aManager) {
+    return new GLManagerGLContext(aManager->gl());
+  }
+  return nullptr;
+}
+
+/* static */ GLManager*
+GLManager::CreateGLManager(LayerManager* aManager)
+{
+  if (aManager) {
+    if (aManager->AsLayerManagerComposite()) {
+      return CreateGLManager(aManager->AsLayerManagerComposite());
+    }
+    if (aManager->GetBackendType() == LayersBackend::LAYERS_WR) {
+      return CreateGLManager(static_cast<WebRenderLayerManager*>(aManager));
+    }
+  }
+  return nullptr;
+}
+
 
 } // namespace layers
 } // namespace mozilla
