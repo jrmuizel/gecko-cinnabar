@@ -17,8 +17,8 @@ class InProcessCompositorWidget : public CompositorWidget
 public:
   explicit InProcessCompositorWidget(nsBaseWidget* aWidget);
 
-  virtual bool PreRender(layers::LayerManagerComposite* aManager) override;
-  virtual void PostRender(layers::LayerManagerComposite* aManager) override;
+  virtual bool PreRender(layers::LayerManager* aManager) override;
+  virtual void PostRender(layers::LayerManager* aManager) override;
   virtual void DrawWindowUnderlay(layers::LayerManagerComposite* aManager,
                                   LayoutDeviceIntRect aRect) override;
   virtual void DrawWindowOverlay(layers::LayerManagerComposite* aManager,

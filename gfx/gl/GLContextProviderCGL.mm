@@ -194,6 +194,8 @@ static const NSOpenGLPixelFormatAttribute kAttribs_doubleBuffered_accel[] = {
     NSOpenGLPFAAccelerated,
     NSOpenGLPFAAllowOfflineRenderers,
     NSOpenGLPFADoubleBuffer,
+    NSOpenGLPFAOpenGLProfile,
+    NSOpenGLProfileVersion3_2Core,
     0
 };
 

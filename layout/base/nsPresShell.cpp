@@ -22,7 +22,6 @@
 #include "mozilla/layers/CompositorOGL.h"
 #include "mozilla/Logging.h"
 
-#include "WebRenderer.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/EventDispatcher.h"
@@ -6265,13 +6264,6 @@ PresShell::RecordShadowStyleChange(ShadowRoot* aShadowRoot)
   mChangedScopeStyleRoots.AppendElement(aShadowRoot->GetHost()->AsElement());
 }
 
-extern GLContext* gGLContext;
-
-extern "C" void* wr_create();
-extern "C" void wr_render(void* wrstate);
-extern "C" void wr_destroy(void* wrstate);
-
-
 void
 PresShell::Paint(nsView*        aViewToPaint,
                  const nsRegion& aDirtyRegion,
@@ -6393,29 +6385,9 @@ PresShell::Paint(nsView*        aViewToPaint,
   }
 
   if (frame) {
-    if (gGLContext) {
-      // TODO: don't create a new window, but do makecurrent and pass
-      //       the context to webrenderer
-      //gGLContext->MakeCurrent();
-      // BENWA
-      if (!gWRState) {
-        gWRState = wr_create();
-      }
-      static int frame = 0;
-      printf("WR Begin\n");
-      wr_dp_begin(gWRState);
-      wr_dp_push_rect(gWRState, frame++ % 100, frame++ % 100, 100, 100, 1.f, 0.f, 0.f, 1.f);
-    }
-
     // We can paint directly into the widget using its layer manager.
     nsLayoutUtils::PaintFrame(nullptr, frame, aDirtyRegion, bgcolor,
                               nsDisplayListBuilderMode::PAINTING, flags);
-
-    if (gGLContext) {
-      printf("WR Ending\n");
-      wr_dp_end(gWRState);
-      printf("WR End\n");
-    }
     return;
   }
 
