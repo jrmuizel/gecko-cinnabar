@@ -45,6 +45,7 @@ EXPORTS += [
     'protobuf/LayerScopePacket.pb.h',
     'ReadbackLayer.h',
     'TiledLayerBuffer.h',
+    'wr/WebRenderLayerManager.h',
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
@@ -207,6 +208,7 @@ EXPORTS.mozilla.layers += [
     'RenderTrace.h',
     'TextureWrapperImage.h',
     'TransactionIdAllocator.h',
+    'wr/WebRenderLayerManager.h',
 ]
 
 if CONFIG['MOZ_X11']:
@@ -408,6 +410,12 @@ UNIFIED_SOURCES += [
     'RenderTrace.cpp',
     'RotatedBuffer.cpp',
     'TextureWrapperImage.cpp',
+    'wr/WebRenderCanvasLayer.cpp',
+    'wr/WebRenderColorLayer.cpp',
+    'wr/WebRenderContainerLayer.cpp',
+    'wr/WebRenderImageLayer.cpp',
+    'wr/WebRenderLayerManager.cpp',
+    'wr/WebRenderPaintedLayer.cpp',
 ]
 
 SOURCES += [

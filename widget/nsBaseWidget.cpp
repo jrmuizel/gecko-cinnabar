@@ -1,3 +1,4 @@
+
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
@@ -74,6 +75,7 @@
 #include "gfxConfig.h"
 #include "mozilla/layers/CompositorSession.h"
 #include "VRManagerChild.h"
+#include "WebRenderLayerManager.h"
 
 #ifdef DEBUG
 #include "nsIObserver.h"
@@ -181,6 +183,8 @@ nsBaseWidget::nsBaseWidget()
 , mAccessibilityInUseFlag(false)
 #endif
 {
+  static uint32_t counter = 0;
+  mWidgetIndex = counter++;
 #ifdef NOISY_WIDGET_LEAKS
   gNumWidgets++;
   printf("WIDGETS+ = %d\n", gNumWidgets);
@@ -1395,8 +1399,13 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
       // We are shutting down, do not try to re-create a LayerManager
       return nullptr;
     }
+    printf("mWidgetIndex: %d\n", mWidgetIndex);
+    if (mWidgetIndex == 5 && !XRE_IsContentProcess()) {
+      mLayerManager = new WebRenderLayerManager(this);
+    }
+
     // Try to use an async compositor first, if possible
-    if (ShouldUseOffMainThreadCompositing()) {
+    if (!mLayerManager && ShouldUseOffMainThreadCompositing()) {
       // e10s uses the parameter to pass in the shadow manager from the TabChild
       // so we don't expect to see it there since this doesn't support e10s.
       NS_ASSERTION(aShadowManager == nullptr, "Async Compositor not supported with e10s");
