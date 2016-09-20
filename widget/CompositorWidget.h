@@ -18,6 +18,7 @@ namespace mozilla {
 class VsyncObserver;
 namespace layers {
 class Compositor;
+class LayerManager;
 class LayerManagerComposite;
 class Compositor;
 class Composer2D;
@@ -73,7 +74,7 @@ public:
    * Always called from the compositing thread, which may be the main-thread if
    * OMTC is not enabled.
    */
-  virtual bool PreRender(layers::LayerManagerComposite* aManager) {
+  virtual bool PreRender(layers::LayerManager* aManager) {
     return true;
   }
 
@@ -84,7 +85,7 @@ public:
    * Always called from the compositing thread, which may be the main-thread if
    * OMTC is not enabled.
    */
-  virtual void PostRender(layers::LayerManagerComposite* aManager)
+  virtual void PostRender(layers::LayerManager* aManager)
   {}
 
   /**

@@ -2025,7 +2025,7 @@ nsChildView::CleanupWindowEffects()
 }
 
 bool
-nsChildView::PreRender(LayerManagerComposite* aManager)
+nsChildView::PreRender(LayerManager* aManager)
 {
   UniquePtr<GLManager> manager(GLManager::CreateGLManager(aManager));
   if (!manager) {
@@ -2047,7 +2047,7 @@ nsChildView::PreRender(LayerManagerComposite* aManager)
 }
 
 void
-nsChildView::PostRender(LayerManagerComposite* aManager)
+nsChildView::PostRender(LayerManager* aManager)
 {
   UniquePtr<GLManager> manager(GLManager::CreateGLManager(aManager));
   if (!manager) {

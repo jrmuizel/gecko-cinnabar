@@ -381,10 +381,10 @@ protected:
   // These are methods for CompositorWidgetWrapper, and should only be
   // accessed from that class. Derived widgets can choose which methods to
   // implement, or none if supporting out-of-process compositing.
-  virtual bool PreRender(mozilla::layers::LayerManagerComposite* aManager) {
+  virtual bool PreRender(mozilla::layers::LayerManager* aManager) {
     return true;
   }
-  virtual void PostRender(mozilla::layers::LayerManagerComposite* aManager)
+  virtual void PostRender(mozilla::layers::LayerManager* aManager)
   {}
   virtual void DrawWindowUnderlay(mozilla::layers::LayerManagerComposite* aManager,
                                   LayoutDeviceIntRect aRect)
@@ -657,6 +657,7 @@ protected:
   nsPopupLevel      mPopupLevel;
   nsPopupType       mPopupType;
   SizeConstraints   mSizeConstraints;
+  uint32_t          mWidgetIndex;
 
   CompositorWidgetDelegate* mCompositorWidgetDelegate;
 
