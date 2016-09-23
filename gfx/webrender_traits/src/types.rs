@@ -290,6 +290,7 @@ pub struct ImageDisplayItem {
     pub image_rendering: ImageRendering,
 }
 
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ImageFormat {
     Invalid,
@@ -299,6 +300,7 @@ pub enum ImageFormat {
     RGBAF32,
 }
 
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ImageKey(u32, u32);
 
