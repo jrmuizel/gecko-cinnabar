@@ -11,7 +11,7 @@
  */
 
 #include "nsDisplayList.h"
-#include "WebRenderer.h"
+#include "webrender.h"
 
 #include <stdint.h>
 #include <algorithm>
