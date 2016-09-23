@@ -8,6 +8,7 @@
 
 #include "Layers.h"
 
+struct wrstate;
 class nsIWidget;
 
 namespace mozilla {
@@ -22,7 +23,7 @@ namespace layers {
 class WebRenderLayer
 {
 public:
-  virtual void RenderLayer(void* aWRState) = 0;
+  virtual void RenderLayer(wrstate* aWRState) = 0;
 
   static inline WebRenderLayer*
   ToWebRenderLayer(Layer* aLayer)
@@ -73,7 +74,7 @@ public:
 private:
   RefPtr<widget::CompositorWidget> mWidget;
   RefPtr<gl::GLContext> mGLContext;
-  void* mWRState;
+  wrstate* mWRState;
   uint32_t mCounter;
 
   /* PaintedLayer callbacks; valid at the end of a transaciton,

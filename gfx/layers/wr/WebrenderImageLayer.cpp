@@ -9,7 +9,7 @@ namespace mozilla {
 namespace layers {
 
 void
-WebRenderImageLayer::RenderLayer(void* aWRState)
+WebRenderImageLayer::RenderLayer(wrstate* aWRState)
 {
 }
 

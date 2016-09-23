@@ -27,7 +27,7 @@ protected:
     MOZ_COUNT_DTOR(WebRenderColorLayer);
   }
 
-  void RenderLayer(void* aWRState) override;
+  void RenderLayer(wrstate* aWRState) override;
 };
 
 } // namespace layers
