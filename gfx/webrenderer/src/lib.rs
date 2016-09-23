@@ -346,6 +346,7 @@ pub extern fn wr_dp_push_rect(state:&mut wrstate, x: f32, y: f32, w: f32, h: f32
     if state.dl_builder.len() == 0 {
       return;
     }
+    println!("dancing");
     let (width, height) = state.size;
     let bounds = Rect::new(Point2D::new(0.0, 0.0), Size2D::new(width as f32, height as f32));
     let clip_region = webrender_traits::ClipRegion::new(&bounds,
