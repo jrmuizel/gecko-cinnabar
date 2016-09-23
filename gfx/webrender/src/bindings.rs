@@ -13,11 +13,13 @@ use gleam::gl;
 use std::ffi::CStr;
 use webrender_traits::{ServoStackingContextId};
 use webrender_traits::{Epoch, ColorF, FragmentType, GlyphInstance};
+use webrender_traits::{ImageFormat, ImageKey};
 use std::fs::File;
 use std::io::Read;
 use std::env;
 use std::mem;
 use std::str::FromStr;
+use std::slice;
 
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
@@ -99,7 +101,7 @@ impl webrender_traits::RenderNotifier for Notifier {
                              _: Option<Size2D<f32>>) {
     }
 }*/
-pub struct wrstate {
+pub struct WrState {
         size: (u32, u32),
         pipeline_id: PipelineId,
         renderer: Renderer,
@@ -122,7 +124,7 @@ fn get_proc_address(addr: &str) -> *const () {
 }
  
 #[no_mangle]
-pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut wrstate {
+pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut WrState {
   println!("Test");
   // hack to find the directory for the shaders
   let res_path = concat!(env!("CARGO_MANIFEST_DIR"),"/res");
@@ -164,7 +166,7 @@ pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut wrstate {
 
     let builder = WebRenderFrameBuilder::new(pipeline_id);
 
-  let mut state = Box::new(wrstate {
+  let mut state = Box::new(WrState {
     size: (width, height),
     pipeline_id: pipeline_id,
     renderer: renderer,
@@ -177,7 +179,7 @@ pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut wrstate {
 }
 
 #[no_mangle]
-pub extern fn wr_dp_begin(state:&mut wrstate, width: u32, height: u32) {
+pub extern fn wr_dp_begin(state:&mut WrState, width: u32, height: u32) {
     state.size = (width, height);
     state.dl_builder.clear();
     state.dl_builder.push(webrender_traits::DisplayListBuilder::new());
@@ -185,7 +187,7 @@ pub extern fn wr_dp_begin(state:&mut wrstate, width: u32, height: u32) {
 }
 
 #[no_mangle]
-pub extern fn wr_dp_end(state:&mut wrstate) {
+pub extern fn wr_dp_end(state:&mut WrState) {
     let epoch = Epoch(0);
     let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
     let pipeline_id = state.pipeline_id;
@@ -233,9 +235,19 @@ pub extern fn wr_dp_end(state:&mut wrstate) {
     state.renderer.render(Size2D::new(width, height));
 }
 
+#[no_mangle]
+pub extern fn wr_add_image(state:&mut WrState, width: u32, height: u32, format: ImageFormat, bytes: * const u8, size: usize) -> ImageKey {
+    let bytes = unsafe { slice::from_raw_parts(bytes, size).to_owned() };
+    state.api.add_image(width, height, format, bytes)
+}
+
+pub extern fn wr_delete_image(state:&mut WrState, key: ImageKey) {
+    state.api.delete_image(key)
+}
+
 
 #[no_mangle]
-pub extern fn wr_dp_push_rect(state:&mut wrstate, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) {
+pub extern fn wr_dp_push_rect(state:&mut WrState, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) {
     if state.dl_builder.len() == 0 {
       return;
     }
@@ -250,7 +262,7 @@ pub extern fn wr_dp_push_rect(state:&mut wrstate, x: f32, y: f32, w: f32, h: f32
 }
 
 #[no_mangle]
-pub extern fn wr_render(state:&mut wrstate) {
+pub extern fn wr_render(state:&mut WrState) {
 
     state.dl_builder.clear();
     state.dl_builder.push(webrender_traits::DisplayListBuilder::new());
@@ -317,7 +329,7 @@ pub extern fn wr_render(state:&mut wrstate) {
 }
 
 #[no_mangle]
-pub extern fn wr_destroy(state:*mut wrstate) {
+pub extern fn wr_destroy(state:*mut WrState) {
   unsafe {
     Box::from_raw(state);
   }
@@ -325,7 +337,4 @@ pub extern fn wr_destroy(state:*mut wrstate) {
 
 #[no_mangle]
 pub extern fn wr_init() {
-
-    // NB: rust &str aren't null terminated.
-    let greeting = "hello from rust.\0";
 }
