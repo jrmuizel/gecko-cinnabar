@@ -32,7 +32,7 @@ PointerToColor(void* aPtr)
 }
 
 void
-WebRenderPaintedLayer::RenderLayer(void* aWRState)
+WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
 {
   Rect transformedBounds = GetEffectiveTransform().TransformBounds(Rect(GetVisibleRegion().GetBounds().ToUnknownRect()));
   Color c = PointerToColor(this);
