@@ -35,7 +35,7 @@ public:
     mValidRegion.Sub(mValidRegion, mInvalidRegion.GetRegion());
   }
 
-  void RenderLayer(void* aWRState) override;
+  void RenderLayer(wrstate* aWRState) override;
 };
 
 } // namespace layers

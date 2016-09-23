@@ -10,7 +10,7 @@ namespace mozilla {
 namespace layers {
 
 void
-WebRenderColorLayer::RenderLayer(void* aWRState)
+WebRenderColorLayer::RenderLayer(wrstate* aWRState)
 {
   printf("rendering color layer %p\n", this);
   wr_dp_push_rect(aWRState, mBounds.x, mBounds.y, mBounds.width, mBounds.height,

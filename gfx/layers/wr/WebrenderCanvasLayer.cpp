@@ -14,7 +14,7 @@ WebRenderCanvasLayer::~WebRenderCanvasLayer()
 }
 
 void
-WebRenderCanvasLayer::RenderLayer(void* aWRState)
+WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
 {
 }
 

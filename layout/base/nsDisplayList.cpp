@@ -1559,7 +1559,7 @@ MoveListTo(nsDisplayList* aList, nsTArray<nsDisplayItem*>* aElements) {
   }
 }
 
-void nsDisplayList::BuildWRDisplayList(void* wrState) {
+void nsDisplayList::BuildWRDisplayList(wrstate* wrState) {
   for (nsDisplayItem* i = GetBottom(); i != nullptr; i = i->GetAbove()) {
     i->BuildWRDisplayList(wrState);
   }
@@ -3105,7 +3105,7 @@ static void CheckForBorderItem(nsDisplayItem *aItem, uint32_t& aFlags)
 }
 
 void
-nsDisplayBackgroundImage::BuildWRDisplayList(void* wrState) {
+nsDisplayBackgroundImage::BuildWRDisplayList(wrstate* wrState) {
   nsStyleContext *sc = mFrame->StyleContext();
 
   bool drawImage;
@@ -3543,7 +3543,7 @@ nsDisplayBackgroundColor::CanApplyOpacity() const
 }
 
 void
-nsDisplayBackgroundColor::BuildWRDisplayList(void* wrState) {
+nsDisplayBackgroundColor::BuildWRDisplayList(wrstate* wrState) {
   gfxRect bounds =
     nsLayoutUtils::RectToGfxRect(mBackgroundRect,
                                  mFrame->PresContext()->AppUnitsPerDevPixel());
@@ -4316,7 +4316,7 @@ nsDisplayWrapList::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
                            HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) {
   mList.HitTest(aBuilder, aRect, aState, aOutFrames);
 }
-void nsDisplayWrapList::BuildWRDisplayList(void* wrState) {
+void nsDisplayWrapList::BuildWRDisplayList(wrstate* wrState) {
   mList.BuildWRDisplayList(wrState);
 }
 
