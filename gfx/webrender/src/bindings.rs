@@ -13,7 +13,7 @@ use gleam::gl;
 use std::ffi::CStr;
 use webrender_traits::{ServoStackingContextId};
 use webrender_traits::{Epoch, ColorF, FragmentType, GlyphInstance};
-use webrender_traits::{ImageFormat, ImageKey};
+use webrender_traits::{ImageFormat, ImageKey, ImageRendering};
 use std::fs::File;
 use std::io::Read;
 use std::env;
@@ -260,6 +260,27 @@ pub extern fn wr_dp_push_rect(state:&mut WrState, x: f32, y: f32, w: f32, h: f32
                                clip_region,
                                ColorF::new(r, g, b, a));
 }
+
+#[no_mangle]
+pub extern fn wr_dp_push_image(state:&mut WrState, x: f32, y: f32, w: f32, h: f32, key: ImageKey) {
+    if state.dl_builder.len() == 0 {
+      return;
+    }
+    let (width, height) = state.size;
+    let bounds = Rect::new(Point2D::new(0.0, 0.0), Size2D::new(width as f32, height as f32));
+    let clip_region = webrender_traits::ClipRegion::new(&bounds,
+                                                        Vec::new(),
+                                                        &mut state.frame_builder.auxiliary_lists_builder);
+    let rect = Rect::new(Point2D::new(x, y), Size2D::new(w, h));
+    state.dl_builder.last_mut().unwrap().push_image(rect,
+                               clip_region,
+                               rect.size,
+                               rect.size,
+                               ImageRendering::Auto,
+                               key);
+}
+
+
 
 #[no_mangle]
 pub extern fn wr_render(state:&mut WrState) {
