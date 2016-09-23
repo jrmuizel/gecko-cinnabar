@@ -26,7 +26,7 @@ protected:
   virtual ~WebRenderCanvasLayer();
 
 public:
-  void RenderLayer(void* aWRState) override;
+  void RenderLayer(wrstate* aWRState) override;
 };
 
 } // namespace layers

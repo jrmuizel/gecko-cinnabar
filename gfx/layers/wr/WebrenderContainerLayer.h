@@ -29,7 +29,7 @@ protected:
   }
 
 public:
-  void RenderLayer(void* aWRState) override;
+  void RenderLayer(wrstate* aWRState) override;
 
   virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface) override
   {
@@ -53,7 +53,7 @@ protected:
   }
 
 public:
-  void RenderLayer(void* aWRState) override { }
+  void RenderLayer(wrstate* aWRState) override { }
 
   virtual void ComputeEffectiveTransforms(const gfx::Matrix4x4& aTransformToSurface) override
   {

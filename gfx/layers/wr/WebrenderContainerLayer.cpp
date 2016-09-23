@@ -9,7 +9,7 @@ namespace mozilla {
 namespace layers {
 
 void
-WebRenderContainerLayer::RenderLayer(void* aWRState)
+WebRenderContainerLayer::RenderLayer(wrstate* aWRState)
 {
   AutoTArray<Layer*, 12> children;
   SortChildrenBy3DZOrder(children);
