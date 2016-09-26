@@ -20,6 +20,8 @@ class CompositorWidget;
 }
 namespace layers {
 
+class WebRenderLayerManager;
+
 class WebRenderLayer
 {
 public:
@@ -70,6 +72,12 @@ public:
   virtual already_AddRefed<RefLayer> CreateRefLayer() override;
 
   virtual bool NeedsWidgetInvalidation() override { return true; }
+
+  DrawPaintedLayerCallback GetPaintedLayerCallback() const
+  { return mPaintedLayerCallback; }
+
+  void* GetPaintedLayerCallbackData() const
+  { return mPaintedLayerCallbackData; }
 
 private:
   RefPtr<widget::CompositorWidget> mWidget;

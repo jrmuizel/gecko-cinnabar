@@ -388,7 +388,7 @@ if CONFIG['COMPILE_ENVIRONMENT']:
     ]
     FINAL_TARGET_FILES += ['!dependentlibs.list']
 
-OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/webrender/target/debug -lwebrender"]
+OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/webrender/target/release -lwebrender"]
 
 # This library needs to be last to make XPCOM module registration work.
 
