@@ -79,12 +79,15 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
     return;
   }
 
+  mPaintedLayerCallback = aCallback;
+  mPaintedLayerCallbackData = aCallbackData;
+
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   if (!mWRState) {
     mGLContext->MakeCurrent();
     mWRState = wr_create(size.width, size.height, mCounter);
   }
- 
+
   mozilla::widget::WidgetRenderingContext widgetContext;
 #if defined(XP_MACOSX)
   widgetContext.mLayerManager = this;
