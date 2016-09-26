@@ -27,6 +27,10 @@ protected:
   {
     MOZ_COUNT_DTOR(WebRenderPaintedLayer);
   }
+  WebRenderLayerManager* Manager()
+  {
+    return static_cast<WebRenderLayerManager*>(mManager);
+  }
 
 public:
   virtual void InvalidateRegion(const nsIntRegion& aRegion) override

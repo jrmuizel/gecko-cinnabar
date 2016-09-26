@@ -79,12 +79,15 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
     return;
   }
 
+  mPaintedLayerCallback = aCallback;
+  mPaintedLayerCallbackData = aCallbackData;
+
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   if (!mWRState) {
     mGLContext->MakeCurrent();
     mWRState = wr_create(size.width, size.height, mCounter);
   }
- 
+
   mWidget->PreRender(this);
   mGLContext->MakeCurrent();
   static int frame = 0;

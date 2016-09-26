@@ -6,6 +6,7 @@
 #include "WebRenderPaintedLayer.h"
 
 #include "mozilla/ArrayUtils.h"
+#include "gfxUtils.h"
 
 namespace mozilla {
 namespace layers {
@@ -34,10 +35,41 @@ PointerToColor(void* aPtr)
 void
 WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
 {
+  auto visibleRegion = GetVisibleRegion();
+  auto size = visibleRegion.GetBounds().Size();
+  if (size.IsEmpty()) {
+      printf("Empty region\n");
+      return;
+  } else {
+      printf("have size: %d %d\n", size.width, size.height);
+  }
+  RefPtr<DrawTarget> target = gfx::Factory::CreateDrawTarget(gfx::BackendType::CAIRO, size.ToUnknownSize(), SurfaceFormat::B8G8R8A8);
+
+  RefPtr<gfxContext> ctx = gfxContext::CreatePreservingTransformOrNull(target);
+  MOZ_ASSERT(ctx); // already checked the target above
+
+  Manager()->GetPaintedLayerCallback()(this,
+                                       ctx,
+                                       visibleRegion.ToUnknownRegion(), visibleRegion.ToUnknownRegion(),
+                                       DrawRegionClip::DRAW, nsIntRegion(), Manager()->GetPaintedLayerCallbackData());
   Rect transformedBounds = GetEffectiveTransform().TransformBounds(Rect(GetVisibleRegion().GetBounds().ToUnknownRect()));
-  Color c = PointerToColor(this);
-  wr_dp_push_rect(aWRState, transformedBounds.x, transformedBounds.y, transformedBounds.width, transformedBounds.height,
-                  c.r, c.g, c.b, c.a);
+  static int count;
+  char buf[400];
+  sprintf(buf, "wrout%d.png", count++);
+  //gfxUtils::WriteAsPNG(target, buf);
+  WRImageKey key;
+  {
+      unsigned char* data;
+      IntSize size;
+      int32_t stride;
+      SurfaceFormat format;
+      target->LockBits(&data, &size, &stride, &format);
+      key = wr_add_image(aWRState, size.width, size.height, RGBA8, data, size.height * stride);
+
+      target->ReleaseBits(data);
+  }
+  wr_dp_push_image(aWRState, transformedBounds.x, transformedBounds.y, transformedBounds.width, transformedBounds.height,
+                  key);
 }
 
 } // namespace layers
