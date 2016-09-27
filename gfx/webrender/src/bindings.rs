@@ -320,8 +320,6 @@ pub extern fn wr_render(state:&mut WrState) {
                       clip_region,
                       ColorF::new(0.0, 1.0, 0.0, 1.0));
 
-    let text_bounds = Rect::new(Point2D::new(100.0, 200.0), Size2D::new(700.0, 300.0));
-
     assert!(state.dl_builder.len() == 1);
     let dl = state.dl_builder.pop().unwrap();
     state.frame_builder.add_display_list(&mut state.api, dl.finalize(), &mut sc);
