@@ -36,13 +36,17 @@ void
 WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
 {
   auto visibleRegion = GetVisibleRegion();
-  auto size = visibleRegion.GetBounds().Size();
+  auto bounds = visibleRegion.GetBounds();
+  auto size = bounds.Size();
   if (size.IsEmpty()) {
       printf("Empty region\n");
       return;
   } else {
       printf("have size: %d %d\n", size.width, size.height);
   }
+
+  wr_push_dl_builder(aWRState);
+
   RefPtr<DrawTarget> target = gfx::Factory::CreateDrawTarget(gfx::BackendType::CAIRO, size.ToUnknownSize(), SurfaceFormat::B8G8R8A8);
 
   RefPtr<gfxContext> ctx = gfxContext::CreatePreservingTransformOrNull(target);
@@ -52,7 +56,6 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
                                        ctx,
                                        visibleRegion.ToUnknownRegion(), visibleRegion.ToUnknownRegion(),
                                        DrawRegionClip::DRAW, nsIntRegion(), Manager()->GetPaintedLayerCallbackData());
-  Rect transformedBounds = GetEffectiveTransform().TransformBounds(Rect(GetVisibleRegion().GetBounds().ToUnknownRect()));
   static int count;
   char buf[400];
   sprintf(buf, "wrout%d.png", count++);
@@ -68,8 +71,9 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
 
       target->ReleaseBits(data);
   }
-  wr_dp_push_image(aWRState, transformedBounds.x, transformedBounds.y, transformedBounds.width, transformedBounds.height,
-                  key);
+  auto transform = GetTransform();
+  wr_dp_push_image(aWRState, 0, 0, bounds.width, bounds.height, key);
+  wr_pop_dl_builder(aWRState, bounds.x, bounds.y, bounds.width, bounds.height, &transform.components[0]);
 }
 
 } // namespace layers

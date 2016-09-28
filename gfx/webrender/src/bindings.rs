@@ -105,6 +105,7 @@ pub struct WrState {
         size: (u32, u32),
         pipeline_id: PipelineId,
         renderer: Renderer,
+        z_index: i32,
         api: webrender_traits::RenderApi,
         frame_builder: WebRenderFrameBuilder,
         dl_builder: Vec<DisplayListBuilder>,
@@ -170,6 +171,7 @@ pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut WrState {
     size: (width, height),
     pipeline_id: pipeline_id,
     renderer: renderer,
+    z_index: 0,
     api: api,
     frame_builder: builder,
     dl_builder: Vec::new(),
@@ -182,7 +184,43 @@ pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut WrState {
 pub extern fn wr_dp_begin(state:&mut WrState, width: u32, height: u32) {
     state.size = (width, height);
     state.dl_builder.clear();
+    state.z_index = 0;
     state.dl_builder.push(webrender_traits::DisplayListBuilder::new());
+
+}
+
+#[no_mangle]
+pub extern fn wr_push_dl_builder(state:&mut WrState)
+{
+    state.dl_builder.push(webrender_traits::DisplayListBuilder::new());
+}
+
+#[no_mangle]
+pub extern fn wr_pop_dl_builder(state:&mut WrState, x: f32, y: f32, width: f32, height: f32, transform: &Matrix4D<f32>)
+{
+    // 
+    let servo_id = ServoStackingContextId(FragmentType::FragmentBody, 0);
+    state.z_index += 1;
+
+    let mut sc =
+        webrender_traits::StackingContext::new(servo_id,
+                                               None,
+                                               webrender_traits::ScrollPolicy::Scrollable,
+                                               Rect::new(Point2D::new(0., 0.), Size2D::new(0., 0.)),
+                                               Rect::new(Point2D::new(x, y), Size2D::new(width, height)),
+                                               state.z_index,
+                                               transform,
+                                               &Matrix4D::identity(),
+                                               false,
+                                               webrender_traits::MixBlendMode::Normal,
+                                               Vec::new(),
+                                               &mut state.frame_builder.auxiliary_lists_builder);
+    let dl = state.dl_builder.pop().unwrap();
+    state.frame_builder.add_display_list(&mut state.api, dl.finalize(), &mut sc);
+    let pipeline_id = state.frame_builder.root_pipeline_id;
+    let stacking_context_id = state.frame_builder.add_stacking_context(&mut state.api, pipeline_id, sc);
+
+    state.dl_builder.last_mut().unwrap().push_stacking_context(stacking_context_id);
 
 }
 
