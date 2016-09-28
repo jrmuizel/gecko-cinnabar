@@ -47,8 +47,9 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
 
   wr_push_dl_builder(aWRState);
 
-  RefPtr<DrawTarget> target = gfx::Factory::CreateDrawTarget(gfx::BackendType::CAIRO, size.ToUnknownSize(), SurfaceFormat::B8G8R8A8);
+  RefPtr<DrawTarget> target = gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, size.ToUnknownSize(), SurfaceFormat::B8G8R8A8);
 
+  target->SetTransform(Matrix()::PreTranslate(-bounds.x, -bounds.y));
   RefPtr<gfxContext> ctx = gfxContext::CreatePreservingTransformOrNull(target);
   MOZ_ASSERT(ctx); // already checked the target above
 
