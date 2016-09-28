@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* Simple class for computing SHA1. */
-
 #ifndef WR_h
 #define WR_h
 extern "C" {
@@ -30,7 +28,8 @@ WRImageKey wr_add_image(wrstate* wrstate, uint32_t width, uint32_t height,
                         WRImageFormat format, uint8_t *bytes, size_t size);
 void wr_delete_image(wrstate* wrstate, WRImageKey key);
 
-
+void wr_push_dl_builder(wrstate *wrState);
+void wr_pop_dl_builder(wrstate *wrState, float x, float y, float width, float height, float *matrix);
 void wr_dp_begin(wrstate* wrState, uint32_t width, uint32_t height);
 void wr_dp_end(wrstate* wrState);
 void wr_dp_push_rect(wrstate* wrState, float x, float y, float w, float h, float r, float g, float b, float a);
