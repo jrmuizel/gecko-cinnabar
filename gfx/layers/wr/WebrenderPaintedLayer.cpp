@@ -49,7 +49,7 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
 
   RefPtr<DrawTarget> target = gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, size.ToUnknownSize(), SurfaceFormat::B8G8R8A8);
 
-  target->SetTransform(Matrix()::PreTranslate(-bounds.x, -bounds.y));
+  target->SetTransform(Matrix().PreTranslate(-bounds.x, -bounds.y));
   RefPtr<gfxContext> ctx = gfxContext::CreatePreservingTransformOrNull(target);
   MOZ_ASSERT(ctx); // already checked the target above
 
@@ -73,8 +73,9 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
       target->ReleaseBits(data);
   }
   auto transform = GetTransform();
-  wr_dp_push_image(aWRState, 0, 0, bounds.width, bounds.height, key);
-  wr_pop_dl_builder(aWRState, bounds.x, bounds.y, bounds.width, bounds.height, &transform.components[0]);
+  printf("bounds %d %d %d %d\n", bounds.x, bounds.y, bounds.width, bounds.height);
+  wr_dp_push_image(aWRState, bounds.x, bounds.y, bounds.width, bounds.height, key);
+  wr_pop_dl_builder(aWRState, bounds.x, bounds.y, bounds.width + bounds.x, bounds.height + bounds.y, &transform.components[0]);
 }
 
 } // namespace layers

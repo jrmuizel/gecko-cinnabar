@@ -207,7 +207,7 @@ pub extern fn wr_pop_dl_builder(state:&mut WrState, x: f32, y: f32, width: f32, 
                                                None,
                                                webrender_traits::ScrollPolicy::Scrollable,
                                                Rect::new(Point2D::new(0., 0.), Size2D::new(0., 0.)),
-                                               Rect::new(Point2D::new(x, y), Size2D::new(width, height)),
+                                               Rect::new(Point2D::new(x, y), Size2D::new(width + 1000., height + 1000.)),
                                                state.z_index,
                                                transform,
                                                &Matrix4D::identity(),
@@ -290,7 +290,7 @@ pub extern fn wr_dp_push_rect(state:&mut WrState, x: f32, y: f32, w: f32, h: f32
       return;
     }
     let (width, height) = state.size;
-    let bounds = Rect::new(Point2D::new(0.0, 0.0), Size2D::new(width as f32, height as f32));
+    let bounds = Rect::new(Point2D::new(x, y), Size2D::new(width as f32, height as f32));
     let clip_region = webrender_traits::ClipRegion::new(&bounds,
                                                         Vec::new(),
                                                         &mut state.frame_builder.auxiliary_lists_builder);
@@ -305,7 +305,7 @@ pub extern fn wr_dp_push_image(state:&mut WrState, x: f32, y: f32, w: f32, h: f3
       return;
     }
     let (width, height) = state.size;
-    let bounds = Rect::new(Point2D::new(0.0, 0.0), Size2D::new(width as f32, height as f32));
+    let bounds = Rect::new(Point2D::new(x, y), Size2D::new(width as f32, height as f32));
     let clip_region = webrender_traits::ClipRegion::new(&bounds,
                                                         Vec::new(),
                                                         &mut state.frame_builder.auxiliary_lists_builder);
