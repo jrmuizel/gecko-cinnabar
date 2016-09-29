@@ -41,8 +41,6 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
   if (size.IsEmpty()) {
       printf("Empty region\n");
       return;
-  } else {
-      printf("have size: %d %d\n", size.width, size.height);
   }
 
   wr_push_dl_builder(aWRState);
@@ -57,10 +55,13 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
                                        ctx,
                                        visibleRegion.ToUnknownRegion(), visibleRegion.ToUnknownRegion(),
                                        DrawRegionClip::DRAW, nsIntRegion(), Manager()->GetPaintedLayerCallbackData());
+#if 0
   static int count;
   char buf[400];
   sprintf(buf, "wrout%d.png", count++);
-  //gfxUtils::WriteAsPNG(target, buf);
+  gfxUtils::WriteAsPNG(target, buf);
+#endif
+
   WRImageKey key;
   {
       unsigned char* data;
@@ -73,8 +74,8 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
       target->ReleaseBits(data);
   }
   auto transform = GetTransform();
-  printf("bounds %d %d %d %d\n", bounds.x, bounds.y, bounds.width, bounds.height);
   wr_dp_push_image(aWRState, bounds.x, bounds.y, bounds.width, bounds.height, key);
+  Manager()->AddImageKeyForDiscard(key);
   wr_pop_dl_builder(aWRState, bounds.x, bounds.y, bounds.width + bounds.x, bounds.height + bounds.y, &transform.components[0]);
 }
 

@@ -7,6 +7,7 @@
 #define GFX_WEBRENDERLAYERMANAGER_H
 
 #include "Layers.h"
+#include "webrender.h"
 
 struct wrstate;
 class nsIWidget;
@@ -79,11 +80,16 @@ public:
   void* GetPaintedLayerCallbackData() const
   { return mPaintedLayerCallbackData; }
 
+  // adds an imagekey to a list of keys that will be discarded at the end of
+  // the frame
+  void AddImageKeyForDiscard(WRImageKey);
+
 private:
   RefPtr<widget::CompositorWidget> mWidget;
   RefPtr<gl::GLContext> mGLContext;
   wrstate* mWRState;
   uint32_t mCounter;
+  std::vector<WRImageKey> mImageKeys;
 
   /* PaintedLayer callbacks; valid at the end of a transaciton,
    * while rendering */
