@@ -103,6 +103,17 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   wr_dp_end(mWRState);
   mGLContext->SwapBuffers();
   mWidget->PostRender(&widgetContext);
+
+  for (auto key : mImageKeys) {
+      wr_delete_image(mWRState, key);
+  }
+  mImageKeys.clear();
+}
+
+void
+WebRenderLayerManager::AddImageKeyForDiscard(WRImageKey key)
+{
+  mImageKeys.push_back(key);
 }
 
 void
