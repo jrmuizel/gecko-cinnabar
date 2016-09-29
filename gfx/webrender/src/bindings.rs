@@ -279,10 +279,10 @@ pub extern fn wr_add_image(state:&mut WrState, width: u32, height: u32, format: 
     state.api.add_image(width, height, format, bytes)
 }
 
+#[no_mangle]
 pub extern fn wr_delete_image(state:&mut WrState, key: ImageKey) {
     state.api.delete_image(key)
 }
-
 
 #[no_mangle]
 pub extern fn wr_dp_push_rect(state:&mut WrState, x: f32, y: f32, w: f32, h: f32, r: f32, g: f32, b: f32, a: f32) {
