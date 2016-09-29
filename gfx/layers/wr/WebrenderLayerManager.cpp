@@ -90,14 +90,10 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
 
   mWidget->PreRender(this);
   mGLContext->MakeCurrent();
-  static int frame = 0;
   printf("WR Beginning\n");
   wr_dp_begin(mWRState, size.width, size.height);
 
   WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer(mWRState);
-
-  wr_dp_push_rect(mWRState, frame % 100, frame % 100, 100, 100, 1.f, 0.f, 0.f, 1.f);
-  frame += 2;
 
   printf("WR Ending\n");
   wr_dp_end(mWRState);
