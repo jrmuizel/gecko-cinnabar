@@ -207,7 +207,7 @@ pub extern fn wr_pop_dl_builder(state:&mut WrState, x: f32, y: f32, width: f32, 
                                                None,
                                                webrender_traits::ScrollPolicy::Scrollable,
                                                Rect::new(Point2D::new(0., 0.), Size2D::new(0., 0.)),
-                                               Rect::new(Point2D::new(x, y), Size2D::new(width + 1000., height + 1000.)),
+                                               Rect::new(Point2D::new(x, y), Size2D::new(width, height)),
                                                state.z_index,
                                                transform,
                                                &Matrix4D::identity(),
@@ -299,17 +299,35 @@ pub extern fn wr_dp_push_rect(state:&mut WrState, x: f32, y: f32, w: f32, h: f32
                                ColorF::new(r, g, b, a));
 }
 
+#[repr(C)]
+pub struct WrRect
+{
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32
+}
+
+impl WrRect
+{
+    pub fn to_rect(&self) -> Rect<f32>
+    {
+        Rect::new(Point2D::new(self.x, self.y), Size2D::new(self.width, self.height))
+    }
+}
+
 #[no_mangle]
-pub extern fn wr_dp_push_image(state:&mut WrState, x: f32, y: f32, w: f32, h: f32, key: ImageKey) {
+pub extern fn wr_dp_push_image(state:&mut WrState, bounds: WrRect, clip : WrRect, key: ImageKey) {
     if state.dl_builder.len() == 0 {
       return;
     }
     let (width, height) = state.size;
-    let bounds = Rect::new(Point2D::new(x, y), Size2D::new(width as f32, height as f32));
-    let clip_region = webrender_traits::ClipRegion::new(&bounds,
+    let bounds = bounds.to_rect();
+    let clip = clip.to_rect();
+    let clip_region = webrender_traits::ClipRegion::new(&clip,
                                                         Vec::new(),
                                                         &mut state.frame_builder.auxiliary_lists_builder);
-    let rect = Rect::new(Point2D::new(x, y), Size2D::new(w, h));
+    let rect = bounds;
     state.dl_builder.last_mut().unwrap().push_image(rect,
                                clip_region,
                                rect.size,

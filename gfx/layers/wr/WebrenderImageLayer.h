@@ -27,6 +27,11 @@ protected:
     MOZ_COUNT_DTOR(WebRenderImageLayer);
   }
 
+  WebRenderLayerManager* Manager()
+  {
+    return static_cast<WebRenderLayerManager*>(mManager);
+  }
+
   void RenderLayer(wrstate* aWRState) override;
 };
 

@@ -34,6 +34,9 @@ freetype = {git = "https://github.com/servo/rust-freetype"}
 core-graphics = "0.4.1"
 core-text = "2.0"
 
+[profile.release]
+debug = true
+
 [lib]
 name = "webrender"
 crate-type = ["staticlib"] # could be `staticlib` as well

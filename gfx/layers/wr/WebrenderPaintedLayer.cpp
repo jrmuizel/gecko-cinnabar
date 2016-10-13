@@ -74,7 +74,15 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
       target->ReleaseBits(data);
   }
   auto transform = GetTransform();
-  wr_dp_push_image(aWRState, bounds.x, bounds.y, bounds.width, bounds.height, key);
+  Rect rect(bounds.x, bounds.y, bounds.width, bounds.height);
+  Rect clip;
+  auto combinedClip = GetCombinedClipRect();
+  if (combinedClip.isSome()) {
+      clip = IntRectToRect(combinedClip.ref().ToUnknownRect());
+  } else {
+      clip = rect;
+  }
+  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), key);
   Manager()->AddImageKeyForDiscard(key);
   wr_pop_dl_builder(aWRState, bounds.x, bounds.y, bounds.width + bounds.x, bounds.height + bounds.y, &transform.components[0]);
 }
