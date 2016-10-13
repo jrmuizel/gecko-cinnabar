@@ -21,6 +21,17 @@ class CompositorWidget;
 }
 namespace layers {
 
+static inline WRRect toWrRect(gfx::Rect rect)
+{
+    WRRect r;
+    r.x = rect.x;
+    r.y = rect.y;
+    r.width = rect.width;
+    r.height = rect.height;
+    return r;
+}
+
+
 class WebRenderLayerManager;
 
 class WebRenderLayer

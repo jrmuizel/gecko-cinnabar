@@ -20,6 +20,13 @@ struct WRImageKey {
   uint32_t b;
 };
 
+struct WRRect {
+  float x;
+  float y;
+  float width;
+  float height;
+};
+
 struct wrstate;
 
 wrstate* wr_create(uint32_t width, uint32_t height, uint32_t counter);
@@ -34,7 +41,7 @@ void wr_pop_dl_builder(wrstate *wrState, float x, float y, float width, float he
 void wr_dp_begin(wrstate* wrState, uint32_t width, uint32_t height);
 void wr_dp_end(wrstate* wrState);
 void wr_dp_push_rect(wrstate* wrState, float x, float y, float w, float h, float r, float g, float b, float a);
-void wr_dp_push_image(wrstate* wrState, float x, float y, float w, float h, WRImageKey key);
+void wr_dp_push_image(wrstate* wrState, WRRect bounds, WRRect clip, WRImageKey key);
 
 }
 #endif
