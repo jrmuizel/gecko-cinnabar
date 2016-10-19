@@ -108,6 +108,9 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
       wr_delete_image(mWRState, key);
   }
   mImageKeys.clear();
+
+  // Since we don't do repeat transactions right now, just set the time
+  mAnimationReadyTime = TimeStamp::Now();
 }
 
 void
