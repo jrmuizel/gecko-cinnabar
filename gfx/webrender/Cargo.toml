@@ -25,12 +25,12 @@ offscreen_gl_context = {version = "0.4", features = ["serde_serialization"]}
 rayon = "0.4.0"
 time = "0.1"
 webrender_traits = {path = "../webrender_traits", default-features = false}
-core-foundation = "0.2.2"
 
 [target.'cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))'.dependencies]
 freetype = {git = "https://github.com/servo/rust-freetype"}
 
 [target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.2.2"
 core-graphics = "0.4.1"
 core-text = "2.0"
 
