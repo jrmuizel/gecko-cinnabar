@@ -7,7 +7,7 @@
 #define GFX_WEBRENDERCONTAINERLAYER_H
 
 #include "Layers.h"
-#include "WebRenderLayerManager.h"
+#include "WebrenderLayerManager.h"
 
 namespace mozilla {
 namespace layers {
