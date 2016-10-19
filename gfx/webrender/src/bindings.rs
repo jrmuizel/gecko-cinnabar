@@ -10,7 +10,7 @@ extern crate webrender_traits;
 use app_units::Au;
 use euclid::{Size2D, Point2D, Rect, Matrix4D};
 use gleam::gl;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use webrender_traits::{ServoStackingContextId};
 use webrender_traits::{Epoch, ColorF, FragmentType, GlyphInstance};
 use webrender_traits::{ImageFormat, ImageKey, ImageRendering};
@@ -21,9 +21,21 @@ use std::mem;
 use std::str::FromStr;
 use std::slice;
 
-use core_foundation::base::TCFType;
-use core_foundation::string::CFString;
-use core_foundation::bundle::{CFBundleGetBundleWithIdentifier, CFBundleGetFunctionPointerForName};
+#[cfg(target_os = "linux")]
+mod dlopen {
+    use std::os::raw::{c_void, c_char, c_int};
+
+    pub const RTLD_LAZY: c_int = 0x001;
+    pub const RTLD_NOW: c_int = 0x002;
+
+    #[link="dl"]
+    extern {
+        pub fn dlopen(filename: *const c_char, flag: c_int) -> *mut c_void;
+        pub fn dlerror() -> *mut c_char;
+        pub fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+        pub fn dlclose(handle: *mut c_void) -> c_int;
+    }
+}
 
 /*
 struct Notifier {
@@ -113,6 +125,10 @@ pub struct WrState {
 
 #[cfg(target_os="macos")]
 fn get_proc_address(addr: &str) -> *const () {
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+    use core_foundation::bundle::{CFBundleGetBundleWithIdentifier, CFBundleGetFunctionPointerForName};
+
     let symbol_name: CFString = FromStr::from_str(addr).unwrap();
     let framework_name: CFString = FromStr::from_str("com.apple.opengl").unwrap();
     let framework = unsafe {
@@ -122,6 +138,18 @@ fn get_proc_address(addr: &str) -> *const () {
         CFBundleGetFunctionPointerForName(framework, symbol_name.as_concrete_TypeRef())
     };
     symbol as *const _
+}
+
+#[cfg(target_os="linux")]
+fn get_proc_address(addr: &str) -> *const () {
+    //TODO: cache this
+    let mut libglx = unsafe { dlopen::dlopen(b"libGL.so.1\0".as_ptr() as *const _, dlopen::RTLD_NOW) };
+    if libglx.is_null() {
+        libglx = unsafe { dlopen::dlopen(b"libGL.so\0".as_ptr() as *const _, dlopen::RTLD_NOW) };
+    }
+
+    let sym = CString::new(addr).unwrap();
+    unsafe { dlopen::dlsym(libglx, sym.as_ptr()) as *const () }
 }
  
 #[no_mangle]
