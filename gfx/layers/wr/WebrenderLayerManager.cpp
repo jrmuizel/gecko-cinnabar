@@ -3,17 +3,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "WebRenderLayerManager.h"
+#include "WebrenderLayerManager.h"
 
 #include "GLContext.h"
 #include "GLContextProvider.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
-#include "WebRenderCanvasLayer.h"
-#include "WebRenderColorLayer.h"
-#include "WebRenderContainerLayer.h"
-#include "WebRenderImageLayer.h"
-#include "WebRenderPaintedLayer.h"
+#include "WebrenderCanvasLayer.h"
+#include "WebrenderColorLayer.h"
+#include "WebrenderContainerLayer.h"
+#include "WebrenderImageLayer.h"
+#include "WebrenderPaintedLayer.h"
 #include "webrender.h"
 
 namespace mozilla {
