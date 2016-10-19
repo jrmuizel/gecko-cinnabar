@@ -7,7 +7,7 @@
 #define GFX_WEBRENDERCANVASLAYER_H
 
 #include "CopyableCanvasLayer.h"
-#include "WebRenderLayerManager.h"
+#include "WebrenderLayerManager.h"
 
 namespace mozilla {
 namespace layers {
