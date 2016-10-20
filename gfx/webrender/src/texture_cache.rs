@@ -9,7 +9,7 @@ use fnv::FnvHasher;
 use frame::FrameId;
 use freelist::{FreeList, FreeListItem, FreeListItemId};
 use internal_types::{TextureUpdate, TextureUpdateOp, TextureUpdateDetails};
-use internal_types::{RasterItem, RenderTargetMode, TextureImage, TextureUpdateList};
+use internal_types::{RenderTargetMode, TextureImage, TextureUpdateList};
 use internal_types::{RectUv, DevicePixel};
 use std::cmp::{self, Ordering};
 use std::collections::HashMap;
@@ -698,11 +698,8 @@ impl TextureCache {
             (ImageFormat::RGBA8, TextureCacheItemKind::Alternate) => {
                 (&mut self.arena.alternate_pages_rgba8, RenderTargetMode::RenderTarget)
             }
-            //(ImageFormat::RGBA8, TextureCacheItemKind::RenderTarget) => {
-            //    (&mut self.arena.render_target_pages, RenderTargetMode::RenderTarget)
-            //}
             (ImageFormat::RGB8, TextureCacheItemKind::Standard) => {
-                (&mut self.arena.pages_rgb8, RenderTargetMode::None)
+                (&mut self.arena.pages_rgb8, RenderTargetMode::RenderTarget)
             }
             (ImageFormat::Invalid, TextureCacheItemKind::Standard) |
             (ImageFormat::RGBAF32, TextureCacheItemKind::Standard) |
@@ -800,49 +797,6 @@ impl TextureCache {
         }
     }
 
-    pub fn insert_raster_op(&mut self,
-                            image_id: TextureCacheItemId,
-                            item: &RasterItem,
-                            _device_pixel_ratio: f32) {
-        let update_op = match item {
-            &RasterItem::_BoxShadow(ref op) => {
-                let allocation = self.allocate(image_id,
-                                               0,
-                                               0,
-                                               op.raster_size.0.as_u32(),
-                                               op.raster_size.1.as_u32(),
-                                               ImageFormat::RGBA8,
-                                               TextureCacheItemKind::Standard,
-                                               BorderType::SinglePixel,
-                                               TextureFilter::Linear,
-                                               false);
-
-                // TODO(pcwalton): Handle large box shadows not fitting in texture cache page.
-                assert!(allocation.kind == AllocationKind::TexturePage);
-
-                TextureUpdate {
-                    id: allocation.item.texture_id,
-                    op: TextureUpdateOp::Update(
-                        allocation.item.requested_rect.origin.x,
-                        allocation.item.requested_rect.origin.y,
-                        op.raster_size.0.as_u32(),
-                        op.raster_size.1.as_u32(),
-                        TextureUpdateDetails::BoxShadow(
-                            op.blur_radius,
-                            op.border_radius,
-                            Size2D::new(op.box_rect_size.0,
-                                        op.box_rect_size.1),
-                            Point2D::new(op.local_raster_origin.0,
-                                         op.local_raster_origin.1),
-                            op.inverted,
-                            BorderType::SinglePixel)),
-                }
-            }
-        };
-
-        self.pending_updates.push(update_op);
-    }
-
     pub fn add_raw_update(&mut self, id: TextureId, size: Size2D<i32>) {
         self.pending_updates.push(TextureUpdate {
             id: id,
@@ -893,8 +847,8 @@ impl TextureCache {
         let is_opaque = match (&insert_op, format) {
             (&TextureInsertOp::Blit(ref bytes), ImageFormat::RGBA8) => {
                 let mut is_opaque = true;
-                for i in (0..bytes.len()).step_by(4) {
-                    if bytes[i + 3] != 255 {
+                for i in 0..(bytes.len() / 4) {
+                    if bytes[i * 4 + 3] != 255 {
                         is_opaque = false;
                         break;
                     }

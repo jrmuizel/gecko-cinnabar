@@ -19,10 +19,10 @@ use std::mem;
 //use std::thread;
 use webrender_traits::ImageFormat;
 
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+#[cfg(not(any(target_arch = "arm", target_arch = "aarch64")))]
 const GL_FORMAT_A: gl::GLuint = gl::RED;
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 const GL_FORMAT_A: gl::GLuint = gl::ALPHA;
 
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -31,84 +31,13 @@ const GL_FORMAT_BGRA: gl::GLuint = gl::BGRA;
 #[cfg(target_os = "android")]
 const GL_FORMAT_BGRA: gl::GLuint = gl::BGRA_EXT;
 
-#[cfg(target_os = "linux")]
+#[cfg(not(any(target_arch = "arm", target_arch = "aarch64")))]
 const SHADER_VERSION: &'static str = "#version 150\n";
 
-#[cfg(target_os = "macos")]
-const SHADER_VERSION: &'static str = "#version 150\n";
-
-#[cfg(target_os = "windows")]
-const SHADER_VERSION: &'static str = "#version 150\n";
-
-#[cfg(target_os = "android")]
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 const SHADER_VERSION: &'static str = "#version 300 es\n";
 
 static SHADER_PREAMBLE: &'static str = "shared.glsl";
-
-/*
-static QUAD_VERTICES: [PackedVertex; 6] = [
-    PackedVertex {
-        x: 0.0, y: 0.0,
-        color: PackedColor { r: 255, g: 255, b: 255, a: 255 },
-        u: 0.0, v: 0.0,
-        mu: 0, mv: 0,
-        matrix_index: 0,
-        clip_in_rect_index: 0,
-        clip_out_rect_index: 0,
-        tile_params_index: 0,
-    },
-    PackedVertex {
-        x: 1.0, y: 0.0,
-        color: PackedColor { r: 255, g: 255, b: 255, a: 255 },
-        u: 0.0, v: 0.0,
-        mu: 0, mv: 0,
-        matrix_index: 0,
-        clip_in_rect_index: 0,
-        clip_out_rect_index: 0,
-        tile_params_index: 0,
-    },
-    PackedVertex {
-        x: 1.0, y: 1.0,
-        color: PackedColor { r: 255, g: 255, b: 255, a: 255 },
-        u: 0.0, v: 0.0,
-        mu: 0, mv: 0,
-        matrix_index: 0,
-        clip_in_rect_index: 0,
-        clip_out_rect_index: 0,
-        tile_params_index: 0,
-    },
-    PackedVertex {
-        x: 0.0, y: 0.0,
-        color: PackedColor { r: 255, g: 255, b: 255, a: 255 },
-        u: 0.0, v: 0.0,
-        mu: 0, mv: 0,
-        matrix_index: 0,
-        clip_in_rect_index: 0,
-        clip_out_rect_index: 0,
-        tile_params_index: 0,
-    },
-    PackedVertex {
-        x: 1.0, y: 1.0,
-        color: PackedColor { r: 255, g: 255, b: 255, a: 255 },
-        u: 0.0, v: 0.0,
-        mu: 0, mv: 0,
-        matrix_index: 0,
-        clip_in_rect_index: 0,
-        clip_out_rect_index: 0,
-        tile_params_index: 0,
-    },
-    PackedVertex {
-        x: 0.0, y: 1.0,
-        color: PackedColor { r: 255, g: 255, b: 255, a: 255 },
-        u: 0.0, v: 0.0,
-        mu: 0, mv: 0,
-        matrix_index: 0,
-        clip_in_rect_index: 0,
-        clip_out_rect_index: 0,
-        tile_params_index: 0,
-    },
-];
-*/
 
 lazy_static! {
     pub static ref MAX_TEXTURE_SIZE: gl::GLint = {
@@ -578,71 +507,161 @@ pub struct VBOId(gl::GLuint);
 #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
 struct IBOId(gl::GLuint);
 
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-pub struct GpuProfile {
-    next_query: usize,
-    qids: Vec<gl::GLuint>,
+const MAX_EVENTS_PER_FRAME: usize = 256;
+const MAX_PROFILE_FRAMES: usize = 4;
+
+#[derive(Debug, Clone)]
+pub struct GpuSample<T> {
+    pub tag: T,
+    pub time_ns: u64,
 }
 
-#[cfg(target_os = "android")]
-pub struct GpuProfile;
+pub struct GpuFrameProfile<T> {
+    queries: Vec<gl::GLuint>,
+    samples: Vec<GpuSample<T>>,
+    next_query: usize,
+    pending_query: gl::GLuint,
+}
 
-const QUERY_COUNT: i32 = 4;
+impl<T> GpuFrameProfile<T> {
+    #[cfg(not(target_os = "android"))]
+    fn new() -> GpuFrameProfile<T> {
+        let queries = gl::gen_queries(MAX_EVENTS_PER_FRAME as gl::GLint);
 
-impl GpuProfile {
-    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-    pub fn new() -> GpuProfile {
-        let queries = gl::gen_queries(QUERY_COUNT);
+        GpuFrameProfile {
+            queries: queries,
+            samples: Vec::new(),
+            next_query: 0,
+            pending_query: 0,
+        }
+    }
 
-        for q in &queries {
-            gl::begin_query(gl::TIME_ELAPSED, *q);
+    #[cfg(target_os = "android")]
+    fn new() -> GpuFrameProfile<T> {
+        GpuFrameProfile {
+            queries: Vec::new(),
+            samples: Vec::new(),
+            next_query: 0,
+            pending_query: 0,
+        }
+    }
+
+    fn begin_frame(&mut self) {
+        self.next_query = 0;
+        self.pending_query = 0;
+        self.samples.clear();
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn end_frame(&mut self) {
+        if self.pending_query != 0 {
+            gl::end_query(gl::TIME_ELAPSED);
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    fn end_frame(&mut self) {
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn add_marker(&mut self, tag: T) {
+        if self.pending_query != 0 {
             gl::end_query(gl::TIME_ELAPSED);
         }
 
-        GpuProfile {
-            qids: queries,
-            next_query: 0,
+        if self.next_query < MAX_EVENTS_PER_FRAME {
+            self.pending_query = self.queries[self.next_query];
+            gl::begin_query(gl::TIME_ELAPSED, self.pending_query);
+            self.samples.push(GpuSample {
+                tag: tag,
+                time_ns: 0,
+            });
+        } else {
+            self.pending_query = 0;
+        }
+
+        self.next_query += 1;
+    }
+
+    #[cfg(target_os = "android")]
+    fn add_marker(&mut self, tag: T) {
+        self.samples.push(GpuSample {
+            tag: tag,
+            time_ns: 0,
+        });
+    }
+
+    fn is_valid(&self) -> bool {
+        self.next_query <= MAX_EVENTS_PER_FRAME
+    }
+
+    #[cfg(not(target_os = "android"))]
+    fn build_samples(&mut self) -> Vec<GpuSample<T>> {
+        for (index, sample) in self.samples.iter_mut().enumerate() {
+            sample.time_ns = gl::get_query_object_ui64v(self.queries[index], gl::QUERY_RESULT)
+        }
+
+        mem::replace(&mut self.samples, Vec::new())
+    }
+
+    #[cfg(target_os = "android")]
+    fn build_samples(&mut self) -> Vec<GpuSample<T>> {
+        mem::replace(&mut self.samples, Vec::new())
+    }
+}
+
+impl<T> Drop for GpuFrameProfile<T> {
+    #[cfg(not(target_os = "android"))]
+    fn drop(&mut self) {
+        gl::delete_queries(&self.queries);
+    }
+
+    #[cfg(target_os = "android")]
+    fn drop(&mut self) {
+    }
+}
+
+pub struct GpuProfiler<T> {
+    frames: [GpuFrameProfile<T>; MAX_PROFILE_FRAMES],
+    next_frame: usize,
+}
+
+impl<T> GpuProfiler<T> {
+    pub fn new() -> GpuProfiler<T> {
+        GpuProfiler {
+            next_frame: 0,
+            frames: [
+                      GpuFrameProfile::new(),
+                      GpuFrameProfile::new(),
+                      GpuFrameProfile::new(),
+                      GpuFrameProfile::new(),
+                    ],
         }
     }
 
-    #[cfg(target_os = "android")]
-    pub fn new() -> GpuProfile {
-        GpuProfile
+    pub fn build_samples(&mut self) -> Option<Vec<GpuSample<T>>> {
+        let frame = &mut self.frames[self.next_frame];
+        if frame.is_valid() {
+            Some(frame.build_samples())
+        } else {
+            None
+        }
     }
 
-    #[cfg(any(target_os = "android", target_os = "gonk"))]
-    pub fn get(&mut self) -> u64 {
-        0
+    pub fn begin_frame(&mut self) {
+        let frame = &mut self.frames[self.next_frame];
+        frame.begin_frame();
     }
 
-    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-    pub fn get(&mut self) -> u64 {
-        let qi = self.next_query;
-        gl::get_query_object_ui64v(self.qids[qi], gl::QUERY_RESULT)
+    pub fn end_frame(&mut self) {
+        let frame = &mut self.frames[self.next_frame];
+        frame.end_frame();
+        self.next_frame = (self.next_frame + 1) % MAX_PROFILE_FRAMES;
     }
 
-    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-    pub fn begin(&mut self) {
-        gl::begin_query(gl::TIME_ELAPSED, self.qids[self.next_query]);
-    }
-
-    #[cfg(target_os = "android")]
-    pub fn begin(&mut self) {}
-
-    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-    pub fn end(&mut self) {
-        gl::end_query(gl::TIME_ELAPSED);
-        self.next_query = (self.next_query + 1) % QUERY_COUNT as usize;
-    }
-
-    #[cfg(target_os = "android")]
-    pub fn end(&mut self) -> u64 { 0 }
-}
-
-#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-impl Drop for GpuProfile {
-    fn drop(&mut self) {
-        gl::delete_queries(&self.qids);
+    pub fn add_marker(&mut self, tag: T) {
+        let frame = &mut self.frames[self.next_frame];
+        frame.add_marker(tag);
     }
 }
 
@@ -1152,37 +1171,33 @@ impl Device {
     pub fn create_program(&mut self,
                           base_filename: &str,
                           include_filename: &str) -> ProgramId {
-        self.create_program_with_prefix(base_filename, include_filename, None)
+        self.create_program_with_prefix(base_filename, &[include_filename], None)
     }
 
     pub fn create_program_with_prefix(&mut self,
                                       base_filename: &str,
-                                      include_filename: &str,
+                                      include_filenames: &[&str],
                                       prefix: Option<String>) -> ProgramId {
         debug_assert!(self.inside_frame);
 
         let pid = gl::create_program();
+        let base_path = self.resource_path.join(base_filename);
 
-        let mut vs_path = self.resource_path.clone();
-        vs_path.push(&format!("{}.vs.glsl", base_filename));
+        let vs_path = base_path.with_extension("vs.glsl");
         //self.file_watcher.add_watch(vs_path.clone());
 
-        let mut fs_path = self.resource_path.clone();
-        fs_path.push(&format!("{}.fs.glsl", base_filename));
+        let fs_path = base_path.with_extension("fs.glsl");
         //self.file_watcher.add_watch(fs_path.clone());
 
-        let mut include_path = self.resource_path.clone();
-        include_path.push(&format!("{}.glsl", include_filename));
-        let mut f = File::open(&include_path).unwrap();
         let mut include = String::new();
-        f.read_to_string(&mut include).unwrap();
+        for inc_filename in include_filenames {
+            let include_path = self.resource_path.join(inc_filename).with_extension("glsl");
+            File::open(&include_path).unwrap().read_to_string(&mut include).unwrap();
+        }
 
-        let mut shared_path = self.resource_path.clone();
-        shared_path.push(&format!("{}.glsl", base_filename));
+        let shared_path = base_path.with_extension("glsl");
         if let Ok(mut f) = File::open(&shared_path) {
-            let mut shared_code = String::new();
-            f.read_to_string(&mut shared_code).unwrap();
-            include.push_str(&shared_code);
+            f.read_to_string(&mut include).unwrap();
         }
 
         let program = Program {
@@ -1354,27 +1369,11 @@ impl Device {
         UniformLocation(gl::get_uniform_location(program_id, name))
     }
 
-/*
-    pub fn set_uniform_1i(&self, uniform: UniformLocation, x: i32) {
-        debug_assert!(self.inside_frame);
-        let UniformLocation(location) = uniform;
-        gl::uniform_1i(location, x);
-    }
-*/
-
     pub fn set_uniform_2f(&self, uniform: UniformLocation, x: f32, y: f32) {
         debug_assert!(self.inside_frame);
         let UniformLocation(location) = uniform;
         gl::uniform_2f(location, x, y);
     }
-
-/*
-    pub fn set_uniform_4f(&self, uniform: UniformLocation, x: f32, y: f32, z: f32, w: f32) {
-        debug_assert!(self.inside_frame);
-        let UniformLocation(location) = uniform;
-        gl::uniform_4f(location, x, y, z, w);
-    }
-*/
 
     fn set_uniforms(&self, program: &Program, transform: &Matrix4D<f32>) {
         debug_assert!(self.inside_frame);
@@ -1412,7 +1411,7 @@ impl Device {
 
         let (gl_format, bpp, data) = match self.textures.get(&texture_id).unwrap().format {
             ImageFormat::A8 => {
-                if cfg!(target_os="android") {
+                if cfg!(any(target_arch="arm", target_arch="aarch64")) {
                     for byte in data {
                         expanded_data.push(*byte);
                         expanded_data.push(*byte);
@@ -1584,15 +1583,6 @@ impl Device {
         gl::draw_elements_instanced(gl::TRIANGLES, index_count, gl::UNSIGNED_SHORT, 0, instance_count);
     }
 
-/*
-    pub fn delete_vao(&mut self, vao_id: VAOId) {
-        self.vaos.remove(&vao_id).expect(&format!("unable to remove vao {:?}", vao_id));
-        if self.bound_vao == vao_id {
-            self.bound_vao = VAOId(0);
-        }
-    }
-*/
-
     pub fn end_frame(&mut self) {
         self.bind_render_target(None);
 
@@ -1620,7 +1610,7 @@ impl Drop for Device {
 fn gl_texture_formats_for_image_format(format: ImageFormat) -> (gl::GLint, gl::GLuint) {
     match format {
         ImageFormat::A8 => {
-            if cfg!(target_os="android") {
+            if cfg!(any(target_arch="arm", target_arch="aarch64")) {
                 (GL_FORMAT_BGRA as gl::GLint, GL_FORMAT_BGRA)
             } else {
                 (GL_FORMAT_A as gl::GLint, GL_FORMAT_A)
@@ -1628,7 +1618,7 @@ fn gl_texture_formats_for_image_format(format: ImageFormat) -> (gl::GLint, gl::G
         },
         ImageFormat::RGB8 => (gl::RGB as gl::GLint, gl::RGB),
         ImageFormat::RGBA8 => {
-            if cfg!(target_os="android") {
+            if cfg!(any(target_arch="arm", target_arch="aarch64")) {
                 (GL_FORMAT_BGRA as gl::GLint, GL_FORMAT_BGRA)
             } else {
                 (gl::RGBA as gl::GLint, GL_FORMAT_BGRA)
