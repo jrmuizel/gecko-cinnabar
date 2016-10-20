@@ -325,6 +325,12 @@ pub extern fn wr_add_image(state:&mut WrState, width: u32, height: u32, format: 
 }
 
 #[no_mangle]
+pub extern fn wr_update_image(state:&mut WrState, key: ImageKey, width: u32, height: u32, format: ImageFormat, bytes: * const u8, size: usize) {
+    let bytes = unsafe { slice::from_raw_parts(bytes, size).to_owned() };
+    state.api.update_image(key, width, height, format, bytes);
+}
+
+#[no_mangle]
 pub extern fn wr_delete_image(state:&mut WrState, key: ImageKey) {
     state.api.delete_image(key)
 }
