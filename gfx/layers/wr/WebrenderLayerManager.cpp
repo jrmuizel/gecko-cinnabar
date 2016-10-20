@@ -96,6 +96,7 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   wr_dp_begin(mWRState, size.width, size.height);
 
   WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer(mWRState);
+  mGLContext->MakeCurrent();
 
   printf("WR Ending\n");
   wr_dp_end(mWRState);

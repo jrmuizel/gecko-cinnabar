@@ -5,6 +5,15 @@
 
 #include "WebrenderCanvasLayer.h"
 
+#include "AsyncCanvasRenderer.h"
+#include "gfxUtils.h"
+#include "GLContext.h"
+#include "GLScreenBuffer.h"
+#include "mozilla/gfx/2D.h"
+#include "mozilla/layers/TextureClientSharedSurface.h"
+#include "PersistentBufferProvider.h"
+#include "SharedSurface.h"
+
 namespace mozilla {
 namespace layers {
 
@@ -16,6 +25,93 @@ WebRenderCanvasLayer::~WebRenderCanvasLayer()
 void
 WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
 {
+  FirePreTransactionCallback();
+  RefPtr<gfx::SourceSurface> surface;
+  // Get the canvas buffer
+  AutoReturnSnapshot autoReturn;
+  if (mAsyncRenderer) {
+    MOZ_ASSERT(!mBufferProvider);
+    MOZ_ASSERT(!mGLContext);
+    surface = mAsyncRenderer->GetSurface();
+  } else if (mGLContext) {
+    gl::SharedSurface* frontbuffer = nullptr;
+    if (mGLFrontbuffer) {
+      frontbuffer = mGLFrontbuffer.get();
+    } else {
+      gl::GLScreenBuffer* screen = mGLContext->Screen();
+      const auto& front = screen->Front();
+      if (front) {
+        frontbuffer = front->Surf();
+      }
+    }
+
+    if (!frontbuffer) {
+      NS_WARNING("Null frame received.");
+      return;
+    }
+
+    gfx::IntSize readSize(frontbuffer->mSize);
+    gfx::SurfaceFormat format = (GetContentFlags() & CONTENT_OPAQUE)
+                                ? gfx::SurfaceFormat::B8G8R8X8
+                                : gfx::SurfaceFormat::B8G8R8A8;
+    bool needsPremult = frontbuffer->mHasAlpha && !mIsAlphaPremultiplied;
+
+    RefPtr<gfx::DataSourceSurface> resultSurf = GetTempSurface(readSize, format);
+    // There will already be a warning from inside of GetTempSurface, but
+    // it doesn't hurt to complain:
+    if (NS_WARN_IF(!resultSurf)) {
+      return;
+    }
+
+    // Readback handles Flush/MarkDirty.
+    mGLContext->Readback(frontbuffer, resultSurf);
+    if (needsPremult) {
+      gfxUtils::PremultiplyDataSurface(resultSurf, resultSurf);
+    }
+    surface = resultSurf;
+  } else if (mBufferProvider) {
+    surface = mBufferProvider->BorrowSnapshot();
+    autoReturn.mSnapshot = &surface;
+    autoReturn.mBufferProvider = mBufferProvider;
+  }
+  FireDidTransactionCallback();
+
+  if (!surface) {
+    return;
+  }
+
+  RefPtr<gfx::DataSourceSurface> dataSurface = surface->GetDataSurface();
+  gfx::DataSourceSurface::ScopedMap map(dataSurface, gfx::DataSourceSurface::MapType::READ);
+  //XXX
+  MOZ_RELEASE_ASSERT(surface->GetFormat() == gfx::SurfaceFormat::B8G8R8X8 ||
+                     surface->GetFormat() == gfx::SurfaceFormat::B8G8R8A8, "bad format");
+
+  gfx::IntSize size = surface->GetSize();
+
+  WRImageKey key;
+  key = wr_add_image(aWRState, size.width, size.height, RGBA8, map.GetData(), size.height * map.GetStride());
+
+  auto transform = GetTransform();
+  const bool needsYFlip = (mOriginPos == gl::OriginPos::BottomLeft);
+  if (needsYFlip) {
+    transform.PreTranslate(0, size.height, 0).PreScale(1, -1, 1);
+  }
+  gfx::Rect rect(0, 0, size.width, size.height);
+
+  gfx::Rect clip;
+  auto combinedClip = GetCombinedClipRect();
+  if (combinedClip.isSome()) {
+      clip = IntRectToRect(combinedClip.ref().ToUnknownRect());
+  } else {
+      clip = rect;
+  }
+  wr_push_dl_builder(aWRState);
+  wr_push_dl_builder(aWRState);
+  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(rect), key);
+  Manager()->AddImageKeyForDiscard(key);
+  wr_pop_dl_builder(aWRState, 0, 0, rect.width, rect.height, &transform.components[0]);
+  gfx::Matrix4x4 identity;
+  wr_pop_dl_builder(aWRState, clip.x, clip.y, 0, 0, &identity.components[0]);
 }
 
 } // namespace layers
