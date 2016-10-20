@@ -1399,8 +1399,8 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
       // We are shutting down, do not try to re-create a LayerManager
       return nullptr;
     }
-    printf("mWidgetIndex: %d\n", mWidgetIndex);
-    if (mWidgetIndex == 5 && !XRE_IsContentProcess()) {
+
+    if (!XRE_IsContentProcess()) {
       mLayerManager = new WebRenderLayerManager(this);
     }
 
