@@ -26,8 +26,6 @@ namespace layers {
 WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
   : mWRState(nullptr)
 {
-  static uint32_t counter = 0;
-  mCounter = counter++;
   CompositorWidgetInitData initData;
   aWidget->GetCompositorWidgetInitData(&initData);
   mWidget = CompositorWidget::CreateLocal(initData, aWidget);
@@ -74,10 +72,6 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
                                       void* aCallbackData,
                                       EndTransactionFlags aFlags)
 {
-  printf("WebRenderLayerManager::EndTransaction with mCounter %d\n", int(mCounter));
-  if (mCounter != 0) {
-    return;
-  }
 
   mPaintedLayerCallback = aCallback;
   mPaintedLayerCallbackData = aCallbackData;
