@@ -401,6 +401,9 @@ if CONFIG['OS_ARCH'] == 'Linux':
 
 OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/webrender/target/release -lwebrender"]
 
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
+    OS_LIBS += ['-lGL']
+
 # This library needs to be last to make XPCOM module registration work.
 
 USE_LIBS += ['StaticXULComponentsEnd']

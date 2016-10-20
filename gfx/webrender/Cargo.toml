@@ -26,6 +26,9 @@ rayon = "0.4.0"
 time = "0.1"
 webrender_traits = {path = "../webrender_traits", default-features = false}
 
+[replace]
+"offscreen_gl_context:0.4.5" = { path = '../offscreen_gl_context' }
+
 [target.'cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))'.dependencies]
 freetype = {git = "https://github.com/servo/rust-freetype"}
 

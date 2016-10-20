@@ -1389,7 +1389,12 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
       return nullptr;
     }
     printf("mWidgetIndex: %d\n", mWidgetIndex);
+#if MOZ_WIDGET_GTK
+    if (mWidgetIndex == 1 && !XRE_IsContentProcess()) {
+#else
     if (mWidgetIndex == 5 && !XRE_IsContentProcess()) {
+#endif
+      printf("new WebRenderLayerManager\n");
       mLayerManager = new WebRenderLayerManager(this);
     }
 
