@@ -14,6 +14,12 @@ use offscreen_gl_context::{GLContextAttributes, GLLimits};
 
 #[cfg(target_os = "macos")] use core_graphics::font::CGFont;
 
+#[derive(Debug, Copy, Clone)]
+pub enum RendererKind {
+    Native,
+    OSMesa,
+}
+
 #[derive(Deserialize, Serialize)]
 pub enum ApiMsg {
     AddRawFont(FontKey, Vec<u8>),
@@ -290,7 +296,6 @@ pub struct ImageDisplayItem {
     pub image_rendering: ImageRendering,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ImageFormat {
     Invalid,
@@ -300,7 +305,6 @@ pub enum ImageFormat {
     RGBAF32,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ImageKey(u32, u32);
 
@@ -363,6 +367,11 @@ pub trait RenderNotifier: Send {
     fn new_frame_ready(&mut self);
     fn new_scroll_frame_ready(&mut self, composite_needed: bool);
     fn pipeline_size_changed(&mut self, pipeline_id: PipelineId, size: Option<Size2D<f32>>);
+}
+
+// Trait to allow dispatching functions to a specific thread or event loop.
+pub trait RenderDispatcher: Send {
+    fn dispatch(&self, Box<Fn() + Send>);
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
