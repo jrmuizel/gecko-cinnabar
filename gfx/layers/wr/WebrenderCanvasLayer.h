@@ -10,6 +10,10 @@
 #include "WebrenderLayerManager.h"
 
 namespace mozilla {
+namespace gfx {
+class SourceSurface;
+}; // namespace gfx
+
 namespace layers {
 
 class WebRenderCanvasLayer : public WebRenderLayer,
@@ -24,6 +28,10 @@ public:
 
 protected:
   virtual ~WebRenderCanvasLayer();
+  WebRenderLayerManager* Manager()
+  {
+    return static_cast<WebRenderLayerManager*>(mManager);
+  }
 
 public:
   void RenderLayer(wrstate* aWRState) override;
