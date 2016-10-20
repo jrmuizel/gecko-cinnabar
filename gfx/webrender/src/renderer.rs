@@ -11,7 +11,7 @@
 
 use batch::RasterBatch;
 use debug_render::DebugRenderer;
-use device::{Device, ProgramId, TextureId, UniformLocation, VertexFormat, GpuProfile};
+use device::{Device, ProgramId, TextureId, UniformLocation, VertexFormat, GpuProfiler};
 use device::{TextureFilter, VAOId, VertexUsageHint, FileWatcherHandler};
 use euclid::{Matrix4D, Point2D, Rect, Size2D};
 use fnv::FnvHasher;
@@ -19,11 +19,11 @@ use gleam::gl;
 use internal_types::{RendererFrame, ResultMsg, TextureUpdateOp};
 use internal_types::{TextureUpdateDetails, TextureUpdateList, PackedVertex, RenderTargetMode};
 use internal_types::{ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE, DevicePixel};
-use internal_types::{PackedVertexForTextureCacheUpdate, CompositionOp};
-use internal_types::{AxisDirection, TextureSampler};
+use internal_types::{PackedVertexForTextureCacheUpdate};
+use internal_types::{AxisDirection, TextureSampler, GLContextHandleWrapper};
 use ipc_channel::ipc;
 use profiler::{Profiler, BackendProfileCounters};
-use profiler::{RendererProfileTimers, RendererProfileCounters};
+use profiler::{GpuProfileTag, RendererProfileTimers, RendererProfileCounters};
 use render_backend::RenderBackend;
 use std::cmp;
 use std::collections::HashMap;
@@ -38,15 +38,51 @@ use texture_cache::{BorderType, TextureCache, TextureInsertOp};
 use tiling::{self, Frame, FrameBuilderConfig, GLYPHS_PER_TEXT_RUN, PrimitiveBatchData};
 use tiling::{TransformedRectKind, RenderTarget, ClearTile};
 use time::precise_time_ns;
-use webrender_traits::{ColorF, Epoch, PipelineId, RenderNotifier};
-use webrender_traits::{ImageFormat, MixBlendMode, RenderApiSender};
-use offscreen_gl_context::{NativeGLContext, NativeGLContextMethods};
+use webrender_traits::{ColorF, Epoch, PipelineId, RenderNotifier, RenderDispatcher};
+use webrender_traits::{ImageFormat, RenderApiSender, RendererKind};
 
 pub const BLUR_INFLATION_FACTOR: u32 = 3;
 pub const MAX_RASTER_OP_SIZE: u32 = 2048;
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 
 const UBO_BIND_DATA: u32 = 1;
+
+// White
+const GPU_TAG_INIT: GpuProfileTag = GpuProfileTag { label: "Init", color: ColorF { r: 1.0, g: 1.0, b: 1.0, a: 1.0 } };
+
+// Grey
+const GPU_TAG_SETUP_TARGET: GpuProfileTag = GpuProfileTag { label: "Target", color: ColorF { r: 0.5, g: 0.5, b: 0.5, a: 1.0 } };
+
+// Black
+const GPU_TAG_CLEAR_TILES: GpuProfileTag = GpuProfileTag { label: "Clear Tiles", color: ColorF { r: 0.0, g: 0.0, b: 0.0, a: 1.0 } };
+
+// Red / dark red
+const GPU_TAG_PRIM_RECT: GpuProfileTag = GpuProfileTag { label: "Rect", color: ColorF { r: 1.0, g: 0.0, b: 0.0, a: 1.0 } };
+const GPU_TAG_PRIM_RECT_CLIP: GpuProfileTag = GpuProfileTag { label: "RectClip", color: ColorF { r: 0.7, g: 0.0, b: 0.0, a: 1.0 } };
+
+// Green / dark green
+const GPU_TAG_PRIM_IMAGE: GpuProfileTag = GpuProfileTag { label: "Image", color: ColorF { r: 0.0, g: 1.0, b: 0.0, a: 1.0 } };
+const GPU_TAG_PRIM_IMAGE_CLIP: GpuProfileTag = GpuProfileTag { label: "ImageClip", color: ColorF { r: 0.0, g: 0.7, b: 0.0, a: 1.0 } };
+
+// Light blue
+const GPU_TAG_PRIM_BLEND: GpuProfileTag = GpuProfileTag { label: "Blend", color: ColorF { r: 0.8, g: 1.0, b: 1.0, a: 1.0 } };
+
+// Magenta
+const GPU_TAG_PRIM_COMPOSITE: GpuProfileTag = GpuProfileTag { label: "Composite", color: ColorF { r: 1.0, g: 0.0, b: 1.0, a: 1.0 } };
+
+// Blue / dark blue
+const GPU_TAG_PRIM_TEXT: GpuProfileTag = GpuProfileTag { label: "Text", color: ColorF { r: 0.0, g: 0.0, b: 1.0, a: 1.0 } };
+const GPU_TAG_PRIM_TEXT_RUN: GpuProfileTag = GpuProfileTag { label: "TextRun", color: ColorF { r: 0.0, g: 0.0, b: 0.7, a: 1.0 } };
+
+// Yellow / dark yellow
+const GPU_TAG_PRIM_ALIGNED_GRADIENT: GpuProfileTag = GpuProfileTag { label: "AlignedGradient", color: ColorF { r: 1.0, g: 1.0, b: 0.0, a: 1.0 } };
+const GPU_TAG_PRIM_ANGLE_GRADIENT: GpuProfileTag = GpuProfileTag { label: "AngleGradient", color: ColorF { r: 0.7, g: 0.7, b: 0.0, a: 1.0 } };
+
+// Cyan
+const GPU_TAG_PRIM_BOX_SHADOW: GpuProfileTag = GpuProfileTag { label: "BoxShadow", color: ColorF { r: 0.0, g: 1.0, b: 1.0, a: 1.0 } };
+
+// Orange
+const GPU_TAG_PRIM_BORDER: GpuProfileTag = GpuProfileTag { label: "Border", color: ColorF { r: 1.0, g: 0.5, b: 0.0, a: 1.0 } };
 
 struct VertexDataTexture {
     id: TextureId,
@@ -155,40 +191,6 @@ struct PrimitiveShader {
     max_items: usize,
 }
 
-#[derive(Clone, Copy)]
-struct VertexBuffer {
-    vao_id: VAOId,
-}
-
-pub trait CompositionOpHelpers {
-    fn needs_framebuffer(&self) -> bool;
-}
-
-impl CompositionOpHelpers for CompositionOp {
-    fn needs_framebuffer(&self) -> bool {
-        match *self {
-            CompositionOp::MixBlend(MixBlendMode::Normal) => unreachable!(),
-
-            CompositionOp::MixBlend(MixBlendMode::Screen) |
-            CompositionOp::MixBlend(MixBlendMode::Overlay) |
-            CompositionOp::MixBlend(MixBlendMode::ColorDodge) |
-            CompositionOp::MixBlend(MixBlendMode::ColorBurn) |
-            CompositionOp::MixBlend(MixBlendMode::HardLight) |
-            CompositionOp::MixBlend(MixBlendMode::SoftLight) |
-            CompositionOp::MixBlend(MixBlendMode::Difference) |
-            CompositionOp::MixBlend(MixBlendMode::Exclusion) |
-            CompositionOp::MixBlend(MixBlendMode::Hue) |
-            CompositionOp::MixBlend(MixBlendMode::Saturation) |
-            CompositionOp::MixBlend(MixBlendMode::Color) |
-            CompositionOp::MixBlend(MixBlendMode::Luminosity) => true,
-            CompositionOp::Filter(_) |
-            CompositionOp::MixBlend(MixBlendMode::Multiply) |
-            CompositionOp::MixBlend(MixBlendMode::Darken) |
-            CompositionOp::MixBlend(MixBlendMode::Lighten) => false,
-        }
-    }
-}
-
 struct FileWatcher {
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
     result_tx: Sender<ResultMsg>,
@@ -267,8 +269,15 @@ fn create_prim_shader(name: &'static str,
         prefix.push_str(&format!("#define WR_FEATURE_{}\n", feature));
     }
 
+    let includes_base = ["prim_shared"];
+    let includes_clip = ["prim_shared", "clip_shared"];
+    let includes: &[&str] = if name.ends_with("_clip") {
+        &includes_clip
+    } else {
+        &includes_base
+    };
     let program_id = device.create_program_with_prefix(name,
-                                                       "prim_shared",
+                                                       includes,
                                                        Some(prefix));
 
     let data_index = gl::get_uniform_block_index(program_id.0, "Data");
@@ -286,8 +295,9 @@ fn create_clear_shader(name: &'static str,
                        max_ubo_vectors: usize) -> ProgramId {
     let prefix = format!("#define WR_MAX_UBO_VECTORS {}", max_ubo_vectors);
 
+    let includes = &["shared_other"];
     let program_id = device.create_program_with_prefix(name,
-                                                       "shared_other",
+                                                       includes,
                                                        Some(prefix));
 
     let data_index = gl::get_uniform_block_index(program_id.0, "Data");
@@ -307,8 +317,6 @@ pub struct Renderer {
     device_pixel_ratio: f32,
     raster_batches: Vec<RasterBatch>,
     raster_op_vao: Option<VAOId>,
-
-    box_shadow_program_id: ProgramId,
 
     blur_program_id: ProgramId,
     u_direction: UniformLocation,
@@ -348,13 +356,15 @@ pub struct Renderer {
     raster_op_target_rgba8: TextureId,
     render_targets: [TextureId; 2],
 
-    gpu_profile_paint: GpuProfile,
-    gpu_profile_composite: GpuProfile,
+    gpu_profile: GpuProfiler<GpuProfileTag>,
     quad_vao_id: VAOId,
 
     layer_texture: VertexDataTexture,
     render_task_texture: VertexDataTexture,
     pipeline_epoch_map: HashMap<PipelineId, Epoch, BuildHasherDefault<FnvHasher>>,
+    /// Used to dispatch functions to the main thread's event loop.
+    /// Required to allow GLContext sharing in some implementations like WGL.
+    main_thread_dispatcher: Arc<Mutex<Option<Box<RenderDispatcher>>>>
 }
 
 impl Renderer {
@@ -394,7 +404,6 @@ impl Renderer {
                                      Box::new(file_watch_handler));
         device.begin_frame();
 
-        let box_shadow_program_id = device.create_program("box_shadow", "shared_other");
         let blur_program_id = device.create_program("blur", "shared_other");
         let max_raster_op_size = MAX_RASTER_OP_SIZE * options.device_pixel_ratio as u32;
 
@@ -455,7 +464,7 @@ impl Renderer {
                                                  max_prim_box_shadows,
                                                  &mut device,
                                                  options.precache_shaders);
-        let ps_aligned_gradient = PrimitiveShader::new("ps_gradient",
+        let ps_aligned_gradient = PrimitiveShader::new("ps_gradient_clip",
                                                        max_ubo_vectors,
                                                        max_prim_aligned_gradients,
                                                        &mut device,
@@ -574,11 +583,16 @@ impl Renderer {
 
         device.end_frame();
 
+        let main_thread_dispatcher = Arc::new(Mutex::new(None));
         let backend_notifier = notifier.clone();
+        let backend_main_thread_dispatcher = main_thread_dispatcher.clone();
 
         // We need a reference to the webrender context from the render backend in order to share
         // texture ids
-        let context_handle = NativeGLContext::current_handle();
+        let context_handle = match options.renderer_kind {
+            RendererKind::Native => GLContextHandleWrapper::current_native_handle(),
+            RendererKind::OSMesa => GLContextHandleWrapper::current_osmesa_handle(),
+        };
 
         let config = FrameBuilderConfig::new(options.enable_scrollbars);
 
@@ -598,7 +612,8 @@ impl Renderer {
                                                  context_handle,
                                                  config,
                                                  debug,
-                                                 enable_recording);
+                                                 enable_recording,
+                                                 backend_main_thread_dispatcher);
             backend.run();
         });
 
@@ -611,7 +626,6 @@ impl Renderer {
             pending_texture_updates: Vec::new(),
             pending_shader_updates: Vec::new(),
             device_pixel_ratio: options.device_pixel_ratio,
-            box_shadow_program_id: box_shadow_program_id,
             blur_program_id: blur_program_id,
             tile_clear_shader: tile_clear_shader,
             ps_rectangle: ps_rectangle,
@@ -642,12 +656,12 @@ impl Renderer {
             raster_op_target_rgba8: raster_op_target_rgba8,
             render_targets: [TextureId(0), TextureId(0)],
             max_raster_op_size: max_raster_op_size,
-            gpu_profile_paint: GpuProfile::new(),
-            gpu_profile_composite: GpuProfile::new(),
+            gpu_profile: GpuProfiler::new(),
             quad_vao_id: quad_vao_id,
             layer_texture: layer_texture,
             render_task_texture: render_task_texture,
             pipeline_epoch_map: HashMap::with_hasher(Default::default()),
+            main_thread_dispatcher: main_thread_dispatcher
         };
 
         renderer.update_uniform_locations();
@@ -682,6 +696,14 @@ impl Renderer {
     pub fn set_render_notifier(&self, notifier: Box<RenderNotifier>) {
         let mut notifier_arc = self.notifier.lock().unwrap();
         *notifier_arc = Some(notifier);
+    }
+
+    /// Sets the new MainThreadDispatcher.
+    ///
+    /// Allows to dispatch functions to the main thread's event loop.
+    pub fn set_main_thread_dispatcher(&self, dispatcher: Box<RenderDispatcher>) {
+        let mut dispatcher_arc = self.main_thread_dispatcher.lock().unwrap();
+        *dispatcher_arc = Some(dispatcher);
     }
 
     /// Returns the Epoch of the current frame in a pipeline.
@@ -728,11 +750,14 @@ impl Renderer {
 
                 // Block CPU waiting for last frame's GPU profiles to arrive.
                 // In general this shouldn't block unless heavily GPU limited.
-                let paint_ns = self.gpu_profile_paint.get();
-                let composite_ns = self.gpu_profile_composite.get();
+                if let Some(samples) = self.gpu_profile.build_samples() {
+                    profile_timers.gpu_samples = samples;
+                }
 
                 profile_timers.cpu_time.profile(|| {
                     self.device.begin_frame();
+                    self.gpu_profile.begin_frame();
+                    self.gpu_profile.add_marker(GPU_TAG_INIT);
 
                     gl::disable(gl::SCISSOR_TEST);
                     gl::disable(gl::DEPTH_TEST);
@@ -744,23 +769,18 @@ impl Renderer {
 
                     gl::bind_buffer(gl::UNIFORM_BUFFER, 0);
                     gl::bind_buffer_base(gl::UNIFORM_BUFFER, UBO_BIND_DATA, 0);
+                    self.gpu_profile.end_frame();
                 });
 
                 let current_time = precise_time_ns();
                 let ns = current_time - self.last_time;
                 self.profile_counters.frame_time.set(ns);
 
-                profile_timers.gpu_time_paint.set(paint_ns);
-                profile_timers.gpu_time_composite.set(composite_ns);
-
-                let gpu_ns = paint_ns + composite_ns;
-                profile_timers.gpu_time_total.set(gpu_ns);
-
                 if self.enable_profiler {
                     self.profiler.draw_profile(&frame.profile_counters,
                                                &self.backend_profile_counters,
                                                &self.profile_counters,
-                                               &profile_timers,
+                                               &mut profile_timers,
                                                &mut self.debug);
                 }
 
@@ -995,24 +1015,6 @@ impl Renderer {
                                     ]
                                 });
                             }
-                            TextureUpdateDetails::BoxShadow(blur_radius,
-                                                            border_radius,
-                                                            box_rect_size,
-                                                            raster_origin,
-                                                            inverted,
-                                                            border_type) => {
-                                self.update_texture_cache_for_box_shadow(
-                                    update.id,
-                                    &Rect::new(Point2D::new(x, y),
-                                               Size2D::new(width, height)),
-                                    &Rect::new(
-                                        Point2D::new(raster_origin.x, raster_origin.y),
-                                        Size2D::new(box_rect_size.width, box_rect_size.height)),
-                                    blur_radius,
-                                    border_radius,
-                                    inverted,
-                                    border_type)
-                            }
                         }
                     }
                 }
@@ -1020,87 +1022,6 @@ impl Renderer {
         }
 
         self.flush_raster_batches();
-    }
-
-    fn update_texture_cache_for_box_shadow(&mut self,
-                                           update_id: TextureId,
-                                           texture_rect: &Rect<u32>,
-                                           box_rect: &Rect<DevicePixel>,
-                                           blur_radius: DevicePixel,
-                                           border_radius: DevicePixel,
-                                           inverted: bool,
-                                           border_type: BorderType) {
-        debug_assert!(border_type == BorderType::SinglePixel);
-        let box_shadow_program_id = self.box_shadow_program_id;
-
-        let blur_radius = blur_radius.as_f32();
-
-        let color = if inverted {
-            ColorF::new(1.0, 1.0, 1.0, 0.0)
-        } else {
-            ColorF::new(1.0, 1.0, 1.0, 1.0)
-        };
-
-        let zero_point = Point2D::new(0.0, 0.0);
-        let zero_size = Size2D::new(0.0, 0.0);
-
-        self.add_rect_to_raster_batch(update_id,
-                                      TextureId(0),
-                                      box_shadow_program_id,
-                                      None,
-                                      &texture_rect,
-                                      border_type,
-                                      |texture_rect| {
-            let box_rect_top_left = Point2D::new(box_rect.origin.x.as_f32() + texture_rect.origin.x,
-                                                 box_rect.origin.y.as_f32() + texture_rect.origin.y);
-            let box_rect_bottom_right = Point2D::new(box_rect_top_left.x + box_rect.size.width.as_f32(),
-                                                     box_rect_top_left.y + box_rect.size.height.as_f32());
-            let border_radii = Point2D::new(border_radius.as_f32(),
-                                            border_radius.as_f32());
-
-            [
-                PackedVertexForTextureCacheUpdate::new(&texture_rect.origin,
-                                                       &color,
-                                                       &zero_point,
-                                                       &border_radii,
-                                                       &zero_point,
-                                                       &box_rect_top_left,
-                                                       &box_rect_bottom_right,
-                                                       &zero_size,
-                                                       &zero_size,
-                                                       blur_radius),
-                PackedVertexForTextureCacheUpdate::new(&texture_rect.top_right(),
-                                                       &color,
-                                                       &zero_point,
-                                                       &border_radii,
-                                                       &zero_point,
-                                                       &box_rect_top_left,
-                                                       &box_rect_bottom_right,
-                                                       &zero_size,
-                                                       &zero_size,
-                                                       blur_radius),
-                PackedVertexForTextureCacheUpdate::new(&texture_rect.bottom_left(),
-                                                       &color,
-                                                       &zero_point,
-                                                       &border_radii,
-                                                       &zero_point,
-                                                       &box_rect_top_left,
-                                                       &box_rect_bottom_right,
-                                                       &zero_size,
-                                                       &zero_size,
-                                                       blur_radius),
-                PackedVertexForTextureCacheUpdate::new(&texture_rect.bottom_right(),
-                                                       &color,
-                                                       &zero_point,
-                                                       &border_radii,
-                                                       &zero_point,
-                                                       &box_rect_top_left,
-                                                       &box_rect_bottom_right,
-                                                       &zero_size,
-                                                       &zero_size,
-                                                       blur_radius),
-            ]
-        });
     }
 
     fn add_rect_to_raster_batch<F>(&mut self,
@@ -1409,6 +1330,8 @@ impl Renderer {
                    target_size: &Size2D<f32>,
                    cache_texture: TextureId,
                    should_clear: bool) {
+        self.gpu_profile.add_marker(GPU_TAG_SETUP_TARGET);
+
         self.device.bind_render_target(render_target);
         gl::viewport(0,
                      0,
@@ -1461,6 +1384,7 @@ impl Renderer {
 
                 match &batch.data {
                     &PrimitiveBatchData::Blend(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_BLEND);
                         let shader = self.ps_blend.get(&mut self.device);
                         self.device.bind_program(shader, &projection);
                         self.device.bind_vao(self.quad_vao_id);
@@ -1481,6 +1405,7 @@ impl Renderer {
                         }
                     }
                     &PrimitiveBatchData::Composite(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_COMPOSITE);
                         let shader = self.ps_composite.get(&mut self.device);
                         self.device.bind_program(shader, &projection);
                         self.device.bind_vao(self.quad_vao_id);
@@ -1501,6 +1426,7 @@ impl Renderer {
                         }
                     }
                     &PrimitiveBatchData::Rectangles(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_RECT);
                         let (shader, max_prim_items) = self.ps_rectangle.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1510,6 +1436,7 @@ impl Renderer {
                                             &projection);
                     }
                     &PrimitiveBatchData::RectanglesClip(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_RECT_CLIP);
                         let (shader, max_prim_items) = self.ps_rectangle_clip.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1520,6 +1447,7 @@ impl Renderer {
 
                     }
                     &PrimitiveBatchData::Image(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_IMAGE);
                         let (shader, max_prim_items) = self.ps_image.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1529,6 +1457,7 @@ impl Renderer {
                                             &projection);
                     }
                     &PrimitiveBatchData::ImageClip(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_IMAGE_CLIP);
                         let (shader, max_prim_items) = self.ps_image_clip.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1539,6 +1468,7 @@ impl Renderer {
 
                     }
                     &PrimitiveBatchData::Borders(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_BORDER);
                         let (shader, max_prim_items) = self.ps_border.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1549,6 +1479,7 @@ impl Renderer {
 
                     }
                     &PrimitiveBatchData::BoxShadows(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_BOX_SHADOW);
                         let (shader, max_prim_items) = self.ps_box_shadow.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1559,6 +1490,7 @@ impl Renderer {
 
                     }
                     &PrimitiveBatchData::Text(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_TEXT);
                         let (shader, max_prim_items) = self.ps_text.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1568,6 +1500,7 @@ impl Renderer {
                                             &projection);
                     }
                     &PrimitiveBatchData::TextRun(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_TEXT_RUN);
                         let (shader, max_prim_items) = self.ps_text_run.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1577,6 +1510,7 @@ impl Renderer {
                                             &projection);
                     }
                     &PrimitiveBatchData::AlignedGradient(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_ALIGNED_GRADIENT);
                         let (shader, max_prim_items) = self.ps_aligned_gradient.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1587,6 +1521,7 @@ impl Renderer {
 
                     }
                     &PrimitiveBatchData::AngleGradient(ref ubo_data) => {
+                        self.gpu_profile.add_marker(GPU_TAG_PRIM_ANGLE_GRADIENT);
                         let (shader, max_prim_items) = self.ps_angle_gradient.get(&mut self.device, batch.transform_kind);
                         self.draw_ubo_batch(ubo_data,
                                             shader,
@@ -1613,11 +1548,6 @@ impl Renderer {
                                         frame.viewport_size.height * self.device_pixel_ratio as i32);
         let needs_clear = viewport_size.width < framebuffer_size.width as i32 ||
                           viewport_size.height < framebuffer_size.height as i32;
-
-        //println!("render {} debug rects", frame.debug_rects.len());
-        self.gpu_profile_paint.begin();
-        self.gpu_profile_paint.end();
-        self.gpu_profile_composite.begin();
 
         for debug_rect in frame.debug_rects.iter().rev() {
             self.add_debug_rect(debug_rect.rect.origin,
@@ -1693,6 +1623,8 @@ impl Renderer {
             }
         }
 
+        self.gpu_profile.add_marker(GPU_TAG_CLEAR_TILES);
+
         // Clear tiles with no items
         if !frame.clear_tiles.is_empty() {
             let tile_clear_shader = self.tile_clear_shader.get(&mut self.device);
@@ -1714,8 +1646,6 @@ impl Renderer {
                 gl::delete_buffers(&ubos);
             }
         }
-
-        self.gpu_profile_composite.end();
     }
 }
 
@@ -1730,4 +1660,5 @@ pub struct RendererOptions {
     pub enable_recording: bool,
     pub enable_scrollbars: bool,
     pub precache_shaders: bool,
+    pub renderer_kind: RendererKind,
 }
