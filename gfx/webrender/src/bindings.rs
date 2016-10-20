@@ -123,6 +123,22 @@ pub struct WrState {
         dl_builder: Vec<DisplayListBuilder>,
 }
 
+#[cfg(target_os="windows")]
+fn get_proc_address(addr: &str) -> *const () {
+    use kernel32;
+
+    let lib_name = CString::new("opengl32.dll").unwrap();
+    let symbol_name = CString::new(addr).unwrap();
+    unsafe {
+        let lib = kernel32::LoadLibraryA(lib_name.as_ptr());
+        if lib.is_null() {
+            println!("Opengl Library is null");
+        }
+
+        return kernel32::GetProcAddress(lib, symbol_name.as_ptr()) as *const();
+    };
+}
+
 #[cfg(target_os="macos")]
 fn get_proc_address(addr: &str) -> *const () {
     use core_foundation::base::TCFType;
