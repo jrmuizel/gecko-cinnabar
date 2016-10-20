@@ -6,20 +6,20 @@
 
 void main(void) {
 #ifdef WR_FEATURE_TRANSFORM
-    float alpha = 1;
+    float alpha = 1.f;
     vec2 local_pos = init_transform_fs(vLocalPos, vLocalRect, alpha);
 
     // We clamp the texture coordinate calculation here to the local rectangle boundaries,
     // which makes the edge of the texture stretch instead of repeat.
-    vec2 pos_for_texture =
-         clamp(pos, vLocalRect.xy, vLocalRect.xy + vLocalRect.zw) - vLocalRect.xy;
+    vec2 relative_pos_in_rect =
+         clamp(local_pos, vLocalRect.xy, vLocalRect.xy + vLocalRect.zw) - vLocalRect.xy;
 #else
-    float alpha = 1;
+    float alpha = 1.f;
     vec2 local_pos = vLocalPos;
     vec2 relative_pos_in_rect = vLocalPos - vLocalRect.xy;
 #endif
 
-    alpha = min(alpha, do_clip(local_pos, vClipRect, vClipRadius));
+    alpha = min(alpha, do_clip(local_pos));
 
     // We calculate the particular tile this fragment belongs to, taking into
     // account the spacing in between tiles. We only paint if our fragment does
