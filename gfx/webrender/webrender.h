@@ -33,6 +33,9 @@ wrstate* wr_create(uint32_t width, uint32_t height, uint32_t counter);
 void wr_destroy(wrstate* wrstate);
 WRImageKey wr_add_image(wrstate* wrstate, uint32_t width, uint32_t height,
                         WRImageFormat format, uint8_t *bytes, size_t size);
+void wr_update_image(wrstate* wrstate, WRImageKey key,
+                     uint32_t width, uint32_t height,
+                     WRImageFormat format, uint8_t *bytes, size_t size);
 void wr_delete_image(wrstate* wrstate, WRImageKey key);
 
 void wr_push_dl_builder(wrstate *wrState);
