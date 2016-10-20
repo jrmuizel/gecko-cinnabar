@@ -13,7 +13,7 @@ use gleam::gl;
 use std::ffi::{CStr, CString};
 use webrender_traits::{ServoStackingContextId};
 use webrender_traits::{Epoch, ColorF, FragmentType, GlyphInstance};
-use webrender_traits::{ImageFormat, ImageKey, ImageRendering};
+use webrender_traits::{ImageFormat, ImageKey, ImageRendering, RendererKind};
 use std::fs::File;
 use std::io::Read;
 use std::env;
@@ -178,6 +178,7 @@ pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut WrState {
         enable_recording: false,
         enable_scrollbars: false,
         precache_shaders: false,
+        renderer_kind: RendererKind::Native,
         debug: false,
     };
 
