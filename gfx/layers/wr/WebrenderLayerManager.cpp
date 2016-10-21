@@ -82,6 +82,10 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
     mWRState = wr_create(size.width, size.height, mCounter);
   }
 
+  if (gfxPrefs::LayersDump()) {
+    this->Dump();
+  }
+
   mWidget->PreRender(this);
   mGLContext->MakeCurrent();
   printf("WR Beginning\n");
