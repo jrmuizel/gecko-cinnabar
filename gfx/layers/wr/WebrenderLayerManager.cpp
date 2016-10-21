@@ -7,6 +7,7 @@
 
 #include "GLContext.h"
 #include "GLContextProvider.h"
+#include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
@@ -26,9 +27,12 @@ using namespace widget;
 namespace layers {
 
 WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
-                                             uint64_t aLayersId)
+                                             uint64_t aLayersId,
+                                             APZCTreeManager* aAPZC)
   : mWRState(nullptr)
   , mLayersId(aLayersId)
+  , mAPZC(aAPZC)
+  , mIsFirstPaint(false)
 {
   CompositorWidgetInitData initData;
   aWidget->GetCompositorWidgetInitData(&initData);
@@ -45,7 +49,10 @@ WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
 void
 WebRenderLayerManager::Destroy()
 {
-
+  if (mAPZC) {
+    mAPZC->ClearTree();
+    mAPZC = nullptr;
+  }
 }
 
 WebRenderLayerManager::~WebRenderLayerManager()
@@ -88,6 +95,9 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
                                       void* aCallbackData,
                                       EndTransactionFlags aFlags)
 {
+  if (mAPZC) {
+    mAPZC->UpdateHitTestingTree(mLayersId, GetRoot(), mIsFirstPaint, mLayersId, 0);
+  }
 
   DiscardImages();
 
