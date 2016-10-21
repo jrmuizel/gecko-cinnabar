@@ -1133,7 +1133,8 @@ CreateForWidget(Display* aXDisplay, Window aXWindow, bool aForceAccelerated)
     RefPtr<GLContextGLX> gl = GLContextGLX::CreateGLContext(CreateContextFlags::NONE,
                                                             caps, shareContext, false,
                                                             aXDisplay, aXWindow, config,
-                                                            false);
+                                                            //TODO: we might want to pass an additional bool to select GL core/compat
+                                                            false, nullptr, ContextProfile::OpenGLCore); //WR: required GL 3.2+
     return gl.forget();
 }
 
