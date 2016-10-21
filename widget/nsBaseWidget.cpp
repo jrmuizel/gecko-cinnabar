@@ -58,6 +58,7 @@
 #include "mozilla/layers/ChromeProcessController.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
+#include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/gfx/GPUProcessManager.h"
@@ -1002,7 +1003,11 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
 
   mRootContentController = CreateRootContentController();
   if (mRootContentController) {
-    mCompositorSession->SetContentController(mRootContentController);
+    if (mCompositorSession) {
+      mCompositorSession->SetContentController(mRootContentController);
+    } else {
+      CompositorBridgeParent::SetControllerForLayerTree(RootLayerTreeId(), mRootContentController.get());
+    }
   }
 
   // When APZ is enabled, we can actually enable raw touch events because we
@@ -1406,8 +1411,14 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
 
     if (!XRE_IsContentProcess()) {
       mRootLayerTreeId = Some(gfx::GPUProcessManager::Get()->AllocateLayerTreeId());
+      APZCTreeManager* apzc = nullptr;
+      if (gfxPlatform::AsyncPanZoomEnabled()) {
+        apzc = new APZCTreeManager();
+        mAPZC = apzc;
+        ConfigureAPZCTreeManager();
+      }
       WebRenderLayerManager* manager = new WebRenderLayerManager(this,
-        mRootLayerTreeId.value());
+        mRootLayerTreeId.value(), apzc);
       mCompositorWidgetDelegate = manager->GetCompositorWidgetDelegate();
       mLayerManager = manager;
     }

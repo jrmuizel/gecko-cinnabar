@@ -35,6 +35,7 @@ static inline WRRect toWrRect(gfx::Rect rect)
 
 
 class WebRenderLayerManager;
+class APZCTreeManager;
 
 class WebRenderLayer
 {
@@ -52,7 +53,8 @@ class WebRenderLayerManager final : public LayerManager, public CompositorContro
 {
 public:
   explicit WebRenderLayerManager(nsIWidget* aWidget,
-                                 uint64_t aLayersId);
+                                 uint64_t aLayersId,
+                                 APZCTreeManager* aAPZC);
 
   virtual void Destroy() override;
 
@@ -102,6 +104,8 @@ public:
   void AddImageKeyForDiscard(WRImageKey);
   void DiscardImages();
 
+  void SetIsFirstPaint() override { mIsFirstPaint = true; }
+
   // CompositorController
   NS_IMETHOD_(MozExternalRefCountType) AddRef() override { return LayerManager::AddRef(); }
   NS_IMETHOD_(MozExternalRefCountType) Release() override { return LayerManager::Release(); }
@@ -123,6 +127,8 @@ private:
 
   // APZ stuff
   uint64_t mLayersId;
+  RefPtr<APZCTreeManager> mAPZC;
+  bool mIsFirstPaint;
 };
 
 } // namespace layers

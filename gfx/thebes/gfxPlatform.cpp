@@ -2406,6 +2406,10 @@ gfxPlatform::AsyncPanZoomEnabled()
   // Firefox on Android) we only want to use APZ when E10S is enabled. If
   // we ever get input events off the main thread we can consider relaxing
   // this requirement.
+  // For webrender hacking we have a special pref to allow APZ even without e10s
+  if (gfxPrefs::APZAllowWithoutE10S()) {
+    return true;
+  }
   if (!BrowserTabsRemoteAutostart()) {
     return false;
   }

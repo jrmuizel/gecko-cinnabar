@@ -2004,9 +2004,13 @@ CompositorBridgeParent::SetControllerForLayerTree(uint64_t aLayersId,
 {
   // This ref is adopted by UpdateControllerForLayersId().
   aController->AddRef();
-  CompositorLoop()->PostTask(NewRunnableFunction(&UpdateControllerForLayersId,
-                                                 aLayersId,
-                                                 aController));
+  if (CompositorLoop()) {
+    CompositorLoop()->PostTask(NewRunnableFunction(&UpdateControllerForLayersId,
+                                                   aLayersId,
+                                                   aController));
+  } else {
+    UpdateControllerForLayersId(aLayersId, aController);
+  }
 }
 
 /*static*/ already_AddRefed<APZCTreeManager>
