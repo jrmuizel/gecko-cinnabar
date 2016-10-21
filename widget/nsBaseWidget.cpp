@@ -936,6 +936,12 @@ nsBaseWidget::ComputeShouldAccelerate()
          WidgetTypeSupportsAcceleration();
 }
 
+uint64_t
+nsBaseWidget::RootLayerTreeId()
+{
+  return mRootLayerTreeId ? mRootLayerTreeId.value() : mCompositorSession->RootLayerTreeId();
+}
+
 bool
 nsBaseWidget::UseAPZ()
 {
@@ -1042,7 +1048,7 @@ nsBaseWidget::UpdateZoomConstraints(const uint32_t& aPresShellId,
     }
     return;
   }
-  uint64_t layersId = mCompositorSession->RootLayerTreeId();
+  uint64_t layersId = RootLayerTreeId();
   mAPZC->UpdateZoomConstraints(ScrollableLayerGuid(layersId, aPresShellId, aViewId),
                                aConstraints);
 }
@@ -1067,7 +1073,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
   // event. If the event is instead targeted to an APZC in the child process,
   // the transform will be applied in the child process before dispatching
   // the event there (see e.g. TabChild::RecvRealTouchEvent()).
-  if (aGuid.mLayersId == mCompositorSession->RootLayerTreeId()) {
+  if (aGuid.mLayersId == RootLayerTreeId()) {
     APZCCallbackHelper::ApplyCallbackTransform(*aEvent, aGuid,
         GetDefaultScale());
   }
@@ -1403,6 +1409,7 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
     }
 
     if (!XRE_IsContentProcess()) {
+      mRootLayerTreeId = Some(gfx::GPUProcessManager::Get()->AllocateLayerTreeId());
       WebRenderLayerManager* manager = new WebRenderLayerManager(this);
       mCompositorWidgetDelegate = manager->GetCompositorWidgetDelegate();
       mLayerManager = manager;
@@ -1873,7 +1880,7 @@ nsBaseWidget::ZoomToRect(const uint32_t& aPresShellId,
   if (!mCompositorSession || !mAPZC) {
     return;
   }
-  uint64_t layerId = mCompositorSession->RootLayerTreeId();
+  uint64_t layerId = RootLayerTreeId();
   mAPZC->ZoomToRect(ScrollableLayerGuid(layerId, aPresShellId, aViewId), aRect, aFlags);
 }
 
@@ -1932,7 +1939,7 @@ nsBaseWidget::StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics)
 
   MOZ_ASSERT(XRE_IsParentProcess() && mCompositorSession);
 
-  int layersId = mCompositorSession->RootLayerTreeId();;
+  int layersId = RootLayerTreeId();
   ScrollableLayerGuid guid(layersId, aDragMetrics.mPresShellId, aDragMetrics.mViewId);
 
   APZThreadUtils::RunOnControllerThread(NewRunnableMethod
