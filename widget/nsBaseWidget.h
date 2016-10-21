@@ -643,6 +643,8 @@ protected:
 
   void FreeShutdownObserver();
 
+  uint64_t RootLayerTreeId();
+
   nsIWidgetListener* mWidgetListener;
   nsIWidgetListener* mAttachedWidgetListener;
   nsIWidgetListener* mPreviouslyAttachedWidgetListener;
@@ -650,6 +652,7 @@ protected:
   RefPtr<CompositorSession> mCompositorSession;
   RefPtr<CompositorBridgeChild> mCompositorBridgeChild;
   RefPtr<mozilla::CompositorVsyncDispatcher> mCompositorVsyncDispatcher;
+  mozilla::Maybe<uint64_t> mRootLayerTreeId;
   RefPtr<IAPZCTreeManager> mAPZC;
   RefPtr<GeckoContentController> mRootContentController;
   RefPtr<APZEventState> mAPZEventState;
