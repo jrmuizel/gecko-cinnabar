@@ -617,6 +617,7 @@ pref("layout.event-regions.enabled", false);
 // gfx/layers/apz/src/AsyncPanZoomController.cpp.
 pref("apz.allow_checkerboarding", true);
 pref("apz.allow_immediate_handoff", true);
+pref("apz.allow_without_e10s", false);
 pref("apz.allow_zooming", false);
 
 // Whether to lock touch scrolling to one axis at a time
