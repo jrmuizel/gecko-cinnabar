@@ -93,9 +93,11 @@ extern crate core_graphics;
 extern crate core_text;
 #[cfg(target_os="macos")]
 extern crate core_foundation;
-
 #[cfg(not(target_os="macos"))]
 extern crate freetype;
+
+#[cfg(target_os="windows")]
+extern crate kernel32;
 
 extern crate app_units;
 extern crate bincode;
