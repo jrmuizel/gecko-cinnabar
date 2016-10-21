@@ -82,6 +82,10 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
     mWRState = wr_create(size.width, size.height, mCounter);
   }
 
+  if (gfxPrefs::LayersDump()) {
+    this->Dump();
+  }
+
   mozilla::widget::WidgetRenderingContext widgetContext;
 #if defined(XP_MACOSX)
   widgetContext.mLayerManager = this;
