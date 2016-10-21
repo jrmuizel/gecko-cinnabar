@@ -7,7 +7,7 @@
 
 #include "LayersLogging.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
-#include "webrender.h"
+#include "bindings.h"
 
 namespace mozilla {
 namespace layers {

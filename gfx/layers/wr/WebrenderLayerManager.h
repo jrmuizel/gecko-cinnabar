@@ -8,7 +8,7 @@
 
 #include "Layers.h"
 #include "mozilla/layers/CompositorController.h"
-#include "webrender.h"
+#include "bindings.h"
 
 class nsIWidget;
 

@@ -8,7 +8,7 @@
 
 #include "chrome/common/ipc_message_utils.h"
 #include "mozilla/Maybe.h"
-#include "webrender.h"
+#include "bindings.h"
 
 typedef mozilla::Maybe<WRImageMask> MaybeImageMask;
 
