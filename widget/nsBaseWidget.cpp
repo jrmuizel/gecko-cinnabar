@@ -183,8 +183,6 @@ nsBaseWidget::nsBaseWidget()
 , mAccessibilityInUseFlag(false)
 #endif
 {
-  static uint32_t counter = 0;
-  mWidgetIndex = counter++;
 #ifdef NOISY_WIDGET_LEAKS
   gNumWidgets++;
   printf("WIDGETS+ = %d\n", gNumWidgets);
