@@ -1,41 +1,128 @@
 use std::path::PathBuf;
-use webrender_traits::{PipelineId, RenderApi, DisplayListBuilder};
-use webrender_traits::{AuxiliaryListsBuilder, StackingContextId, DisplayListId};
+use webrender_traits::{PipelineId, AuxiliaryListsBuilder, StackingContextId, DisplayListId};
 use renderer::{Renderer, RendererOptions};
 extern crate webrender_traits;
 
 
 //extern crate glutin;
 
-use app_units::Au;
 use euclid::{Size2D, Point2D, Rect, Matrix4D};
 use gleam::gl;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use webrender_traits::{ServoStackingContextId};
-use webrender_traits::{Epoch, ColorF, FragmentType, GlyphInstance};
+use webrender_traits::{Epoch, ColorF, FragmentType};
 use webrender_traits::{ImageFormat, ImageKey, ImageRendering, RendererKind};
-use std::fs::File;
-use std::io::Read;
-use std::env;
 use std::mem;
-use std::str::FromStr;
 use std::slice;
 
 #[cfg(target_os = "linux")]
-mod dlopen {
+mod linux {
+    use std::mem;
     use std::os::raw::{c_void, c_char, c_int};
+    use std::ffi::CString;
 
-    pub const RTLD_LAZY: c_int = 0x001;
+    //pub const RTLD_LAZY: c_int = 0x001;
     pub const RTLD_NOW: c_int = 0x002;
 
     #[link="dl"]
     extern {
-        pub fn dlopen(filename: *const c_char, flag: c_int) -> *mut c_void;
-        pub fn dlerror() -> *mut c_char;
-        pub fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-        pub fn dlclose(handle: *mut c_void) -> c_int;
+        fn dlopen(filename: *const c_char, flag: c_int) -> *mut c_void;
+        //fn dlerror() -> *mut c_char;
+        fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+        fn dlclose(handle: *mut c_void) -> c_int;
+    }
+
+    pub struct Library {
+        handle: *mut c_void,
+        load_fun: extern "system" fn(*const u8) -> *const c_void,
+    }
+
+    impl Drop for Library {
+        fn drop(&mut self) {
+            unsafe { dlclose(self.handle) };
+        }
+    }
+
+    impl Library {
+        pub fn new() -> Library {
+            let mut libglx = unsafe { dlopen(b"libGL.so.1\0".as_ptr() as *const _, RTLD_NOW) };
+            if libglx.is_null() {
+                libglx = unsafe { dlopen(b"libGL.so\0".as_ptr() as *const _, RTLD_NOW) };
+            }
+            let fun = unsafe { dlsym(libglx, b"glXGetProcAddress\0".as_ptr() as *const _) };
+            Library {
+                handle: libglx,
+                load_fun: unsafe { mem::transmute(fun) },
+            }
+        }
+        pub fn query(&self, name: &str) -> *const c_void {
+            let string = CString::new(name).unwrap();
+            let address = (self.load_fun)(string.as_ptr() as *const _);
+            address as *const _
+        }
     }
 }
+
+#[cfg(target_os="macos")]
+mod macos {
+    use std::str::FromStr;
+    use std::os::raw::c_void;
+    use core_foundation::base::TCFType;
+    use core_foundation::string::CFString;
+    use core_foundation::bundle::{CFBundleRef, CFBundleGetBundleWithIdentifier, CFBundleGetFunctionPointerForName};
+
+    pub struct Library(CFBundleRef);
+
+    impl Library {
+        pub fn new() -> Library {
+            let framework_name: CFString = FromStr::from_str("com.apple.opengl").unwrap();
+            let framework = unsafe {
+                CFBundleGetBundleWithIdentifier(framework_name.as_concrete_TypeRef())
+            };
+            Library(framework)
+        }
+        pub fn query(&self, name: &str) -> *const c_void {
+            let symbol_name: CFString = FromStr::from_str(name).unwrap();
+            let symbol = unsafe {
+                CFBundleGetFunctionPointerForName(self.0, symbol_name.as_concrete_TypeRef())
+            };
+            symbol as *const _
+        }
+    }
+}
+
+#[cfg(target_os="windows")]
+mod win {
+    use winapi;
+    use kernel32;
+    use std::ffi::CString;
+
+    pub struct Library(winapi::HMODULE);
+
+    impl Library {
+        pub fn new() -> Library {
+            let lib = unsafe {
+                kernel32::LoadLibraryA(b"opengl32.dll\0".as_ptr() as *const _);
+            };
+            if lib.is_null() {
+                println!("Opengl Library is null");
+            }
+            Library(lib)
+        }
+        pub fn query(&self, name: &str) -> *const c_void {
+            let symbol_name = CString::new(addr).unwrap();
+            let symbol = kernel32::GetProcAddress(lib, symbol_name.as_ptr()) as *const _;
+            symbol as *const _
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+use self::linux::Library as GlLibrary;
+#[cfg(target_os = "macos")]
+use self::macos::Library as GlLibrary;
+#[cfg(target_os = "windows")]
+use self::win::Library as GlLibrary;
 
 /*
 struct Notifier {
@@ -114,76 +201,32 @@ impl webrender_traits::RenderNotifier for Notifier {
     }
 }*/
 pub struct WrState {
-        size: (u32, u32),
-        pipeline_id: PipelineId,
-        renderer: Renderer,
-        z_index: i32,
-        api: webrender_traits::RenderApi,
-        frame_builder: WebRenderFrameBuilder,
-        dl_builder: Vec<DisplayListBuilder>,
-}
-
-#[cfg(target_os="windows")]
-fn get_proc_address(addr: &str) -> *const () {
-    use kernel32;
-
-    let lib_name = CString::new("opengl32.dll").unwrap();
-    let symbol_name = CString::new(addr).unwrap();
-    unsafe {
-        let lib = kernel32::LoadLibraryA(lib_name.as_ptr());
-        if lib.is_null() {
-            println!("Opengl Library is null");
-        }
-
-        return kernel32::GetProcAddress(lib, symbol_name.as_ptr()) as *const();
-    };
-}
-
-#[cfg(target_os="macos")]
-fn get_proc_address(addr: &str) -> *const () {
-    use core_foundation::base::TCFType;
-    use core_foundation::string::CFString;
-    use core_foundation::bundle::{CFBundleGetBundleWithIdentifier, CFBundleGetFunctionPointerForName};
-
-    let symbol_name: CFString = FromStr::from_str(addr).unwrap();
-    let framework_name: CFString = FromStr::from_str("com.apple.opengl").unwrap();
-    let framework = unsafe {
-        CFBundleGetBundleWithIdentifier(framework_name.as_concrete_TypeRef())
-    };
-    let symbol = unsafe {
-        CFBundleGetFunctionPointerForName(framework, symbol_name.as_concrete_TypeRef())
-    };
-    symbol as *const _
-}
-
-#[cfg(target_os="linux")]
-fn get_proc_address(addr: &str) -> *const () {
-    //TODO: cache this
-    let mut libglx = unsafe { dlopen::dlopen(b"libGL.so.1\0".as_ptr() as *const _, dlopen::RTLD_NOW) };
-    if libglx.is_null() {
-        libglx = unsafe { dlopen::dlopen(b"libGL.so\0".as_ptr() as *const _, dlopen::RTLD_NOW) };
-    }
-
-    let sym = CString::new(addr).unwrap();
-    unsafe { dlopen::dlsym(libglx, sym.as_ptr()) as *const () }
+    size: (u32, u32),
+    pipeline_id: PipelineId,
+    renderer: Renderer,
+    z_index: i32,
+    api: webrender_traits::RenderApi,
+    _gl_library: GlLibrary,
+    frame_builder: WebRenderFrameBuilder,
+    dl_builder: Vec<webrender_traits::DisplayListBuilder>,
 }
  
 #[no_mangle]
 pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut WrState {
-  println!("Test");
-  // hack to find the directory for the shaders
-  let res_path = concat!(env!("CARGO_MANIFEST_DIR"),"/res");
+    // hack to find the directory for the shaders
+    let res_path = concat!(env!("CARGO_MANIFEST_DIR"),"/res");
 
-  gl::load_with(|symbol| get_proc_address(symbol) as *const _); 
-  gl::clear_color(0.3, 0.0, 0.0, 1.0);
+    let library = GlLibrary::new();
+    gl::load_with(|symbol| library.query(symbol));
+    gl::clear_color(0.3, 0.0, 0.0, 1.0);
 
-  let version = unsafe {
-    let data = CStr::from_ptr(gl::GetString(gl::VERSION) as *const _).to_bytes().to_vec();
-    String::from_utf8(data).unwrap()
-  };  
+    let version = unsafe {
+        let data = CStr::from_ptr(gl::GetString(gl::VERSION) as *const _).to_bytes().to_vec();
+        String::from_utf8(data).unwrap()
+    };
 
-  println!("OpenGL version new {}", version);
-  println!("Shader resource path: {}", res_path);
+    println!("OpenGL version new {}", version);
+    println!("Shader resource path: {}", res_path);
 
     let opts = RendererOptions {
         device_pixel_ratio: 1.0,
@@ -198,8 +241,8 @@ pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut WrState {
         debug: false,
     };
 
-    let (mut renderer, sender) = Renderer::new(opts);
-    let mut api = sender.create_api();
+    let (renderer, sender) = Renderer::new(opts);
+    let api = sender.create_api();
 
 //     let font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
 //     let font_bytes = load_file(font_path);
@@ -212,17 +255,18 @@ pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut WrState {
 
     let builder = WebRenderFrameBuilder::new(pipeline_id);
 
-  let mut state = Box::new(WrState {
-    size: (width, height),
-    pipeline_id: pipeline_id,
-    renderer: renderer,
-    z_index: 0,
-    api: api,
-    frame_builder: builder,
-    dl_builder: Vec::new(),
-  });
+    let state = Box::new(WrState {
+        size: (width, height),
+        pipeline_id: pipeline_id,
+        renderer: renderer,
+        z_index: 0,
+        api: api,
+        _gl_library: library,
+        frame_builder: builder,
+        dl_builder: Vec::new(),
+    });
 
-  Box::into_raw(state)
+    Box::into_raw(state)
 }
 
 #[no_mangle]
@@ -372,7 +416,7 @@ pub extern fn wr_dp_push_image(state:&mut WrState, bounds: WrRect, clip : WrRect
     if state.dl_builder.len() == 0 {
       return;
     }
-    let (width, height) = state.size;
+    //let (width, height) = state.size;
     let bounds = bounds.to_rect();
     let clip = clip.to_rect();
     let clip_region = webrender_traits::ClipRegion::new(&clip,

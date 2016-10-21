@@ -35,7 +35,8 @@ core-text = "2.0"
 core-foundation = "0.2.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-kernel32-sys = "0.2.2"
+kernel32-sys = "0.2"
+winapi = "0.2"
 
 [lib]
 name = "webrender"
