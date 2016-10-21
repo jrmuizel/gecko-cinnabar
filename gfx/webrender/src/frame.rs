@@ -11,11 +11,12 @@ use internal_types::{CompositionOp};
 use internal_types::{LowLevelFilterOp};
 use internal_types::{RendererFrame};
 use layer::{Layer, ScrollingState};
+use prim_store::Clip;
 use resource_cache::ResourceCache;
 use scene::{SceneStackingContext, ScenePipeline, Scene, SceneItem, SpecificSceneItem};
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
-use tiling::{Clip, FrameBuilder, FrameBuilderConfig, InsideTest, PrimitiveFlags};
+use tiling::{FrameBuilder, FrameBuilderConfig, InsideTest, PrimitiveFlags};
 use util::MatrixHelpers;
 use webrender_traits::{AuxiliaryLists, PipelineId, Epoch, ScrollPolicy, ScrollLayerId};
 use webrender_traits::{ColorF, StackingContext, FilterOp, MixBlendMode};
@@ -632,7 +633,7 @@ impl Frame {
                         (ScrollPolicy::Scrollable, Some(inner_scroll_layer_id)) => {
                             debug_assert!(!self.layers.contains_key(&inner_scroll_layer_id));
 
-                            let layer = Layer::new(&Rect::new(Point2D::zero(), stacking_context.bounds.size),
+                            let layer = Layer::new(&inner_stacking_context.bounds,
                                                    inner_stacking_context.overflow.size,
                                                    &transform,
                                                    parent_info.pipeline_id,
