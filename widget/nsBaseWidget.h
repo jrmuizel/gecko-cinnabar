@@ -657,7 +657,6 @@ protected:
   nsPopupLevel      mPopupLevel;
   nsPopupType       mPopupType;
   SizeConstraints   mSizeConstraints;
-  uint32_t          mWidgetIndex;
 
   CompositorWidgetDelegate* mCompositorWidgetDelegate;
 
