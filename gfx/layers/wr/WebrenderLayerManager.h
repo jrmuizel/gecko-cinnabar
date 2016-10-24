@@ -69,6 +69,7 @@ public:
   virtual void EndTransaction(DrawPaintedLayerCallback aCallback,
                               void* aCallbackData,
                               EndTransactionFlags aFlags = END_DEFAULT) override;
+  virtual void Composite() override;
 
   virtual LayersBackend GetBackendType() override { return LayersBackend::LAYERS_WR; }
   virtual void GetBackendName(nsAString& name) override { name.AssignLiteral("WebRender"); }
@@ -94,9 +95,10 @@ public:
   void* GetPaintedLayerCallbackData() const
   { return mPaintedLayerCallbackData; }
 
-  // adds an imagekey to a list of keys that will be discarded at the end of
-  // the frame
+  // adds an imagekey to a list of keys that will be discarded on the next
+  // transaction or destruction
   void AddImageKeyForDiscard(WRImageKey);
+  void DiscardImages();
 
 private:
   RefPtr<widget::CompositorWidget> mWidget;
