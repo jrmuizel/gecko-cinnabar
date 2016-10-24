@@ -399,7 +399,10 @@ if CONFIG['OS_ARCH'] == 'Linux':
         'EGL',
     ]
 
-OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/webrender/target/release -lwebrender"]
+if CONFIG['OS_ARCH'] == 'WINNT':
+  OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/webrender/target/release webrender"]
+else:
+  OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/webrender/target/release -lwebrender"]
 
 # This library needs to be last to make XPCOM module registration work.
 

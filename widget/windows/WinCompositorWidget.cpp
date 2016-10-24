@@ -44,7 +44,7 @@ WinCompositorWidget::OnDestroyWindow()
 }
 
 bool
-WinCompositorWidget::PreRender(layers::LayerManagerComposite* aManager)
+WinCompositorWidget::PreRender(layers::LayerManager* aManager)
 {
   // This can block waiting for WM_SETTEXT to finish
   // Using PreRender is unnecessarily pessimistic because
@@ -55,7 +55,7 @@ WinCompositorWidget::PreRender(layers::LayerManagerComposite* aManager)
 }
 
 void
-WinCompositorWidget::PostRender(layers::LayerManagerComposite* aManager)
+WinCompositorWidget::PostRender(layers::LayerManager* aManager)
 {
   mPresentLock.Leave();
 }
