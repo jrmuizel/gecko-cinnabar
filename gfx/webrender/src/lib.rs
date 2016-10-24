@@ -100,6 +100,7 @@ extern crate freetype;
 
 #[cfg(target_os="windows")]
 extern crate kernel32;
+extern crate winapi;
 
 extern crate app_units;
 extern crate bincode;
