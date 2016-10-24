@@ -260,6 +260,12 @@ impl RenderBackend {
 
                             self.publish_frame_and_notify_compositor(frame, &mut profile_counters);
                         }
+                        ApiMsg::GenerateFrame => {
+                            let frame = profile_counters.total_time.profile(|| {
+                                self.render()
+                            });
+                            self.publish_frame_and_notify_compositor(frame, &mut profile_counters);
+                        }
                         ApiMsg::TranslatePointToLayerSpace(..) => {
                             panic!("unused api - remove from webrender_traits");
                         }

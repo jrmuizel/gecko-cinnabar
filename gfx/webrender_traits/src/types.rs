@@ -52,6 +52,7 @@ pub enum ApiMsg {
     SetRootPipeline(PipelineId),
     Scroll(Point2D<f32>, Point2D<f32>, ScrollEventPhase),
     TickScrollingBounce,
+    GenerateFrame,
     TranslatePointToLayerSpace(Point2D<f32>, IpcSender<(Point2D<f32>, PipelineId)>),
     GetScrollLayerState(IpcSender<Vec<ScrollLayerState>>),
     RequestWebGLContext(Size2D<i32>, GLContextAttributes, IpcSender<Result<(WebGLContextId, GLLimits), String>>),

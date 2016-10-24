@@ -205,6 +205,11 @@ impl RenderApi {
         self.api_sender.send(msg).unwrap();
     }
 
+    pub fn generate_frame(&self) {
+        let msg = ApiMsg::GenerateFrame;
+        self.api_sender.send(msg).unwrap();
+    }
+
     /// Translates a point from viewport coordinates to layer space
     pub fn translate_point_to_layer_space(&self, point: &Point2D<f32>)
                                           -> (Point2D<f32>, PipelineId) {
