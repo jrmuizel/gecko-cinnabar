@@ -96,22 +96,29 @@ mod win {
     use winapi;
     use kernel32;
     use std::ffi::CString;
+    use std::os::raw::c_void;
 
+    // This is a tuple struct
     pub struct Library(winapi::HMODULE);
 
+    // TODO: Maybe switch this out with crate libloading for a safer alternative
     impl Library {
         pub fn new() -> Library {
             let lib = unsafe {
-                kernel32::LoadLibraryA(b"opengl32.dll\0".as_ptr() as *const _);
+                kernel32::LoadLibraryA(b"opengl32.dll\0".as_ptr() as *const _)
             };
+
             if lib.is_null() {
-                println!("Opengl Library is null");
+                println!("Could not load opengl32 library");
             }
+
             Library(lib)
         }
         pub fn query(&self, name: &str) -> *const c_void {
-            let symbol_name = CString::new(addr).unwrap();
-            let symbol = kernel32::GetProcAddress(lib, symbol_name.as_ptr()) as *const _;
+            let symbol_name = CString::new(name).unwrap();
+            let symbol = unsafe {
+                kernel32::GetProcAddress(self.0, symbol_name.as_ptr())
+            };
             symbol as *const _
         }
     }
