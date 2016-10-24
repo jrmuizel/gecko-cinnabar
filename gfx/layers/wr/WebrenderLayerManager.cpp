@@ -40,7 +40,7 @@ WebRenderLayerManager::Destroy()
 
 WebRenderLayerManager::~WebRenderLayerManager()
 {
-
+  DiscardImages();
 }
 
 widget::CompositorWidgetDelegate*
@@ -79,6 +79,8 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
                                       EndTransactionFlags aFlags)
 {
 
+  DiscardImages();
+
   mPaintedLayerCallback = aCallback;
   mPaintedLayerCallbackData = aCallbackData;
 
@@ -105,19 +107,35 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   mGLContext->SwapBuffers();
   mWidget->PostRender(this);
 
-  for (auto key : mImageKeys) {
-      wr_delete_image(mWRState, key);
-  }
-  mImageKeys.clear();
-
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
+}
+
+void
+WebRenderLayerManager::Composite()
+{
+  if (!mWRState) {
+    return;
+  }
+  printf("WR Compositing\n");
+  mGLContext->MakeCurrent();
+  wr_composite(mWRState);
+  mGLContext->SwapBuffers();
 }
 
 void
 WebRenderLayerManager::AddImageKeyForDiscard(WRImageKey key)
 {
   mImageKeys.push_back(key);
+}
+
+void
+WebRenderLayerManager::DiscardImages()
+{
+  for (auto key : mImageKeys) {
+      wr_delete_image(mWRState, key);
+  }
+  mImageKeys.clear();
 }
 
 void

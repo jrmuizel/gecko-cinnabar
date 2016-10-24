@@ -370,6 +370,15 @@ pub extern fn wr_dp_end(state:&mut WrState) {
 }
 
 #[no_mangle]
+pub extern fn wr_composite(state: &mut WrState) {
+    state.api.generate_frame();
+
+    state.renderer.update();
+    let (width, height) = state.size;
+    state.renderer.render(Size2D::new(width, height));
+}
+
+#[no_mangle]
 pub extern fn wr_add_image(state:&mut WrState, width: u32, height: u32, format: ImageFormat, bytes: * const u8, size: usize) -> ImageKey {
     let bytes = unsafe { slice::from_raw_parts(bytes, size).to_owned() };
     state.api.add_image(width, height, format, bytes)
