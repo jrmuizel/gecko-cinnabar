@@ -396,6 +396,9 @@ if CONFIG['OS_ARCH'] == 'Linux':
 
 if CONFIG['OS_ARCH'] == 'WINNT':
   OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/webrender/target/release webrender"]
+  OS_LIBS += [
+    'opengl32',
+  ]
 else:
   OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/webrender/target/release -lwebrender"]
 
