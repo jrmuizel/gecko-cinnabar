@@ -18,6 +18,7 @@ class GLContext;
 }
 namespace widget {
 class CompositorWidget;
+class CompositorWidgetDelegate;
 }
 namespace layers {
 
@@ -84,6 +85,8 @@ public:
   virtual already_AddRefed<RefLayer> CreateRefLayer() override;
 
   virtual bool NeedsWidgetInvalidation() override { return true; }
+
+  widget::CompositorWidgetDelegate* GetCompositorWidgetDelegate();
 
   DrawPaintedLayerCallback GetPaintedLayerCallback() const
   { return mPaintedLayerCallback; }
