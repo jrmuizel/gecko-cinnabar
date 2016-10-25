@@ -1388,7 +1388,9 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
     }
 
     if (!XRE_IsContentProcess()) {
-      mLayerManager = new WebRenderLayerManager(this);
+      WebRenderLayerManager* manager = new WebRenderLayerManager(this);
+      mCompositorWidgetDelegate = manager->GetCompositorWidgetDelegate();
+      mLayerManager = manager;
     }
 
     // Try to use an async compositor first, if possible
