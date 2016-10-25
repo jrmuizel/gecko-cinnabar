@@ -4528,6 +4528,12 @@ pref("network.tcp.keepalive.retry_interval", 1); // seconds
 pref("network.tcp.keepalive.probe_count", 4);
 #endif
 
+// disable e10s for now
+// TODO: fix WebRender + e10s!
+pref("browser.tabs.remote.autostart", false);
+pref("browser.tabs.remote.autostart.1", false);
+pref("browser.tabs.remote.autostart.2", false);
+
 // Whether to disable acceleration for all widgets.
 pref("layers.acceleration.disabled", false);
 // Preference that when switched at runtime will run a series of benchmarks
