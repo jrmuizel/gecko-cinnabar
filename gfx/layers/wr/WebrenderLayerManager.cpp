@@ -43,6 +43,12 @@ WebRenderLayerManager::~WebRenderLayerManager()
 
 }
 
+widget::CompositorWidgetDelegate*
+WebRenderLayerManager::GetCompositorWidgetDelegate()
+{
+  return mWidget->AsDelegate();
+}
+
 int32_t
 WebRenderLayerManager::GetMaxTextureSize() const
 {
@@ -88,7 +94,7 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
 
   mWidget->PreRender(this);
   mGLContext->MakeCurrent();
-  printf("WR Beginning\n");
+  printf("WR Beginning size %i %i\n", size.width, size.height);
   wr_dp_begin(mWRState, size.width, size.height);
 
   WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer(mWRState);
