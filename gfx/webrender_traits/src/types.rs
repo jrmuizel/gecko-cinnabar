@@ -173,9 +173,17 @@ pub struct ColorF {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ImageMask {
+    pub image: ImageKey,
+    pub rect: Rect<f32>,
+    pub repeat: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ClipRegion {
     pub main: Rect<f32>,
     pub complex: ItemRange,
+    pub image_mask: Option<ImageMask>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -397,13 +405,13 @@ pub struct ScrollLayerId {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum ScrollLayerInfo {
     Fixed,
-    Scrollable(usize)
+    Scrollable(usize, ServoScrollRootId)
 }
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct ScrollLayerState {
     pub pipeline_id: PipelineId,
-    pub stacking_context_id: ServoStackingContextId,
+    pub scroll_root_id: ServoScrollRootId,
     pub scroll_offset: Point2D<f32>,
 }
 
@@ -414,7 +422,7 @@ pub enum ScrollPolicy {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub struct ServoStackingContextId(pub FragmentType, pub usize);
+pub struct ServoScrollRootId(pub usize);
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum SpecificDisplayItem {
@@ -436,7 +444,6 @@ pub enum SpecificDisplayListItem {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct StackingContext {
-    pub servo_id: ServoStackingContextId,
     pub scroll_layer_id: Option<ScrollLayerId>,
     pub scroll_policy: ScrollPolicy,
     pub bounds: Rect<f32>,

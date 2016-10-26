@@ -5,7 +5,8 @@
 use display_list::AuxiliaryListsBuilder;
 use euclid::{Rect, Size2D};
 use {BorderRadius, BorderDisplayItem, ClipRegion, ColorF, ComplexClipRegion};
-use {FontKey, ImageKey, PipelineId, ScrollLayerId, ScrollLayerInfo};
+use {FontKey, ImageKey, PipelineId, ScrollLayerId, ScrollLayerInfo, ServoScrollRootId};
+use {ImageMask};
 
 impl BorderDisplayItem {
     pub fn top_left_inner_radius(&self) -> Size2D<f32> {
@@ -52,11 +53,13 @@ impl BorderRadius {
 impl ClipRegion {
     pub fn new(rect: &Rect<f32>,
                complex: Vec<ComplexClipRegion>,
+               image_mask: Option<ImageMask>,
                auxiliary_lists_builder: &mut AuxiliaryListsBuilder)
                -> ClipRegion {
         ClipRegion {
             main: *rect,
             complex: auxiliary_lists_builder.add_complex_clip_regions(&complex),
+            image_mask: image_mask,
         }
     }
 }
@@ -103,10 +106,13 @@ impl ImageKey {
 }
 
 impl ScrollLayerId {
-    pub fn new(pipeline_id: PipelineId, index: usize) -> ScrollLayerId {
+    pub fn new(pipeline_id: PipelineId,
+               index: usize,
+               scroll_root_id: ServoScrollRootId)
+               -> ScrollLayerId {
         ScrollLayerId {
             pipeline_id: pipeline_id,
-            info: ScrollLayerInfo::Scrollable(index),
+            info: ScrollLayerInfo::Scrollable(index, scroll_root_id),
         }
     }
 

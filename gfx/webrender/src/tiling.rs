@@ -9,12 +9,12 @@ use euclid::{Point2D, Point4D, Rect, Matrix4D, Size2D};
 use fnv::FnvHasher;
 use frame::FrameId;
 use gpu_store::GpuStoreAddress;
-use internal_types::{DevicePixel, CompositionOp};
+use internal_types::{DeviceRect, DevicePoint, DeviceSize, DeviceLength, device_pixel, CompositionOp};
 use internal_types::{ANGLE_FLOAT_TO_FIXED, LowLevelFilterOp};
 use layer::Layer;
 use prim_store::{PrimitiveGeometry, RectanglePrimitive, PrimitiveContainer};
 use prim_store::{BorderPrimitiveCpu, BorderPrimitiveGpu, BoxShadowPrimitive};
-use prim_store::{Clip, ImagePrimitiveCpu, ImagePrimitiveKind};
+use prim_store::{ClipInfo, ImagePrimitiveCpu, ImagePrimitiveKind};
 use prim_store::{PrimitiveKind, PrimitiveIndex, PrimitiveMetadata};
 use prim_store::{GradientPrimitiveCpu, GradientPrimitiveGpu, GradientType};
 use prim_store::{TextRunPrimitiveGpu, TextRunPrimitiveCpu};
@@ -32,19 +32,17 @@ use std::usize;
 use texture_cache::TexturePage;
 use util::{self, rect_from_points, MatrixHelpers, rect_from_points_f};
 use util::{TransformedRect, TransformedRectKind, subtract_rect, pack_as_float};
-use webrender_traits::{ColorF, FontKey, ImageKey, ImageRendering, ComplexClipRegion};
+use webrender_traits::{ColorF, FontKey, ImageKey, ImageRendering, ComplexClipRegion, MixBlendMode};
 use webrender_traits::{BorderDisplayItem, BorderStyle, ItemRange, AuxiliaryLists, BorderSide};
 use webrender_traits::{BoxShadowClipMode, PipelineId, ScrollLayerId, WebGLContextId};
 
-const ALPHA_BATCHERS_PER_RENDER_TARGET: usize = 4;
-const MIN_TASKS_PER_ALPHA_BATCHER: usize = 64;
 const FLOATS_PER_RENDER_TASK_INFO: usize = 8;
 
 trait AlphaBatchHelpers {
-    fn get_batch_info(&self, metadata: &PrimitiveMetadata) -> (AlphaBatchKind, TextureId);
+    fn get_batch_info(&self, metadata: &PrimitiveMetadata) -> (AlphaBatchKind, TextureId, TextureId);
     fn prim_affects_tile(&self,
                          prim_index: PrimitiveIndex,
-                         tile_rect: &Rect<DevicePixel>,
+                         tile_rect: &DeviceRect,
                          transform: &Matrix4D<f32>,
                          device_pixel_ratio: f32) -> bool;
     fn add_prim_to_batch(&self,
@@ -57,7 +55,7 @@ trait AlphaBatchHelpers {
 }
 
 impl AlphaBatchHelpers for PrimitiveStore {
-    fn get_batch_info(&self, metadata: &PrimitiveMetadata) -> (AlphaBatchKind, TextureId) {
+    fn get_batch_info(&self, metadata: &PrimitiveMetadata) -> (AlphaBatchKind, TextureId, TextureId) {
         let batch_kind = match metadata.prim_kind {
             PrimitiveKind::Border => AlphaBatchKind::Border,
             PrimitiveKind::BoxShadow => AlphaBatchKind::BoxShadow,
@@ -77,13 +75,13 @@ impl AlphaBatchHelpers for PrimitiveStore {
             }
         };
 
-        (batch_kind, metadata.color_texture_id)
+        (batch_kind, metadata.color_texture_id, metadata.mask_texture_id)
     }
 
     // Optional narrow phase intersection test, depending on primitive type.
     fn prim_affects_tile(&self,
                          prim_index: PrimitiveIndex,
-                         tile_rect: &Rect<DevicePixel>,
+                         tile_rect: &DeviceRect,
                          transform: &Matrix4D<f32>,
                          device_pixel_ratio: f32) -> bool {
         let metadata = self.get_metadata(prim_index);
@@ -236,6 +234,9 @@ pub enum PrimitiveFlags {
 }
 
 #[derive(Debug, Copy, Clone)]
+struct RenderTargetIndex(usize);
+
+#[derive(Debug, Copy, Clone)]
 struct RenderTaskIndex(usize);
 
 #[derive(Debug, Copy, Clone)]
@@ -353,11 +354,12 @@ impl AlphaBatcher {
                         let flags = AlphaBatchKeyFlags::new(transform_kind,
                                                             needs_blending,
                                                             needs_clipping);
-                        let (batch_kind, color_texture_id) = ctx.prim_store
-                                                                .get_batch_info(prim_metadata);
+                        let (batch_kind, color_texture_id, mask_texture_id) = ctx.prim_store
+                                                                                 .get_batch_info(prim_metadata);
                         batch_key = AlphaBatchKey::primitive(batch_kind,
                                                              flags,
-                                                             color_texture_id);
+                                                             color_texture_id,
+                                                             mask_texture_id);
                     }
                 }
 
@@ -377,13 +379,14 @@ impl AlphaBatcher {
                         AlphaRenderItem::Primitive(_, prim_index) => {
                             // See if this task fits into the tile UBO
                             let prim_metadata = ctx.prim_store.get_metadata(prim_index);
-                            let (batch_kind, color_texture_id) = ctx.prim_store
-                                                                    .get_batch_info(prim_metadata);
+                            let (batch_kind, color_texture_id, mask_texture_id) = ctx.prim_store
+                                                                                     .get_batch_info(prim_metadata);
                             PrimitiveBatch::new(batch_kind,
                                                 batch_key.flags.transform_kind(),
                                                 batch_key.flags.needs_blending(),
                                                 batch_key.flags.needs_clipping(),
-                                                color_texture_id)
+                                                color_texture_id,
+                                                mask_texture_id)
                         }
                     };
                     batches.push((batch_key, new_batch))
@@ -399,14 +402,9 @@ impl AlphaBatcher {
                         debug_assert!(ok)
                     }
                     AlphaRenderItem::Blend(src_id, info) => {
-                        let (opacity, brightness) = match info {
-                            SimpleCompositeInfo::Opacity(opacity) => (opacity, 1.0),
-                            SimpleCompositeInfo::Brightness(brightness) => (1.0, brightness),
-                        };
                         let ok = batch.pack_blend(render_tasks.get_task_index(&src_id),
                                                   render_tasks.get_task_index(&task.task_id),
-                                                  opacity,
-                                                  brightness);
+                                                  info);
                         debug_assert!(ok)
                     }
                     AlphaRenderItem::Primitive(sc_index, prim_index) => {
@@ -432,21 +430,48 @@ struct RenderTargetContext<'a> {
 }
 
 pub struct RenderTarget {
-    pub is_framebuffer: bool,
+    pub alpha_batcher: AlphaBatcher,
     page_allocator: TexturePage,
-    tasks: Vec<RenderTask>,
-
-    pub alpha_batchers: Vec<AlphaBatcher>,
 }
 
 impl RenderTarget {
-    fn new(is_framebuffer: bool) -> RenderTarget {
+    fn new() -> RenderTarget {
         RenderTarget {
-            is_framebuffer: is_framebuffer,
-            page_allocator: TexturePage::new(TextureId(0), RENDERABLE_CACHE_SIZE.0 as u32),
-            tasks: Vec::new(),
+            alpha_batcher: AlphaBatcher::new(),
+            page_allocator: TexturePage::new(TextureId::invalid(), RENDERABLE_CACHE_SIZE as u32),
+        }
+    }
 
-            alpha_batchers: Vec::new(),
+    fn build(&mut self,
+             ctx: &RenderTargetContext,
+             render_tasks: &mut RenderTaskCollection) {
+        self.alpha_batcher.build(ctx, render_tasks);
+    }
+
+    fn add_task(&mut self, task: RenderTask) {
+        match task.kind {
+            RenderTaskKind::Alpha(info) => {
+                self.alpha_batcher.add_task(AlphaBatchTask {
+                    task_id: task.id,
+                    items: info.items,
+                });
+            }
+        }
+    }
+}
+
+pub struct RenderPass {
+    pub is_framebuffer: bool,
+    tasks: Vec<RenderTask>,
+    pub targets: Vec<RenderTarget>,
+}
+
+impl RenderPass {
+    fn new(is_framebuffer: bool) -> RenderPass {
+        RenderPass {
+            is_framebuffer: is_framebuffer,
+            targets: vec![ RenderTarget::new() ],
+            tasks: Vec::new(),
         }
     }
 
@@ -458,74 +483,42 @@ impl RenderTarget {
              ctx: &RenderTargetContext,
              render_tasks: &mut RenderTaskCollection) {
         // Step through each task, adding to batches as appropriate.
-        let tasks_per_batcher =
-            cmp::max((self.tasks.len() + ALPHA_BATCHERS_PER_RENDER_TARGET - 1) /
-                     ALPHA_BATCHERS_PER_RENDER_TARGET,
-                     MIN_TASKS_PER_ALPHA_BATCHER);
-        for task in self.tasks.drain(..) {
-            match task.kind {
-                RenderTaskKind::Alpha(info) => {
-                    let need_new_batcher =
-                        self.alpha_batchers.is_empty() ||
-                        self.alpha_batchers.last().unwrap().tasks.len() == tasks_per_batcher;
+        for mut task in self.tasks.drain(..) {
+            // Find a target to assign this task to, or create a new
+            // one if required.
+            match task.location {
+                RenderTaskLocation::Fixed(..) => {}
+                RenderTaskLocation::Dynamic(ref mut origin, ref size) => {
+                    let alloc_size = Size2D::new(size.width as u32,
+                                                 size.height as u32);
 
-                    if need_new_batcher {
-                        self.alpha_batchers.push(AlphaBatcher::new());
-                    }
+                    let alloc_origin = self.targets
+                                           .last_mut()
+                                           .unwrap()
+                                           .page_allocator.allocate(&alloc_size);
 
-                    self.alpha_batchers.last_mut().unwrap().add_task(AlphaBatchTask {
-                        task_id: task.id,
-                        items: info.items,
-                    });
+                    let alloc_origin = match alloc_origin {
+                        Some(alloc_origin) => alloc_origin,
+                        None => {
+                            let mut new_target = RenderTarget::new();
+                            let origin = new_target.page_allocator
+                                                   .allocate(&alloc_size)
+                                                   .expect("Each render task must allocate <= size of one target!");
+                            self.targets.push(new_target);
+                            origin
+                        }
+                    };
+
+                    let alloc_origin = DevicePoint::new(alloc_origin.x as i32,
+                                                        alloc_origin.y as i32);
+                    *origin = Some((alloc_origin, RenderTargetIndex(self.targets.len() - 1)));
                 }
             }
+
+            render_tasks.add(&task);
+            self.targets.last_mut().unwrap().add_task(task);
         }
 
-        //println!("+ + start render target");
-        for ab in &mut self.alpha_batchers {
-            ab.build(ctx, render_tasks);
-        }
-    }
-}
-
-pub struct RenderPhase {
-    pub targets: Vec<RenderTarget>,
-}
-
-impl RenderPhase {
-    fn new(max_target_count: usize) -> RenderPhase {
-        //println!("+ start render phase: targets={}", max_target_count);
-        let mut targets = Vec::with_capacity(max_target_count);
-        for index in 0..max_target_count {
-            targets.push(RenderTarget::new(index == max_target_count-1));
-        }
-
-        RenderPhase {
-            targets: targets,
-        }
-    }
-
-    fn add_compiled_screen_tile(&mut self,
-                                mut tile: CompiledScreenTile,
-                                render_tasks: &mut RenderTaskCollection) -> Option<CompiledScreenTile> {
-        debug_assert!(tile.required_target_count <= self.targets.len());
-
-        let ok = tile.main_render_task.alloc_if_required(self.targets.len() - 1,
-                                                         &mut self.targets);
-
-        if ok {
-            tile.main_render_task.assign_to_targets(self.targets.len() - 1,
-                                                    &mut self.targets,
-                                                    render_tasks);
-            None
-        } else {
-            Some(tile)
-        }
-    }
-
-    fn build(&mut self,
-             ctx: &RenderTargetContext,
-             render_tasks: &mut RenderTaskCollection) {
         for target in &mut self.targets {
             target.build(ctx, render_tasks);
         }
@@ -534,20 +527,20 @@ impl RenderPhase {
 
 #[derive(Debug)]
 enum RenderTaskLocation {
-    Fixed(Rect<DevicePixel>),
-    Dynamic(Option<Point2D<DevicePixel>>, Size2D<DevicePixel>),
+    Fixed(DeviceRect),
+    Dynamic(Option<(DevicePoint, RenderTargetIndex)>, DeviceSize),
 }
 
 #[derive(Debug)]
 enum AlphaRenderItem {
     Primitive(StackingContextIndex, PrimitiveIndex),
-    Blend(RenderTaskId, SimpleCompositeInfo),
-    Composite(RenderTaskId, RenderTaskId, PackedCompositeInfo),
+    Blend(RenderTaskId, LowLevelFilterOp),
+    Composite(RenderTaskId, RenderTaskId, MixBlendMode),
 }
 
 #[derive(Debug)]
 struct AlphaRenderTask {
-    actual_rect: Rect<DevicePixel>,
+    actual_rect: DeviceRect,
     items: Vec<AlphaRenderItem>,
 }
 
@@ -565,7 +558,7 @@ struct RenderTask {
 }
 
 impl RenderTask {
-    fn new_alpha_batch(actual_rect: Rect<DevicePixel>, ctx: &RenderTargetContext) -> RenderTask {
+    fn new_alpha_batch(actual_rect: DeviceRect, ctx: &RenderTargetContext) -> RenderTask {
         let task_index = ctx.render_task_id_counter.fetch_add(1, Ordering::Relaxed);
 
         RenderTask {
@@ -588,18 +581,20 @@ impl RenderTask {
     fn write_task_data(&self) -> RenderTaskData {
         match self.kind {
             RenderTaskKind::Alpha(ref task) => {
-                let target_rect = self.get_target_rect();
+                let (target_rect, target_index) = self.get_target_rect();
+                debug_assert!(target_rect.size.width == task.actual_rect.size.width);
+                debug_assert!(target_rect.size.height == task.actual_rect.size.height);
 
                 RenderTaskData {
                     data: [
-                        task.actual_rect.origin.x.0 as f32,
-                        task.actual_rect.origin.y.0 as f32,
-                        task.actual_rect.size.width.0 as f32,
-                        task.actual_rect.size.height.0 as f32,
-                        target_rect.origin.x.0 as f32,
-                        target_rect.origin.y.0 as f32,
-                        target_rect.size.width.0 as f32,
-                        target_rect.size.height.0 as f32,
+                        task.actual_rect.origin.x as f32,
+                        task.actual_rect.origin.y as f32,
+                        target_rect.origin.x as f32,
+                        target_rect.origin.y as f32,
+                        task.actual_rect.size.width as f32,
+                        task.actual_rect.size.height as f32,
+                        target_index.0 as f32,
+                        0.0,
                     ],
                 }
             }
@@ -617,75 +612,36 @@ impl RenderTask {
         }
     }
 
-    fn get_target_rect(&self) -> Rect<DevicePixel> {
+    fn get_target_rect(&self) -> (DeviceRect, RenderTargetIndex) {
         match self.location {
-            RenderTaskLocation::Fixed(rect) => rect,
-            RenderTaskLocation::Dynamic(origin, size) => {
-                Rect::new(origin.expect("Should have been allocated by now!"),
-                          size)
+            RenderTaskLocation::Fixed(rect) => (rect, RenderTargetIndex(0)),
+            RenderTaskLocation::Dynamic(origin_and_target_index, size) => {
+                let (origin, target_index) = origin_and_target_index.expect("Should have been allocated by now!");
+                (DeviceRect::new(origin, size), target_index)
             }
         }
     }
 
-    fn assign_to_targets(mut self,
-                         target_index: usize,
-                         targets: &mut Vec<RenderTarget>,
-                         render_tasks: &mut RenderTaskCollection) {
+    fn assign_to_passes(mut self,
+                        pass_index: usize,
+                        passes: &mut Vec<RenderPass>) {
         for child in self.children.drain(..) {
-            child.assign_to_targets(target_index - 1,
-                                    targets,
-                                    render_tasks);
+            child.assign_to_passes(pass_index - 1,
+                                   passes);
         }
-
-        render_tasks.add(&self);
 
         // Sanity check - can be relaxed if needed
         match self.location {
             RenderTaskLocation::Fixed(..) => {
-                debug_assert!(target_index == targets.len() - 1);
+                debug_assert!(pass_index == passes.len() - 1);
             }
             RenderTaskLocation::Dynamic(..) => {
-                debug_assert!(target_index < targets.len() - 1);
+                debug_assert!(pass_index < passes.len() - 1);
             }
         }
 
-        let target = &mut targets[target_index];
-        target.add_render_task(self);
-    }
-
-    fn alloc_if_required(&mut self,
-                         target_index: usize,
-                         targets: &mut Vec<RenderTarget>) -> bool {
-        match self.location {
-            RenderTaskLocation::Fixed(..) => {}
-            RenderTaskLocation::Dynamic(ref mut origin, ref size) => {
-                let target = &mut targets[target_index];
-
-                let alloc_size = Size2D::new(size.width.0 as u32,
-                                             size.height.0 as u32);
-
-                let alloc_origin = target.page_allocator.allocate(&alloc_size);
-
-                match alloc_origin {
-                    Some(alloc_origin) => {
-                        *origin = Some(Point2D::new(DevicePixel(alloc_origin.x as i32),
-                                                    DevicePixel(alloc_origin.y as i32)));
-                    }
-                    None => {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        for child in &mut self.children {
-            if !child.alloc_if_required(target_index - 1,
-                                        targets) {
-                return false;
-            }
-        }
-
-        true
+        let pass = &mut passes[pass_index];
+        pass.add_render_task(self);
     }
 
     fn max_depth(&self,
@@ -699,14 +655,37 @@ impl RenderTask {
     }
 }
 
-pub const SCREEN_TILE_SIZE: i32 = 64;
-pub const RENDERABLE_CACHE_SIZE: DevicePixel = DevicePixel(2048);
+pub const SCREEN_TILE_SIZE: i32 = 256;
+pub const RENDERABLE_CACHE_SIZE: i32 = 2048;
+
+#[derive(Clone, Copy, Debug)]
+pub enum MaskImageSource {
+    User(ImageKey),
+    Renderer(TextureId),
+}
+
+/// Per-batch clipping info merged with the mask image.
+#[derive(Clone, Debug)]
+pub struct Clip {
+    pub clip: Box<ClipInfo>,
+    pub mask: MaskImageSource,
+}
+
+impl Clip {
+    pub fn new(clip: ClipInfo, mask: MaskImageSource) ->Clip {
+        Clip {
+            clip: Box::new(clip),
+            mask: mask,
+        }
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct DebugRect {
     pub label: String,
     pub color: ColorF,
-    pub rect: Rect<DevicePixel>,
+    pub rect: DeviceRect,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -728,6 +707,7 @@ struct AlphaBatchKey {
     kind: AlphaBatchKind,
     flags: AlphaBatchKeyFlags,
     color_texture_id: TextureId,
+    mask_texture_id: TextureId,
 }
 
 impl AlphaBatchKey {
@@ -735,7 +715,8 @@ impl AlphaBatchKey {
         AlphaBatchKey {
             kind: AlphaBatchKind::Blend,
             flags: AlphaBatchKeyFlags(0),
-            color_texture_id: TextureId(0),
+            color_texture_id: TextureId::invalid(),
+            mask_texture_id: TextureId::invalid(),
         }
     }
 
@@ -743,26 +724,31 @@ impl AlphaBatchKey {
         AlphaBatchKey {
             kind: AlphaBatchKind::Composite,
             flags: AlphaBatchKeyFlags(0),
-            color_texture_id: TextureId(0),
+            color_texture_id: TextureId::invalid(),
+            mask_texture_id: TextureId::invalid(),
         }
     }
 
     fn primitive(kind: AlphaBatchKind,
                  flags: AlphaBatchKeyFlags,
-                 color_texture_id: TextureId)
+                 color_texture_id: TextureId,
+                 mask_texture_id: TextureId)
                  -> AlphaBatchKey {
         AlphaBatchKey {
             kind: kind,
             flags: flags,
             color_texture_id: color_texture_id,
+            mask_texture_id: mask_texture_id,
         }
     }
 
     fn is_compatible_with(&self, other: &AlphaBatchKey) -> bool {
         self.kind == other.kind &&
             self.flags == other.flags &&
-            (self.color_texture_id == TextureId(0) || other.color_texture_id == TextureId(0) ||
-             self.color_texture_id == other.color_texture_id)
+        (self.color_texture_id == TextureId::invalid() || other.color_texture_id == TextureId::invalid() ||
+             self.color_texture_id == other.color_texture_id) &&
+            (self.mask_texture_id == TextureId::invalid() || other.mask_texture_id == TextureId::invalid() ||
+             self.mask_texture_id == other.mask_texture_id)
     }
 }
 
@@ -812,55 +798,8 @@ pub struct PrimitiveInstance {
 pub struct PackedBlendPrimitive {
     src_task_id: i32,
     target_task_id: i32,
-    brightness: i32,
-    opacity: i32,
-}
-
-#[derive(Debug, Copy, Clone)]
-struct PackedCompositeInfo {
-    kind: i32,
     op: i32,
     amount: i32,
-    padding: i32,
-}
-
-impl PackedCompositeInfo {
-    fn new(ops: &[CompositionOp]) -> PackedCompositeInfo {
-        // TODO(gw): Support chained filters
-        let op = &ops[0];
-
-        let (kind, op, amount) = match op {
-            &CompositionOp::MixBlend(mode) => {
-                (0, mode as u32, 0.0)
-            }
-            &CompositionOp::Filter(filter) => {
-                let (filter_mode, amount) = match filter {
-                    LowLevelFilterOp::Blur(..) => (0, 0.0),
-                    LowLevelFilterOp::Contrast(amount) => (1, amount.to_f32_px()),
-                    LowLevelFilterOp::Grayscale(amount) => (2, amount.to_f32_px()),
-                    LowLevelFilterOp::HueRotate(angle) => (3, (angle as f32) / ANGLE_FLOAT_TO_FIXED),
-                    LowLevelFilterOp::Invert(amount) => (4, amount.to_f32_px()),
-                    LowLevelFilterOp::Saturate(amount) => (5, amount.to_f32_px()),
-                    LowLevelFilterOp::Sepia(amount) => (6, amount.to_f32_px()),
-                    LowLevelFilterOp::Brightness(_) |
-                    LowLevelFilterOp::Opacity(_) => {
-                        // Expressible using GL blend modes, so not handled
-                        // here.
-                        unreachable!()
-                    }
-                };
-
-                (1, filter_mode, amount)
-            }
-        };
-
-        PackedCompositeInfo {
-            kind: kind,
-            op: op as i32,
-            amount: (amount * 65536.0).round() as i32,
-            padding: 0,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -868,8 +807,7 @@ pub struct PackedCompositePrimitive {
     src0_task_id: i32,
     src1_task_id: i32,
     target_task_id: i32,
-    padding: i32,
-    info: PackedCompositeInfo,
+    op: i32,
 }
 
 #[derive(Debug)]
@@ -890,6 +828,7 @@ pub struct PrimitiveBatch {
     pub transform_kind: TransformedRectKind,
     pub has_complex_clip: bool,
     pub color_texture_id: TextureId,        // TODO(gw): Expand to sampler array to handle all glyphs!
+    pub mask_texture_id: TextureId,
     pub blending_enabled: bool,
     pub data: PrimitiveBatchData,
 }
@@ -897,7 +836,8 @@ pub struct PrimitiveBatch {
 impl PrimitiveBatch {
     fn blend() -> PrimitiveBatch {
         PrimitiveBatch {
-            color_texture_id: TextureId(0),
+            color_texture_id: TextureId::invalid(),
+            mask_texture_id: TextureId::invalid(),
             transform_kind: TransformedRectKind::AxisAligned,
             has_complex_clip: false,
             blending_enabled: true,
@@ -907,7 +847,8 @@ impl PrimitiveBatch {
 
     fn composite() -> PrimitiveBatch {
         PrimitiveBatch {
-            color_texture_id: TextureId(0),
+            color_texture_id: TextureId::invalid(),
+            mask_texture_id: TextureId::invalid(),
             transform_kind: TransformedRectKind::AxisAligned,
             has_complex_clip: false,
             blending_enabled: true,
@@ -918,15 +859,26 @@ impl PrimitiveBatch {
     fn pack_blend(&mut self,
                   src_rect_index: RenderTaskIndex,
                   target_rect_index: RenderTaskIndex,
-                  opacity: f32,
-                  brightness: f32) -> bool {
+                  filter: LowLevelFilterOp) -> bool {
         match &mut self.data {
             &mut PrimitiveBatchData::Blend(ref mut ubo_data) => {
+                let (filter_mode, amount) = match filter {
+                    LowLevelFilterOp::Blur(..) => (0, 0.0),
+                    LowLevelFilterOp::Contrast(amount) => (1, amount.to_f32_px()),
+                    LowLevelFilterOp::Grayscale(amount) => (2, amount.to_f32_px()),
+                    LowLevelFilterOp::HueRotate(angle) => (3, (angle as f32) / ANGLE_FLOAT_TO_FIXED),
+                    LowLevelFilterOp::Invert(amount) => (4, amount.to_f32_px()),
+                    LowLevelFilterOp::Saturate(amount) => (5, amount.to_f32_px()),
+                    LowLevelFilterOp::Sepia(amount) => (6, amount.to_f32_px()),
+                    LowLevelFilterOp::Brightness(amount) => (7, amount.to_f32_px()),
+                    LowLevelFilterOp::Opacity(amount) => (8, amount.to_f32_px()),
+                };
+
                 ubo_data.push(PackedBlendPrimitive {
                     src_task_id: src_rect_index.0 as i32,
                     target_task_id: target_rect_index.0 as i32,
-                    opacity: (opacity * 65535.0).round() as i32,
-                    brightness: (brightness * 65535.0).round() as i32,
+                    amount: (amount * 65535.0).round() as i32,
+                    op: filter_mode,
                 });
 
                 true
@@ -939,15 +891,14 @@ impl PrimitiveBatch {
                       rect0_index: RenderTaskIndex,
                       rect1_index: RenderTaskIndex,
                       target_rect_index: RenderTaskIndex,
-                      info: PackedCompositeInfo) -> bool {
+                      info: MixBlendMode) -> bool {
         match &mut self.data {
             &mut PrimitiveBatchData::Composite(ref mut ubo_data) => {
                 ubo_data.push(PackedCompositePrimitive {
                     src0_task_id: rect0_index.0 as i32,
                     src1_task_id: rect1_index.0 as i32,
                     target_task_id: target_rect_index.0 as i32,
-                    padding: 0,
-                    info: info,
+                    op: info as i32,
                 });
 
                 true
@@ -960,7 +911,8 @@ impl PrimitiveBatch {
            transform_kind: TransformedRectKind,
            blending_enabled: bool,
            has_complex_clip: bool,
-           color_texture_id: TextureId) -> PrimitiveBatch {
+           color_texture_id: TextureId,
+           mask_texture_id: TextureId) -> PrimitiveBatch {
         let data = match batch_kind {
             AlphaBatchKind::Rectangle => PrimitiveBatchData::Rectangles(Vec::new()),
             AlphaBatchKind::TextRun => PrimitiveBatchData::TextRun(Vec::new()),
@@ -974,6 +926,7 @@ impl PrimitiveBatch {
 
         PrimitiveBatch {
             color_texture_id: color_texture_id,
+            mask_texture_id: mask_texture_id,
             transform_kind: transform_kind,
             blending_enabled: blending_enabled,
             has_complex_clip: has_complex_clip,
@@ -1028,18 +981,12 @@ impl Default for PackedStackingContext {
 }
 
 #[derive(Debug, Copy, Clone)]
-enum SimpleCompositeInfo {
-    Opacity(f32),
-    Brightness(f32),
-}
-
-#[derive(Debug, Copy, Clone)]
 enum CompositeKind {
     None,
     // Requires only a single texture as input (e.g. most filters)
-    Simple(SimpleCompositeInfo),
+    Simple(LowLevelFilterOp),
     // Requires two source textures (e.g. mix-blend-mode)
-    Complex(PackedCompositeInfo),
+    Complex(MixBlendMode),
 }
 
 impl CompositeKind {
@@ -1048,31 +995,24 @@ impl CompositeKind {
             return CompositeKind::None;
         }
 
-        if composition_ops.len() == 1 {
-            match composition_ops.first().unwrap() {
-                &CompositionOp::Filter(filter_op) => {
-                    match filter_op {
-                        LowLevelFilterOp::Opacity(opacity) => {
-                            let opacity = opacity.to_f32_px();
-                            if opacity == 1.0 {
-                                return CompositeKind::None;
-                            } else {
-                                return CompositeKind::Simple(SimpleCompositeInfo::Opacity(opacity));
-                            }
+        match composition_ops.first().unwrap() {
+            &CompositionOp::Filter(filter_op) => {
+                match filter_op {
+                    LowLevelFilterOp::Opacity(opacity) => {
+                        let opacityf = opacity.to_f32_px();
+                        if opacityf == 1.0 {
+                            CompositeKind::None
+                        } else {
+                            CompositeKind::Simple(LowLevelFilterOp::Opacity(opacity))
                         }
-                        LowLevelFilterOp::Brightness(amount) => {
-                            let amount = amount.to_f32_px();
-                            return CompositeKind::Simple(SimpleCompositeInfo::Brightness(amount));
-                        }
-                        _ => {}
                     }
+                    other_filter => CompositeKind::Simple(other_filter),
                 }
-                _ => {}
+            }
+            &CompositionOp::MixBlend(mode) => {
+                CompositeKind::Complex(mode)
             }
         }
-
-        let info = PackedCompositeInfo::new(composition_ops);
-        CompositeKind::Complex(info)
     }
 }
 
@@ -1084,15 +1024,15 @@ impl StackingContext {
     fn can_contribute_to_scene(&self) -> bool {
         match self.composite_kind {
             CompositeKind::None | CompositeKind::Complex(..) => true,
-            CompositeKind::Simple(SimpleCompositeInfo::Brightness(..)) => true,
-            CompositeKind::Simple(SimpleCompositeInfo::Opacity(opacity)) => opacity > 0.0,
+            CompositeKind::Simple(LowLevelFilterOp::Opacity(opacity)) => opacity > Au(0),
+            CompositeKind::Simple(..) => true,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ClearTile {
-    pub rect: Rect<DevicePixel>,
+    pub rect: DeviceRect,
 }
 
 #[derive(Clone, Copy)]
@@ -1125,7 +1065,7 @@ pub struct Frame {
     pub viewport_size: Size2D<i32>,
     pub debug_rects: Vec<DebugRect>,
     pub cache_size: Size2D<f32>,
-    pub phases: Vec<RenderPhase>,
+    pub passes: Vec<RenderPass>,
     pub clear_tiles: Vec<ClearTile>,
     pub profile_counters: FrameProfileCounters,
 
@@ -1150,21 +1090,26 @@ enum CompiledScreenTileInfo {
 #[derive(Debug)]
 struct CompiledScreenTile {
     main_render_task: RenderTask,
-    required_target_count: usize,
+    required_pass_count: usize,
     info: CompiledScreenTileInfo,
 }
 
 impl CompiledScreenTile {
     fn new(main_render_task: RenderTask,
            info: CompiledScreenTileInfo) -> CompiledScreenTile {
-        let mut required_target_count = 0;
-        main_render_task.max_depth(0, &mut required_target_count);
+        let mut required_pass_count = 0;
+        main_render_task.max_depth(0, &mut required_pass_count);
 
         CompiledScreenTile {
             main_render_task: main_render_task,
-            required_target_count: required_target_count,
+            required_pass_count: required_pass_count,
             info: info,
         }
+    }
+
+    fn build(self, passes: &mut Vec<RenderPass>) {
+        self.main_render_task.assign_to_passes(passes.len() - 1,
+                                               passes);
     }
 }
 
@@ -1177,14 +1122,14 @@ enum TileCommand {
 
 #[derive(Debug)]
 struct ScreenTile {
-    rect: Rect<DevicePixel>,
+    rect: DeviceRect,
     cmds: Vec<TileCommand>,
     prim_count: usize,
     is_simple: bool,
 }
 
 impl ScreenTile {
-    fn new(rect: Rect<DevicePixel>) -> ScreenTile {
+    fn new(rect: DeviceRect) -> ScreenTile {
         ScreenTile {
             rect: rect,
             cmds: Vec::new(),
@@ -1247,7 +1192,10 @@ impl ScreenTile {
                     match layer.composite_kind {
                         CompositeKind::None => {}
                         CompositeKind::Simple(..) | CompositeKind::Complex(..) => {
-                            let prev_task = mem::replace(&mut current_task, RenderTask::new_alpha_batch(self.rect, ctx));
+                            let layer_rect = layer.xf_rect.as_ref().unwrap().bounding_rect;
+                            let needed_rect = layer_rect.intersection(&self.rect)
+                                                        .expect("bug if these don't overlap");
+                            let prev_task = mem::replace(&mut current_task, RenderTask::new_alpha_batch(needed_rect, ctx));
                             alpha_task_stack.push(prev_task);
                         }
                     }
@@ -1341,7 +1289,7 @@ impl FrameBuilder {
     fn add_primitive(&mut self,
                      rect: &Rect<f32>,
                      clip_rect: &Rect<f32>,
-                     clip: Option<Box<Clip>>,
+                     clip: Option<Clip>,
                      container: PrimitiveContainer) -> PrimitiveIndex {
         let prim_index = self.prim_store.add_primitive(rect,
                                                        clip_rect,
@@ -1402,7 +1350,7 @@ impl FrameBuilder {
     pub fn add_solid_rectangle(&mut self,
                                rect: &Rect<f32>,
                                clip_rect: &Rect<f32>,
-                               clip: Option<Box<Clip>>,
+                               clip: Option<Clip>,
                                color: &ColorF,
                                flags: PrimitiveFlags) {
         if color.a == 0.0 {
@@ -1451,7 +1399,7 @@ impl FrameBuilder {
     pub fn add_border(&mut self,
                       rect: Rect<f32>,
                       clip_rect: &Rect<f32>,
-                      clip: Option<Box<Clip>>,
+                      clip: Option<Clip>,
                       border: &BorderDisplayItem) {
         let radius = &border.radius;
         let left = &border.left;
@@ -1523,7 +1471,7 @@ impl FrameBuilder {
     pub fn add_gradient(&mut self,
                         rect: Rect<f32>,
                         clip_rect: &Rect<f32>,
-                        clip: Option<Box<Clip>>,
+                        clip: Option<Clip>,
                         start_point: Point2D<f32>,
                         end_point: Point2D<f32>,
                         stops: ItemRange) {
@@ -1553,11 +1501,6 @@ impl FrameBuilder {
             (start_point, end_point)
         };
 
-        // TODO(gw): The gradient shader only has a clip variant
-        // right now. So add an invalid clip if none is provided.
-        // Remove this when a non-clip gradient shader is added.
-        let clip = Some(clip.unwrap_or(Box::new(Clip::invalid(rect))));
-
         let gradient_gpu = GradientPrimitiveGpu {
             start_point: sp,
             end_point: ep,
@@ -1574,7 +1517,7 @@ impl FrameBuilder {
     pub fn add_text(&mut self,
                     rect: Rect<f32>,
                     clip_rect: &Rect<f32>,
-                    clip: Option<Box<Clip>>,
+                    clip: Option<Clip>,
                     font_key: FontKey,
                     size: Au,
                     blur_radius: Au,
@@ -1618,7 +1561,7 @@ impl FrameBuilder {
     pub fn add_box_shadow(&mut self,
                           box_bounds: &Rect<f32>,
                           clip_rect: &Rect<f32>,
-                          clip: Option<Box<Clip>>,
+                          clip: Option<Clip>,
                           box_offset: &Point2D<f32>,
                           color: &ColorF,
                           blur_radius: f32,
@@ -1679,7 +1622,7 @@ impl FrameBuilder {
     pub fn add_webgl_rectangle(&mut self,
                                rect: Rect<f32>,
                                clip_rect: &Rect<f32>,
-                               clip: Option<Box<Clip>>,
+                               clip: Option<Clip>,
                                context_id: WebGLContextId) {
         let prim_cpu = ImagePrimitiveCpu {
             kind: ImagePrimitiveKind::WebGL(context_id),
@@ -1694,7 +1637,7 @@ impl FrameBuilder {
     pub fn add_image(&mut self,
                      rect: Rect<f32>,
                      clip_rect: &Rect<f32>,
-                     clip: Option<Box<Clip>>,
+                     clip: Option<Clip>,
                      stretch_size: &Size2D<f32>,
                      tile_spacing: &Size2D<f32>,
                      image_key: ImageKey,
@@ -1713,7 +1656,7 @@ impl FrameBuilder {
     }
 
     fn cull_layers(&mut self,
-                   screen_rect: &Rect<DevicePixel>,
+                   screen_rect: &DeviceRect,
                    layer_map: &HashMap<ScrollLayerId, Layer, BuildHasherDefault<FnvHasher>>,
                    pipeline_auxiliary_lists: &HashMap<PipelineId, AuxiliaryLists, BuildHasherDefault<FnvHasher>>,
                    resource_list: &mut ResourceList,
@@ -1764,10 +1707,10 @@ impl FrameBuilder {
                             let layer_rect = layer_xf_rect.bounding_rect;
                             layer.xf_rect = Some(layer_xf_rect);
 
-                            let tile_x0 = layer_rect.origin.x.0 / SCREEN_TILE_SIZE;
-                            let tile_y0 = layer_rect.origin.y.0 / SCREEN_TILE_SIZE;
-                            let tile_x1 = (layer_rect.origin.x.0 + layer_rect.size.width.0 + SCREEN_TILE_SIZE - 1) / SCREEN_TILE_SIZE;
-                            let tile_y1 = (layer_rect.origin.y.0 + layer_rect.size.height.0 + SCREEN_TILE_SIZE - 1) / SCREEN_TILE_SIZE;
+                            let tile_x0 = layer_rect.origin.x / SCREEN_TILE_SIZE;
+                            let tile_y0 = layer_rect.origin.y / SCREEN_TILE_SIZE;
+                            let tile_x1 = (layer_rect.origin.x + layer_rect.size.width + SCREEN_TILE_SIZE - 1) / SCREEN_TILE_SIZE;
+                            let tile_y1 = (layer_rect.origin.y + layer_rect.size.height + SCREEN_TILE_SIZE - 1) / SCREEN_TILE_SIZE;
 
                             let tile_x0 = cmp::min(tile_x0, x_tile_count);
                             let tile_x0 = cmp::max(tile_x0, 0);
@@ -1824,27 +1767,30 @@ impl FrameBuilder {
     }
 
     fn create_screen_tiles(&self) -> (i32, i32, Vec<ScreenTile>) {
-        let dp_size = Size2D::new(DevicePixel::new(self.screen_rect.size.width as f32,
-                                                   self.device_pixel_ratio),
-                                  DevicePixel::new(self.screen_rect.size.height as f32,
-                                                   self.device_pixel_ratio));
+        let dp_size = DeviceSize::from_lengths(device_pixel(self.screen_rect.size.width as f32,
+                                                            self.device_pixel_ratio),
+                                               device_pixel(self.screen_rect.size.height as f32,
+                                                            self.device_pixel_ratio));
 
-        let x_tile_size = DevicePixel(SCREEN_TILE_SIZE);
-        let y_tile_size = DevicePixel(SCREEN_TILE_SIZE);
-        let x_tile_count = (dp_size.width + x_tile_size - DevicePixel(1)).0 / x_tile_size.0;
-        let y_tile_count = (dp_size.height + y_tile_size - DevicePixel(1)).0 / y_tile_size.0;
+        let x_tile_size = SCREEN_TILE_SIZE;
+        let y_tile_size = SCREEN_TILE_SIZE;
+        let x_tile_count = (dp_size.width + x_tile_size - 1) / x_tile_size;
+        let y_tile_count = (dp_size.height + y_tile_size - 1) / y_tile_size;
 
         // Build screen space tiles, which are individual BSP trees.
         let mut screen_tiles = Vec::new();
         for y in 0..y_tile_count {
-            let y0 = DevicePixel(y * y_tile_size.0);
+            let y0 = y * y_tile_size;
             let y1 = y0 + y_tile_size;
 
             for x in 0..x_tile_count {
-                let x0 = DevicePixel(x * x_tile_size.0);
+                let x0 = x * x_tile_size;
                 let x1 = x0 + x_tile_size;
 
-                let tile_rect = rect_from_points(x0, y0, x1, y1);
+                let tile_rect = rect_from_points(DeviceLength::new(x0),
+                                                 DeviceLength::new(y0),
+                                                 DeviceLength::new(x1),
+                                                 DeviceLength::new(y1));
 
                 screen_tiles.push(ScreenTile::new(tile_rect));
             }
@@ -1897,10 +1843,10 @@ impl FrameBuilder {
                             //           Does this cause any problems / demonstrate other bugs?
                             //           Restrict the tiles by clamping to the layer tile indices...
 
-                            let p_tile_x0 = p_rect.origin.x.0 / SCREEN_TILE_SIZE;
-                            let p_tile_y0 = p_rect.origin.y.0 / SCREEN_TILE_SIZE;
-                            let p_tile_x1 = (p_rect.origin.x.0 + p_rect.size.width.0 + SCREEN_TILE_SIZE - 1) / SCREEN_TILE_SIZE;
-                            let p_tile_y1 = (p_rect.origin.y.0 + p_rect.size.height.0 + SCREEN_TILE_SIZE - 1) / SCREEN_TILE_SIZE;
+                            let p_tile_x0 = p_rect.origin.x / SCREEN_TILE_SIZE;
+                            let p_tile_y0 = p_rect.origin.y / SCREEN_TILE_SIZE;
+                            let p_tile_x1 = (p_rect.origin.x + p_rect.size.width + SCREEN_TILE_SIZE - 1) / SCREEN_TILE_SIZE;
+                            let p_tile_y1 = (p_rect.origin.y + p_rect.size.height + SCREEN_TILE_SIZE - 1) / SCREEN_TILE_SIZE;
 
                             let p_tile_x0 = cmp::min(p_tile_x0, tile_range.x1);
                             let p_tile_x0 = cmp::max(p_tile_x0, tile_range.x0);
@@ -1950,7 +1896,7 @@ impl FrameBuilder {
     }
 
     fn prepare_primitives(&mut self,
-                          screen_rect: &Rect<DevicePixel>,
+                          screen_rect: &DeviceRect,
                           resource_cache: &ResourceCache,
                           frame_id: FrameId,
                           pipeline_auxiliary_lists: &HashMap<PipelineId, AuxiliaryLists, BuildHasherDefault<FnvHasher>>) {
@@ -2019,7 +1965,7 @@ impl FrameBuilder {
             if scrollbar_prim.border_radius == 0.0 {
                 self.prim_store.set_complex_clip(scrollbar_prim.prim_index, None);
             } else {
-                let clip = Clip::uniform(geom.local_rect, scrollbar_prim.border_radius);
+                let clip = ClipInfo::uniform(geom.local_rect, scrollbar_prim.border_radius);
                 self.prim_store.set_complex_clip(scrollbar_prim.prim_index, Some(clip));
             }
             *self.prim_store.gpu_geometry.get_mut(GpuStoreAddress(scrollbar_prim.prim_index.0 as i32)) = geom;
@@ -2034,9 +1980,9 @@ impl FrameBuilder {
         let mut profile_counters = FrameProfileCounters::new();
         profile_counters.total_primitives.set(self.prim_store.prim_count());
 
-        let screen_rect = Rect::new(Point2D::zero(),
-                                    Size2D::new(DevicePixel::new(self.screen_rect.size.width as f32, self.device_pixel_ratio),
-                                                DevicePixel::new(self.screen_rect.size.height as f32, self.device_pixel_ratio)));
+        let screen_rect = DeviceRect::new(DevicePoint::zero(),
+                                          DeviceSize::from_lengths(device_pixel(self.screen_rect.size.width as f32, self.device_pixel_ratio),
+                                                                   device_pixel(self.screen_rect.size.height as f32, self.device_pixel_ratio)));
 
         let mut resource_list = ResourceList::new();
         let mut debug_rects = Vec::new();
@@ -2080,10 +2026,13 @@ impl FrameBuilder {
 
         // Build list of passes, target allocs that each tile needs.
         let mut compiled_screen_tiles = Vec::new();
+        let mut max_passes_needed = 0;
         for screen_tile in screen_tiles {
             let rect = screen_tile.rect;        // TODO(gw): Remove clone here
             match screen_tile.compile(&ctx) {
                 Some(compiled_screen_tile) => {
+                    max_passes_needed = cmp::max(max_passes_needed,
+                                                 compiled_screen_tile.required_pass_count);
                     if self.debug {
                         let (label, color) = match &compiled_screen_tile.info {
                             &CompiledScreenTileInfo::SimpleAlpha(prim_count) => {
@@ -2109,44 +2058,26 @@ impl FrameBuilder {
             }
         }
 
-        let mut phases = Vec::new();
+        let mut passes = Vec::new();
         let static_render_task_count = ctx.render_task_id_counter.load(Ordering::SeqCst);
         let mut render_tasks = RenderTaskCollection::new(static_render_task_count);
 
         if !compiled_screen_tiles.is_empty() {
-            // Sort by pass count to minimize render target switches.
-            compiled_screen_tiles.sort_by(|a, b| {
-                let a_passes = a.required_target_count;
-                let b_passes = b.required_target_count;
-                b_passes.cmp(&a_passes)
-            });
-
-            // Do the allocations now, assigning each tile to a render
-            // phase as required.
-
-            let mut current_phase = RenderPhase::new(compiled_screen_tiles[0].required_target_count);
-
-            for compiled_screen_tile in compiled_screen_tiles {
-                if let Some(failed_tile) = current_phase.add_compiled_screen_tile(compiled_screen_tile,
-                                                                                  &mut render_tasks) {
-                    let full_phase = mem::replace(&mut current_phase,
-                                                  RenderPhase::new(failed_tile.required_target_count));
-                    phases.push(full_phase);
-
-                    let result = current_phase.add_compiled_screen_tile(failed_tile,
-                                                                        &mut render_tasks);
-                    assert!(result.is_none(), "TODO: Handle single tile not fitting in render phase.");
-                }
+            // Do the allocations now, assigning each tile's tasks to a render
+            // pass and target as required.
+            for index in 0..max_passes_needed {
+                passes.push(RenderPass::new(index == max_passes_needed-1));
             }
 
-            phases.push(current_phase);
+            for compiled_screen_tile in compiled_screen_tiles {
+                compiled_screen_tile.build(&mut passes);
+            }
 
-            //println!("rendering: phase count={}", phases.len());
-            for phase in &mut phases {
-                phase.build(&ctx, &mut render_tasks);
+            for pass in passes.iter_mut().rev() {
+                pass.build(&ctx, &mut render_tasks);
 
-                profile_counters.phases.inc();
-                profile_counters.targets.add(phase.targets.len());
+                profile_counters.passes.inc();
+                profile_counters.targets.add(pass.targets.len());
             }
         }
 
@@ -2154,10 +2085,10 @@ impl FrameBuilder {
             viewport_size: self.screen_rect.size,
             debug_rects: debug_rects,
             profile_counters: profile_counters,
-            phases: phases,
+            passes: passes,
             clear_tiles: clear_tiles,
-            cache_size: Size2D::new(RENDERABLE_CACHE_SIZE.0 as f32,
-                                    RENDERABLE_CACHE_SIZE.0 as f32),
+            cache_size: Size2D::new(RENDERABLE_CACHE_SIZE as f32,
+                                    RENDERABLE_CACHE_SIZE as f32),
             layer_texture_data: self.packed_layers.clone(),
             render_task_data: render_tasks.render_task_data,
             gpu_data16: self.prim_store.gpu_data16.build(),

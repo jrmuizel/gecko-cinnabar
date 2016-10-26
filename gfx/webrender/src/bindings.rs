@@ -9,8 +9,8 @@ extern crate webrender_traits;
 use euclid::{Size2D, Point2D, Rect, Matrix4D};
 use gleam::gl;
 use std::ffi::CStr;
-use webrender_traits::{ServoStackingContextId};
-use webrender_traits::{Epoch, ColorF, FragmentType};
+use webrender_traits::{ServoScrollRootId};
+use webrender_traits::{Epoch, ColorF};
 use webrender_traits::{ImageFormat, ImageKey, ImageRendering, RendererKind};
 use std::mem;
 use std::slice;
@@ -189,7 +189,9 @@ impl WebRenderFrameBuilder {
     pub fn next_scroll_layer_id(&mut self) -> webrender_traits::ScrollLayerId {
         let scroll_layer_id = self.next_scroll_layer_id;
         self.next_scroll_layer_id += 1;
-        webrender_traits::ScrollLayerId::new(self.root_pipeline_id, scroll_layer_id)
+        webrender_traits::ScrollLayerId::new(self.root_pipeline_id,
+                                             scroll_layer_id,
+                                             ServoScrollRootId(0))
     }
 
 }
@@ -295,12 +297,10 @@ pub extern fn wr_push_dl_builder(state:&mut WrState)
 pub extern fn wr_pop_dl_builder(state:&mut WrState, x: f32, y: f32, width: f32, height: f32, transform: &Matrix4D<f32>)
 {
     // 
-    let servo_id = ServoStackingContextId(FragmentType::FragmentBody, 0);
     state.z_index += 1;
 
     let mut sc =
-        webrender_traits::StackingContext::new(servo_id,
-                                               None,
+        webrender_traits::StackingContext::new(None,
                                                webrender_traits::ScrollPolicy::Scrollable,
                                                Rect::new(Point2D::new(0., 0.), Size2D::new(0., 0.)),
                                                Rect::new(Point2D::new(x, y), Size2D::new(width, height)),
@@ -328,11 +328,9 @@ pub extern fn wr_dp_end(state:&mut WrState) {
     let (width, height) = state.size;
     let bounds = Rect::new(Point2D::new(0.0, 0.0), Size2D::new(width as f32, height as f32));
     let root_scroll_layer_id = state.frame_builder.next_scroll_layer_id();
-    let servo_id = ServoStackingContextId(FragmentType::FragmentBody, 0);
 
     let mut sc =
-        webrender_traits::StackingContext::new(servo_id,
-                                               Some(root_scroll_layer_id),
+        webrender_traits::StackingContext::new(Some(root_scroll_layer_id),
                                                webrender_traits::ScrollPolicy::Scrollable,
                                                bounds,
                                                bounds,
@@ -395,6 +393,7 @@ pub extern fn wr_dp_push_rect(state:&mut WrState, x: f32, y: f32, w: f32, h: f32
     let bounds = Rect::new(Point2D::new(x, y), Size2D::new(width as f32, height as f32));
     let clip_region = webrender_traits::ClipRegion::new(&bounds,
                                                         Vec::new(),
+                                                        None,
                                                         &mut state.frame_builder.auxiliary_lists_builder);
     state.dl_builder.last_mut().unwrap().push_rect(Rect::new(Point2D::new(x, y), Size2D::new(w, h)),
                                clip_region,
@@ -428,6 +427,7 @@ pub extern fn wr_dp_push_image(state:&mut WrState, bounds: WrRect, clip : WrRect
     let clip = clip.to_rect();
     let clip_region = webrender_traits::ClipRegion::new(&clip,
                                                         Vec::new(),
+                                                        None,
                                                         &mut state.frame_builder.auxiliary_lists_builder);
     let rect = bounds;
     state.dl_builder.last_mut().unwrap().push_image(rect,
