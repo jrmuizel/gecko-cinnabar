@@ -148,7 +148,6 @@ pub struct WebRenderFrameBuilder {
     pub display_lists: Vec<(DisplayListId, webrender_traits::BuiltDisplayList)>,
     pub auxiliary_lists_builder: AuxiliaryListsBuilder,
     pub root_pipeline_id: PipelineId,
-    pub next_scroll_layer_id: usize,
 }
 
 impl WebRenderFrameBuilder {
@@ -158,7 +157,6 @@ impl WebRenderFrameBuilder {
             display_lists: vec![],
             auxiliary_lists_builder: AuxiliaryListsBuilder::new(),
             root_pipeline_id: root_pipeline_id,
-            next_scroll_layer_id: 0,
         }
     }
 
@@ -185,15 +183,6 @@ impl WebRenderFrameBuilder {
         self.display_lists.push((id, display_list));
         id
     }
-
-    pub fn next_scroll_layer_id(&mut self) -> webrender_traits::ScrollLayerId {
-        let scroll_layer_id = self.next_scroll_layer_id;
-        self.next_scroll_layer_id += 1;
-        webrender_traits::ScrollLayerId::new(self.root_pipeline_id,
-                                             scroll_layer_id,
-                                             ServoScrollRootId(0))
-    }
-
 }
 /*
 impl webrender_traits::RenderNotifier for Notifier {
@@ -327,10 +316,10 @@ pub extern fn wr_dp_end(state:&mut WrState) {
     let pipeline_id = state.pipeline_id;
     let (width, height) = state.size;
     let bounds = Rect::new(Point2D::new(0.0, 0.0), Size2D::new(width as f32, height as f32));
-    let root_scroll_layer_id = state.frame_builder.next_scroll_layer_id();
 
     let mut sc =
-        webrender_traits::StackingContext::new(Some(root_scroll_layer_id),
+        webrender_traits::StackingContext::new(Some(webrender_traits::ScrollLayerId::new(
+                                                        pipeline_id, 0, ServoScrollRootId(0))),
                                                webrender_traits::ScrollPolicy::Scrollable,
                                                bounds,
                                                bounds,
