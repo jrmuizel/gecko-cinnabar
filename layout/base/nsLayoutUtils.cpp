@@ -4,8 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+void* gWRState = nullptr;
 #include "nsLayoutUtils.h"
-
+#include "WebRenderer.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -3666,6 +3667,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     printf_stderr("Painted %u pixels in %fms (%u in the last 1000ms)\n",
         pixelCount, rasterizeTime, paintedInLastSecond);
   }
+
+  // BENWA
+  list.BuildWRDisplayList(gWRState);
 
   if (consoleNeedsDisplayList || profilerNeedsDisplayList) {
     *ss << "Painting --- after optimization:\n";

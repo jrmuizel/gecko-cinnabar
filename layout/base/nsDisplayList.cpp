@@ -11,6 +11,7 @@
  */
 
 #include "nsDisplayList.h"
+#include "WebRenderer.h"
 
 #include <stdint.h>
 #include <algorithm>
@@ -1558,6 +1559,12 @@ MoveListTo(nsDisplayList* aList, nsTArray<nsDisplayItem*>* aElements) {
   }
 }
 
+void nsDisplayList::BuildWRDisplayList(void* wrState) {
+  for (nsDisplayItem* i = GetBottom(); i != nullptr; i = i->GetAbove()) {
+    i->BuildWRDisplayList(wrState);
+  }
+}
+
 nsRect
 nsDisplayList::GetBounds(nsDisplayListBuilder* aBuilder) const {
   nsRect bounds;
@@ -3094,6 +3101,27 @@ static void CheckForBorderItem(nsDisplayItem *aItem, uint32_t& aFlags)
 }
 
 void
+nsDisplayBackgroundImage::BuildWRDisplayList(void* wrState) {
+  nsStyleContext *sc = mFrame->StyleContext();
+
+  bool drawImage;
+  bool drawColor;
+  nscolor bgcolor = nsCSSRendering::DetermineBackgroundColor(mFrame->PresContext(), sc, mFrame, drawImage, drawColor);
+
+  if (!drawColor) {
+    bgcolor = NS_RGB(255, 0, 255);
+  }
+
+  auto color = Color::FromABGR(bgcolor);
+
+  gfxRect bounds =
+    nsLayoutUtils::RectToGfxRect(mBackgroundRect,
+                                 mFrame->PresContext()->AppUnitsPerDevPixel());
+  wr_dp_push_rect(wrState, bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a);
+  printf("push %f, %f, %f, %f, %f, %f, %f, %f\n", bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a);
+}
+
+void
 nsDisplayBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
                                 nsRenderingContext* aCtx) {
   PaintInternal(aBuilder, aCtx, mVisibleRect, &mBounds);
@@ -3508,6 +3536,15 @@ bool
 nsDisplayBackgroundColor::CanApplyOpacity() const
 {
   return true;
+}
+
+void
+nsDisplayBackgroundColor::BuildWRDisplayList(void* wrState) {
+  gfxRect bounds =
+    nsLayoutUtils::RectToGfxRect(mBackgroundRect,
+                                 mFrame->PresContext()->AppUnitsPerDevPixel());
+  wr_dp_push_rect(wrState, bounds.x, bounds.y, bounds.width, bounds.height, mColor.r, mColor.g, mColor.b, mColor.a);
+  printf("push %f, %f, %f, %f, %f, %f, %f, %f\n", bounds.x, bounds.y, bounds.width, bounds.height, mColor.r, mColor.g, mColor.b, mColor.a);
 }
 
 void
@@ -4274,6 +4311,9 @@ void
 nsDisplayWrapList::HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
                            HitTestState* aState, nsTArray<nsIFrame*> *aOutFrames) {
   mList.HitTest(aBuilder, aRect, aState, aOutFrames);
+}
+void nsDisplayWrapList::BuildWRDisplayList(void* wrState) {
+  mList.BuildWRDisplayList(wrState);
 }
 
 nsRect
