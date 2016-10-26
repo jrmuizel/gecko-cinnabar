@@ -1406,7 +1406,8 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
 
     if (!XRE_IsContentProcess()) {
       mRootLayerTreeId = Some(gfx::GPUProcessManager::Get()->AllocateLayerTreeId());
-      WebRenderLayerManager* manager = new WebRenderLayerManager(this);
+      WebRenderLayerManager* manager = new WebRenderLayerManager(this,
+        mRootLayerTreeId.value());
       mCompositorWidgetDelegate = manager->GetCompositorWidgetDelegate();
       mLayerManager = manager;
     }
