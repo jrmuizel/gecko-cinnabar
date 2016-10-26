@@ -7,6 +7,7 @@
 #define GFX_WEBRENDERLAYERMANAGER_H
 
 #include "Layers.h"
+#include "mozilla/layers/CompositorController.h"
 #include "webrender.h"
 
 struct wrstate;
@@ -47,10 +48,11 @@ public:
   }
 };
 
-class WebRenderLayerManager final : public LayerManager
+class WebRenderLayerManager final : public LayerManager, public CompositorController
 {
 public:
-  explicit WebRenderLayerManager(nsIWidget* aWidget);
+  explicit WebRenderLayerManager(nsIWidget* aWidget,
+                                 uint64_t aLayersId);
 
   virtual void Destroy() override;
 
@@ -100,6 +102,13 @@ public:
   void AddImageKeyForDiscard(WRImageKey);
   void DiscardImages();
 
+  // CompositorController
+  NS_IMETHOD_(MozExternalRefCountType) AddRef() override { return LayerManager::AddRef(); }
+  NS_IMETHOD_(MozExternalRefCountType) Release() override { return LayerManager::Release(); }
+  void ScheduleRenderOnCompositorThread() override;
+  void ScheduleHideAllPluginWindows() override {}
+  void ScheduleShowAllPluginWindows() override {}
+
 private:
   RefPtr<widget::CompositorWidget> mWidget;
   RefPtr<gl::GLContext> mGLContext;
@@ -111,6 +120,9 @@ private:
    * while rendering */
   DrawPaintedLayerCallback mPaintedLayerCallback;
   void *mPaintedLayerCallbackData;
+
+  // APZ stuff
+  uint64_t mLayersId;
 };
 
 } // namespace layers
