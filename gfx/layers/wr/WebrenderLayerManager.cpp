@@ -7,8 +7,10 @@
 
 #include "GLContext.h"
 #include "GLContextProvider.h"
+#include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
+#include "nsThreadUtils.h"
 #include "WebrenderCanvasLayer.h"
 #include "WebrenderColorLayer.h"
 #include "WebrenderContainerLayer.h"
@@ -23,13 +25,21 @@ using namespace widget;
 
 namespace layers {
 
-WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
+WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
+                                             uint64_t aLayersId)
   : mWRState(nullptr)
+  , mLayersId(aLayersId)
 {
   CompositorWidgetInitData initData;
   aWidget->GetCompositorWidgetInitData(&initData);
   mWidget = CompositorWidget::CreateLocal(initData, aWidget);
   mGLContext = GLContextProvider::CreateForWindow(aWidget, true);
+
+  // ewwwwww, using extern to access a faraway object because I don't want to
+  // expose it properly via an API! Good thing this is just a hacky prototype
+  // and I can get away with it :)
+  extern std::map<uint64_t, CompositorBridgeParent::LayerTreeState> sIndirectLayerTrees;
+  sIndirectLayerTrees[mLayersId].mWRManager = this;
 }
 
 void
@@ -121,6 +131,12 @@ WebRenderLayerManager::Composite()
   mGLContext->MakeCurrent();
   wr_composite(mWRState);
   mGLContext->SwapBuffers();
+}
+
+void
+WebRenderLayerManager::ScheduleRenderOnCompositorThread()
+{
+  NS_DispatchToMainThread(NewRunnableMethod(this, &WebRenderLayerManager::Composite));
 }
 
 void
