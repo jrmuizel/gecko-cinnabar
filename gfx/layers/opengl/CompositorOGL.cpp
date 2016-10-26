@@ -50,6 +50,7 @@
 
 #include "GeckoProfiler.h"
 
+mozilla::gl::GLContext* gGLContext;
 namespace mozilla {
 
 using namespace std;
@@ -107,6 +108,7 @@ CompositorOGL::~CompositorOGL()
   Destroy();
 }
 
+
 already_AddRefed<mozilla::gl::GLContext>
 CompositorOGL::CreateContext()
 {
@@ -142,6 +144,8 @@ CompositorOGL::CreateContext()
   if (!context) {
     context = gl::GLContextProvider::CreateForCompositorWidget(mWidget,
                 gfxVars::RequiresAcceleratedGLContextForCompositorOGL());
+    gGLContext = context;
+    printf("Created\n");
   }
 
   if (!context) {

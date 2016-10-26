@@ -4,44 +4,108 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var CC = Components.classes;
-const CI = Components.interfaces;
+var WIDTH = window.innerWidth;
+var HEIGHT = window.innerHeight;
+var RECT_MIN_SIZE = 10;
+var RECT_MAX_SIZE = 25;
+var MIN_BORDER_RADIUS = 3;
+var MAX_BORDER_RADIUS = 16;
+var RECT_SPEED = 5;
+var RECT_COUNT = 700; // 700
+function lerp(a, b, t) {
+    return a + (b - a) * t;
+}
+function positionRect(element) {
+    element.style.left = element.x + "px";
+    element.style.top = element.y + "px";
+}
+var nextX = 0, nextY = 0;
+function placeRectAtEdge(element) {
+    var horizontal = Math.random() < 0.5;
+    if (horizontal) {
+        element.x = (Math.random() * WIDTH) | 0;
+        element.deltaX = (Math.random() - 0.5) * RECT_SPEED;
+        var top = Math.random() < 0.5;
+        if (top) {
+            element.y = -element.size;
+            element.deltaY = Math.random() * RECT_SPEED / 2;
+        } else {
+            element.y = HEIGHT;
+            element.deltaY = -Math.random() * RECT_SPEED / 2;
+        }
+    } else {
+        element.y = (Math.random() * WIDTH) | 0;
+        element.deltaY = (Math.random() - 0.5) * RECT_SPEED;
+        var left = Math.random() < 0.5;
+        if (left) {
+            element.x = -element.size;
+            element.deltaX = Math.random() * RECT_SPEED / 2;
+        } else {
+            element.x = WIDTH;
+            element.deltaX = -Math.random() * RECT_SPEED / 2;
+        }
+    }
+    /*element.x = nextX;
+    nextX += element.size;
+    element.y = nextY;
 
-const NS_GFXINFO_CONTRACTID = "@mozilla.org/gfx/info;1";
+    if (nextX >= 800) {
+        nextX = 0;
+        nextY += RECT_MAX_SIZE;
+    }
 
-var gContainingWindow = null;
+    element.deltaX = 0;
+    element.deltaY = 1;*/
+}
+function rectIsOffScreen(element) {
+    var right = element.x + element.size, bottom = element.y + element.size;
+    return right <= 0 || bottom <= 0 || element.x >= WIDTH || element.y >= HEIGHT;
+}
+function createRect() {
+    var section = document.createElement('section');
 
-var gBrowser;
+    section.size = lerp(RECT_MIN_SIZE, RECT_MAX_SIZE, Math.random());
+    //section.size = RECT_MAX_SIZE;
+    section.style.width = section.style.height = section.size + "px";
+    section.style.borderRadius = (Math.min(lerp(MIN_BORDER_RADIUS,
+                                                MAX_BORDER_RADIUS,
+                                                Math.random()), section.size / 3) | 0) + "px";
+    //section.style.borderRadius = lerp(MIN_BORDER_RADIUS, MAX_BORDER_RADIUS, 0.5) + "px";
 
-function OnDocumentLoad(evt) {
-    if (evt.target != gBrowser.contentDocument || evt.target.location == "about:blank")
-        return;
-    gBrowser.removeEventListener("load", OnDocumentLoad, true);
-    gContainingWindow.close();
+    placeRectAtEdge(section);
+    positionRect(section);
+    document.body.appendChild(section);
+    return section;
 }
 
-this.OnRecordingLoad = function OnRecordingLoad(win) {
-    if (win === undefined || win == null) {
-        win = window;
+var rects = [];
+for (var i = 0; i < RECT_COUNT; i++) {
+    rects.push(createRect());
+}
+
+//var frameLimit = 5;
+var lastRefTime = Date.now();
+var frameCount = 0;
+function update() {
+    for (var i = 0; i < rects.length; i++) {
+        var element = rects[i];
+        element.x += element.deltaX;
+        element.y += element.deltaY;
+        if (rectIsOffScreen(element))
+            placeRectAtEdge(element);
+        positionRect(element);
     }
-    if (gContainingWindow == null && win != null) {
-        gContainingWindow = win;
+
+    frameCount++;
+    var now = Date.now();
+    if (now >= lastRefTime + 1000.0) {
+        console.log(frameCount + " FPS");
+        lastRefTime = now;
+        frameCount = 0;
     }
 
-    gBrowser = gContainingWindow.document.getElementById("browser");
-
-    var gfxInfo = (NS_GFXINFO_CONTRACTID in CC) && CC[NS_GFXINFO_CONTRACTID].getService(CI.nsIGfxInfo);
-    var info = gfxInfo.getInfo();
-    dump(info.AzureContentBackend + "\n");
-    if (info.AzureContentBackend == "none") {
-        alert("Page recordings may only be made with Azure content enabled.");
-        gContainingWindow.close();
-        return;
-    }
-
-    gBrowser.addEventListener("load", OnDocumentLoad, true);
-
-    var args = window.arguments[0].wrappedJSObject;
-
-    gBrowser.loadURI(args.uri);
-};
+    //frameLimit--;
+    //if (frameLimit > 0)
+    requestAnimationFrame(update);
+}
+requestAnimationFrame(update);

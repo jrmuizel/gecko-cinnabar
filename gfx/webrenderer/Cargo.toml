@@ -1,0 +1,41 @@
+[package]
+name = "webrender"
+version = "0.2.0"
+authors = ["Glenn Watson <gw@intuitionlibrary.com>"]
+
+[features]
+default = ["webrender_traits/serde_codegen"]
+serde_macros = ["webrender_traits/serde_macros"]
+
+[dependencies]
+app_units = "0.3"
+bit-set = "0.4"
+byteorder = "0.5"
+euclid = "0.9"
+fnv="1.0"
+gleam = "0.2"
+ipc-channel = "0.5"
+lazy_static = "0.2"
+log = "0.3"
+#notify = {git = "https://github.com/glennw/rsnotify.git", branch = "inotify-modify"}
+num-traits = "0.1.32"
+offscreen_gl_context = {version = "0.3", features = ["serde_serialization"]}
+scoped_threadpool = "0.1.6"
+time = "0.1"
+webrender_traits = {git = "https://github.com/servo/webrender_traits", default-features = false}
+glutin ="*"
+
+[target.'cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))'.dependencies]
+freetype = {git = "https://github.com/servo/rust-freetype"}
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.4"
+core-text = "2.0"
+
+[lib]
+name = "webrenderer"
+crate-type = ["staticlib"] # could be `staticlib` as well
+
+[profile.release]
+opt-level = 3
+debug = true
