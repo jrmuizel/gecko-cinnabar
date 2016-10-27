@@ -11,7 +11,7 @@ use gleam::gl;
 use std::ffi::CStr;
 use webrender_traits::{ServoScrollRootId};
 use webrender_traits::{Epoch, ColorF};
-use webrender_traits::{ImageFormat, ImageKey, ImageRendering, RendererKind};
+use webrender_traits::{ImageFormat, ImageKey, ImageMask, ImageRendering, RendererKind};
 use std::mem;
 use std::slice;
 
@@ -418,6 +418,14 @@ pub struct WrRect
     height: f32
 }
 
+#[repr(C)]
+pub struct WrImageMask
+{
+    image: ImageKey,
+    rect: WrRect,
+    repeat: bool
+}
+
 impl WrRect
 {
     pub fn to_rect(&self) -> Rect<f32>
@@ -427,16 +435,20 @@ impl WrRect
 }
 
 #[no_mangle]
-pub extern fn wr_dp_push_image(state:&mut WrState, bounds: WrRect, clip : WrRect, key: ImageKey) {
+pub extern fn wr_dp_push_image(state:&mut WrState, bounds: WrRect, clip : WrRect, mask: *const WrImageMask, key: ImageKey) {
     if state.dl_builder.len() == 0 {
       return;
     }
     //let (width, height) = state.size;
     let bounds = bounds.to_rect();
     let clip = clip.to_rect();
+
+    // convert from the C type to the Rust type
+    let mask = unsafe { mask.as_ref().map(|&WrImageMask{image, ref rect,repeat}| ImageMask{image: image, rect: rect.to_rect(), repeat: repeat}) };
+
     let clip_region = webrender_traits::ClipRegion::new(&clip,
                                                         Vec::new(),
-                                                        None,
+                                                        mask,
                                                         &mut state.frame_builder.auxiliary_lists_builder);
     let rect = bounds;
     state.dl_builder.last_mut().unwrap().push_image(rect,
