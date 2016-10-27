@@ -55,6 +55,11 @@ public:
   {
     return static_cast<WebRenderLayer*>(aLayer->ImplData());
   }
+
+  gfx::Rect RelativeToVisible(gfx::Rect aRect);
+  gfx::Rect RelativeToTransformedVisible(gfx::Rect aRect);
+  gfx::Rect RelativeToParent(gfx::Rect aRect);
+  gfx::Rect TransformedVisibleBoundsRelativeToParent();
 };
 
 class WebRenderLayerManager final : public LayerManager, public CompositorController

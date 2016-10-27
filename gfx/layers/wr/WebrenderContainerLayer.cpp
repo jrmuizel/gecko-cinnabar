@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "WebrenderContainerLayer.h"
+#include "LayersLogging.h"
 
 namespace mozilla {
 namespace layers {
@@ -14,9 +15,15 @@ WebRenderContainerLayer::RenderLayer(wrstate* aWRState)
   AutoTArray<Layer*, 12> children;
   SortChildrenBy3DZOrder(children);
 
+  Rect relBounds = TransformedVisibleBoundsRelativeToParent();
+  Matrix4x4 transform;// = GetTransform();
+  if (gfxPrefs::LayersDump()) printf_stderr("ContainerLayer %p using %s as bounds/overflow, %s as transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
+
+  wr_push_dl_builder(aWRState);
   for (Layer* child : children) {
     ToWebRenderLayer(child)->RenderLayer(aWRState);
   }
+  wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
 }
 
 } // namespace layers

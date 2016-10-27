@@ -9,6 +9,7 @@
 #include "gfxUtils.h"
 #include "GLContext.h"
 #include "GLScreenBuffer.h"
+#include "LayersLogging.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/layers/TextureClientSharedSurface.h"
 #include "PersistentBufferProvider.h"
@@ -91,7 +92,7 @@ WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
   WRImageKey key;
   key = wr_add_image(aWRState, size.width, size.height, RGBA8, map.GetData(), size.height * map.GetStride());
 
-  auto transform = GetTransform();
+  Matrix4x4 transform;// = GetTransform();
   const bool needsYFlip = (mOriginPos == gl::OriginPos::BottomLeft);
   if (needsYFlip) {
     transform.PreTranslate(0, size.height, 0).PreScale(1, -1, 1);
@@ -99,19 +100,19 @@ WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
   gfx::Rect rect(0, 0, size.width, size.height);
 
   gfx::Rect clip;
-  auto combinedClip = GetCombinedClipRect();
-  if (combinedClip.isSome()) {
-      clip = IntRectToRect(combinedClip.ref().ToUnknownRect());
+  if (GetClipRect().isSome()) {
+      clip = RelativeToTransformedVisible(IntRectToRect(GetClipRect().ref().ToUnknownRect()));
   } else {
       clip = rect;
   }
+  if (gfxPrefs::LayersDump()) printf_stderr("CanvasLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
   wr_push_dl_builder(aWRState);
-  wr_push_dl_builder(aWRState);
-  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(rect), NULL, key);
+  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), NULL, key);
   Manager()->AddImageKeyForDiscard(key);
-  wr_pop_dl_builder(aWRState, toWrRect(Rect()), toWrRect(Rect(0, 0, rect.width, rect.height)), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
-  gfx::Matrix4x4 identity;
-  wr_pop_dl_builder(aWRState, toWrRect(Rect()), toWrRect(Rect(clip.x, clip.y, 0, 0)), &identity.components[0], FrameMetrics::NULL_SCROLL_ID);
+
+  Rect relBounds = TransformedVisibleBoundsRelativeToParent();
+  if (gfxPrefs::LayersDump()) printf_stderr("CanvasLayer %p using %s as bounds/overflow, %s for transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
+  wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
 }
 
 } // namespace layers
