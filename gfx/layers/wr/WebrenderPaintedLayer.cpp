@@ -65,7 +65,7 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
   }
   wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), NULL, key);
   Manager()->AddImageKeyForDiscard(key);
-  wr_pop_dl_builder(aWRState, toWrRect(Rect()), toWrRect(bounds), &transform.components[0]);
+  wr_pop_dl_builder(aWRState, toWrRect(Rect()), toWrRect(bounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
 }
 
 } // namespace layers
