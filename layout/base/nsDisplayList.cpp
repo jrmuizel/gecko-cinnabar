@@ -3117,7 +3117,8 @@ nsDisplayBackgroundImage::BuildWRDisplayList(wrstate* wrState) {
   gfxRect bounds =
     nsLayoutUtils::RectToGfxRect(mBackgroundRect,
                                  mFrame->PresContext()->AppUnitsPerDevPixel());
-  wr_dp_push_rect(wrState, bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a);
+  MOZ_RELEASE_ASSERT(false);
+  //wr_dp_push_rect(wrState, bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a);
   printf("push %f, %f, %f, %f, %f, %f, %f, %f\n", bounds.x, bounds.y, bounds.width, bounds.height, color.r, color.g, color.b, color.a);
 }
 
@@ -3543,7 +3544,8 @@ nsDisplayBackgroundColor::BuildWRDisplayList(wrstate* wrState) {
   gfxRect bounds =
     nsLayoutUtils::RectToGfxRect(mBackgroundRect,
                                  mFrame->PresContext()->AppUnitsPerDevPixel());
-  wr_dp_push_rect(wrState, bounds.x, bounds.y, bounds.width, bounds.height, mColor.r, mColor.g, mColor.b, mColor.a);
+  MOZ_RELEASE_ASSERT(false);
+  //wr_dp_push_rect(wrState, bounds.x, bounds.y, bounds.width, bounds.height, mColor.r, mColor.g, mColor.b, mColor.a);
   printf("push %f, %f, %f, %f, %f, %f, %f, %f\n", bounds.x, bounds.y, bounds.width, bounds.height, mColor.r, mColor.g, mColor.b, mColor.a);
 }
 

@@ -16,9 +16,9 @@ using namespace mozilla::gfx;
 void
 WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
 {
-  auto visibleRegion = GetVisibleRegion();
-  auto bounds = visibleRegion.GetBounds();
-  auto size = bounds.Size();
+  LayerIntRegion visibleRegion = GetVisibleRegion();
+  LayerIntRect bounds = visibleRegion.GetBounds();
+  LayerIntSize size = bounds.Size();
   if (size.IsEmpty()) {
       printf("Empty region\n");
       return;
@@ -54,18 +54,25 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
 
       target->ReleaseBits(data);
   }
-  auto transform = GetTransform();
-  Rect rect(bounds.x, bounds.y, bounds.width, bounds.height);
+
+  // Since we are creating a stacking context below using the visible region of
+  // this layer, we need to make sure the image display item has coordinates
+  // relative to the visible region.
+  Rect rect = RelativeToVisible(IntRectToRect(bounds.ToUnknownRect()));
   Rect clip;
-  auto combinedClip = GetCombinedClipRect();
-  if (combinedClip.isSome()) {
-      clip = IntRectToRect(combinedClip.ref().ToUnknownRect());
+  if (GetClipRect().isSome()) {
+      clip = RelativeToTransformedVisible(IntRectToRect(GetClipRect().ref().ToUnknownRect()));
   } else {
       clip = rect;
   }
+  if (gfxPrefs::LayersDump()) printf_stderr("PaintedLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
   wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), NULL, key);
   Manager()->AddImageKeyForDiscard(key);
-  wr_pop_dl_builder(aWRState, toWrRect(Rect()), toWrRect(bounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
+
+  Rect relBounds = TransformedVisibleBoundsRelativeToParent();
+  Matrix4x4 transform;// = GetTransform();
+  if (gfxPrefs::LayersDump()) printf_stderr("PaintedLayer %p using %s as bounds/overflow, %s for transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
+  wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
 }
 
 } // namespace layers
