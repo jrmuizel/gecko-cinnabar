@@ -283,13 +283,22 @@ pub extern fn wr_push_dl_builder(state:&mut WrState)
 }
 
 #[no_mangle]
-pub extern fn wr_pop_dl_builder(state:&mut WrState, bounds: WrRect, overflow: WrRect, transform: &Matrix4D<f32>)
+pub extern fn wr_pop_dl_builder(state:&mut WrState, bounds: WrRect, overflow: WrRect, transform: &Matrix4D<f32>, scroll_id: u64)
 {
     // 
     state.z_index += 1;
 
+    let pipeline_id = state.frame_builder.root_pipeline_id;
+    let scroll_layer_id = if scroll_id == 0 {
+        None
+    } else {
+        Some(webrender_traits::ScrollLayerId::new(pipeline_id,
+                                                  scroll_id as usize, // WR issue 489
+                                                  ServoScrollRootId(0)))
+    };
+
     let mut sc =
-        webrender_traits::StackingContext::new(None,
+        webrender_traits::StackingContext::new(scroll_layer_id,
                                                webrender_traits::ScrollPolicy::Scrollable,
                                                bounds.to_rect(),
                                                overflow.to_rect(),
@@ -302,7 +311,6 @@ pub extern fn wr_pop_dl_builder(state:&mut WrState, bounds: WrRect, overflow: Wr
                                                &mut state.frame_builder.auxiliary_lists_builder);
     let dl = state.dl_builder.pop().unwrap();
     state.frame_builder.add_display_list(&mut state.api, dl.finalize(), &mut sc);
-    let pipeline_id = state.frame_builder.root_pipeline_id;
     let stacking_context_id = state.frame_builder.add_stacking_context(&mut state.api, pipeline_id, sc);
 
     state.dl_builder.last_mut().unwrap().push_stacking_context(stacking_context_id);

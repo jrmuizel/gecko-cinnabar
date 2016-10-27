@@ -48,7 +48,7 @@ void wr_delete_image(wrstate* wrstate, WRImageKey key);
 
 void wr_push_dl_builder(wrstate *wrState);
 //XXX: matrix should use a proper type
-void wr_pop_dl_builder(wrstate *wrState, WRRect bounds, WRRect overflow, float *matrix);
+void wr_pop_dl_builder(wrstate *wrState, WRRect bounds, WRRect overflow, float *matrix, uint64_t scrollId);
 void wr_dp_begin(wrstate* wrState, uint32_t width, uint32_t height);
 void wr_dp_end(wrstate* wrState);
 void wr_composite(wrstate* wrState);
