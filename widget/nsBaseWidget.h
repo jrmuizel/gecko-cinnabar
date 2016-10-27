@@ -435,6 +435,7 @@ protected:
   void            BaseCreate(nsIWidget *aParent,
                              nsWidgetInitData* aInitData);
 
+  bool CreateWebrenderLayerManager();
   virtual void ConfigureAPZCTreeManager();
   virtual void ConfigureAPZControllerThread();
   virtual already_AddRefed<GeckoContentController> CreateRootContentController();
