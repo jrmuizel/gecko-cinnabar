@@ -44,12 +44,27 @@ WebRenderLayer::RelativeToTransformedVisible(Rect aRect)
 }
 
 Rect
+WebRenderLayer::ParentStackingContextBounds(size_t aScrollMetadataIndex)
+{
+  // Walk up to find the parent stacking context. This will be created either
+  // by the nearest scrollable metrics, or by the parent layer which must be a
+  // ContainerLayer.
+  Layer* layer = GetLayer();
+  for (size_t i = aScrollMetadataIndex + 1; i < layer->GetScrollMetadataCount(); i++) {
+    if (layer->GetFrameMetrics(i).IsScrollable()) {
+      return layer->GetFrameMetrics(i).CalculateCompositedRectInCssPixels().ToUnknownRect();
+    }
+  }
+  if (layer->GetParent()) {
+    return IntRectToRect(layer->GetParent()->GetVisibleRegion().GetBounds().ToUnknownRect());
+  }
+  return Rect();
+}
+
+Rect
 WebRenderLayer::RelativeToParent(Rect aRect)
 {
-  IntRect parentBounds;
-  if (GetLayer()->GetParent()) {
-    parentBounds = GetLayer()->GetParent()->GetVisibleRegion().GetBounds().ToUnknownRect();
-  }
+  Rect parentBounds = ParentStackingContextBounds(-1);
   aRect.MoveBy(-parentBounds.x, -parentBounds.y);
   return aRect;
 }
@@ -60,6 +75,50 @@ WebRenderLayer::TransformedVisibleBoundsRelativeToParent()
   IntRect bounds = GetLayer()->GetVisibleRegion().GetBounds().ToUnknownRect();
   Rect transformed = GetLayer()->GetTransform().TransformBounds(IntRectToRect(bounds));
   return RelativeToParent(transformed);
+}
+
+WRScrollFrameStackingContextGenerator::WRScrollFrameStackingContextGenerator(
+        wrstate* aWRState,
+        WebRenderLayer* aLayer)
+  : mWRState(aWRState)
+  , mLayer(aLayer)
+{
+  Layer* layer = mLayer->GetLayer();
+  for (size_t i = layer->GetScrollMetadataCount(); i > 0; i--) {
+    const FrameMetrics& fm = layer->GetFrameMetrics(i - 1);
+    if (!fm.IsScrollable()) {
+      continue;
+    }
+    if (gfxPrefs::LayersDump()) printf_stderr("Pushing stacking context id %" PRIu64"\n", fm.GetScrollId());
+    wr_push_dl_builder(mWRState);
+  }
+}
+
+WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
+{
+  Matrix4x4 identity;
+  Layer* layer = mLayer->GetLayer();
+  for (size_t i = 0; i < layer->GetScrollMetadataCount(); i++) {
+    const FrameMetrics& fm = layer->GetFrameMetrics(i);
+    if (!fm.IsScrollable()) {
+      continue;
+    }
+    CSSRect bounds = fm.CalculateCompositedRectInCssPixels();
+    CSSRect overflow = fm.GetExpandedScrollableRect();
+    CSSPoint scrollPos = fm.GetScrollOffset();
+    Rect parentBounds = mLayer->ParentStackingContextBounds(i);
+    bounds.MoveBy(-parentBounds.x, -parentBounds.y);
+    // Subtract the MT scroll position from the overflow here so that the WR
+    // scroll offset (which is the APZ async scroll component) always fits in
+    // the available overflow. If we didn't do this and WR did bounds checking
+    // on the scroll offset, we'd fail those checks.
+    overflow.MoveBy(bounds.x - scrollPos.x, bounds.y - scrollPos.y);
+    if (gfxPrefs::LayersDump()) {
+      printf_stderr("Popping stacking context id %" PRIu64 " with bounds=%s overflow=%s\n",
+        fm.GetScrollId(), Stringify(bounds).c_str(), Stringify(overflow).c_str());
+    }
+    wr_pop_dl_builder(mWRState, toWrRect(bounds), toWrRect(overflow), &identity.components[0], FrameMetrics::NULL_SCROLL_ID);
+  }
 }
 
 
