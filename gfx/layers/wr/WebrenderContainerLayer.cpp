@@ -12,6 +12,8 @@ namespace layers {
 void
 WebRenderContainerLayer::RenderLayer(wrstate* aWRState)
 {
+  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
+
   AutoTArray<Layer*, 12> children;
   SortChildrenBy3DZOrder(children);
 

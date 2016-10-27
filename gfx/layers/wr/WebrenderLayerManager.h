@@ -59,8 +59,19 @@ public:
 
   gfx::Rect RelativeToVisible(gfx::Rect aRect);
   gfx::Rect RelativeToTransformedVisible(gfx::Rect aRect);
+  gfx::Rect ParentStackingContextBounds(size_t aScrollMetadataIndex);
   gfx::Rect RelativeToParent(gfx::Rect aRect);
   gfx::Rect TransformedVisibleBoundsRelativeToParent();
+};
+
+class MOZ_RAII WRScrollFrameStackingContextGenerator
+{
+public:
+  WRScrollFrameStackingContextGenerator(wrstate* aWRState, WebRenderLayer* aLayer);
+  ~WRScrollFrameStackingContextGenerator();
+private:
+  wrstate* mWRState;
+  WebRenderLayer* mLayer;
 };
 
 class WebRenderLayerManager final : public LayerManager, public CompositorController

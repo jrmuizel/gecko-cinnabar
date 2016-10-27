@@ -12,6 +12,8 @@ namespace layers {
 void
 WebRenderColorLayer::RenderLayer(wrstate* aWRState)
 {
+  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
+
   Rect rect = RelativeToParent(GetTransform().TransformBounds(IntRectToRect(mBounds)));
   Rect clip;
   if (GetClipRect().isSome()) {
