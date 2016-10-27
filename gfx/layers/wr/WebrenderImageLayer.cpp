@@ -56,9 +56,9 @@ WebRenderImageLayer::RenderLayer(wrstate* aWRState)
   wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(rect), NULL, key);
   Manager()->AddImageKeyForDiscard(key);
   printf("clip, %f %f %f %f\n", clip.x, clip.y, clip.width, clip.height);
-  wr_pop_dl_builder(aWRState, 0, 0, rect.width, rect.height, &transform.components[0]);
+  wr_pop_dl_builder(aWRState, toWrRect(Rect()), toWrRect(Rect(0, 0, rect.width, rect.height)), &transform.components[0]);
   Matrix4x4 identity;
-  wr_pop_dl_builder(aWRState, clip.x, clip.y, 0, 0, &identity.components[0]);
+  wr_pop_dl_builder(aWRState, toWrRect(Rect()), toWrRect(Rect(clip.x, clip.y, 0, 0)), &identity.components[0]);
   //mContainer->SetImageFactory(originalIF);
 }
 

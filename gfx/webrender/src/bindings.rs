@@ -283,7 +283,7 @@ pub extern fn wr_push_dl_builder(state:&mut WrState)
 }
 
 #[no_mangle]
-pub extern fn wr_pop_dl_builder(state:&mut WrState, x: f32, y: f32, width: f32, height: f32, transform: &Matrix4D<f32>)
+pub extern fn wr_pop_dl_builder(state:&mut WrState, bounds: WrRect, overflow: WrRect, transform: &Matrix4D<f32>)
 {
     // 
     state.z_index += 1;
@@ -291,8 +291,8 @@ pub extern fn wr_pop_dl_builder(state:&mut WrState, x: f32, y: f32, width: f32, 
     let mut sc =
         webrender_traits::StackingContext::new(None,
                                                webrender_traits::ScrollPolicy::Scrollable,
-                                               Rect::new(Point2D::new(0., 0.), Size2D::new(0., 0.)),
-                                               Rect::new(Point2D::new(x, y), Size2D::new(width, height)),
+                                               bounds.to_rect(),
+                                               overflow.to_rect(),
                                                state.z_index,
                                                transform,
                                                &Matrix4D::identity(),
