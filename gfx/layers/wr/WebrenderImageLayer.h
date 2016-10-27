@@ -32,6 +32,8 @@ protected:
     return static_cast<WebRenderLayerManager*>(mManager);
   }
 
+public:
+  Layer* GetLayer() override { return this; }
   void RenderLayer(wrstate* aWRState) override;
 };
 

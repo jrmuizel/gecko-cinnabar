@@ -47,6 +47,7 @@ class APZCTreeManager;
 class WebRenderLayer
 {
 public:
+  virtual Layer* GetLayer() = 0;
   virtual void RenderLayer(wrstate* aWRState) = 0;
 
   static inline WebRenderLayer*
