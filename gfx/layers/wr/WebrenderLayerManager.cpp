@@ -39,11 +39,7 @@ WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
   mWidget = CompositorWidget::CreateLocal(initData, aWidget);
   mGLContext = GLContextProvider::CreateForWindow(aWidget, true);
 
-  // ewwwwww, using extern to access a faraway object because I don't want to
-  // expose it properly via an API! Good thing this is just a hacky prototype
-  // and I can get away with it :)
-  extern std::map<uint64_t, CompositorBridgeParent::LayerTreeState> sIndirectLayerTrees;
-  sIndirectLayerTrees[mLayersId].mWRManager = this;
+  CompositorBridgeParent::SetWRLayerManager(aLayersId, this);
 }
 
 void
