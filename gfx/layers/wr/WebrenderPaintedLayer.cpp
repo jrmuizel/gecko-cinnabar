@@ -63,7 +63,7 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
   } else {
       clip = rect;
   }
-  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), key);
+  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), NULL, key);
   Manager()->AddImageKeyForDiscard(key);
   wr_pop_dl_builder(aWRState, bounds.x, bounds.y, bounds.width + bounds.x, bounds.height + bounds.y, &transform.components[0]);
 }
