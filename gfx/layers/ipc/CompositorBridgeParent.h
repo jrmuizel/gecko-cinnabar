@@ -276,6 +276,9 @@ public:
                                   bool aUseExternalSurfaceSize,
                                   const gfx::IntSize& aSurfaceSize);
 
+  static void SetWRLayerManager(uint64_t aLayersId,
+                                WebRenderLayerManager* aLayerManager);
+
   // Must only be called by CompositorBridgeChild. After invoking this, the
   // IPC channel is active and RecvWillStop/ActorDestroy must be called to
   // free the compositor.
