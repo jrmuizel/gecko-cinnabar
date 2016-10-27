@@ -27,6 +27,8 @@ protected:
     MOZ_COUNT_DTOR(WebRenderColorLayer);
   }
 
+public:
+  Layer* GetLayer() override { return this; }
   void RenderLayer(wrstate* aWRState) override;
 };
 
