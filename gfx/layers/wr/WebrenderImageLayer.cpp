@@ -32,6 +32,8 @@ WebRenderImageLayer::RenderLayer(wrstate* aWRState)
   if (!surface)
     return;
 
+  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
+
   RefPtr<DataSourceSurface> dataSurface = surface->GetDataSurface();
   DataSourceSurface::ScopedMap map(dataSurface, DataSourceSurface::MapType::READ);
   //XXX
