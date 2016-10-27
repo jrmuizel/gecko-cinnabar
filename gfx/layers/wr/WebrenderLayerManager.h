@@ -23,14 +23,21 @@ class CompositorWidgetDelegate;
 }
 namespace layers {
 
-static inline WRRect toWrRect(gfx::Rect rect)
+template<class T>
+static inline WRRect toWrRect(const gfx::RectTyped<T>& rect)
 {
-    WRRect r;
-    r.x = rect.x;
-    r.y = rect.y;
-    r.width = rect.width;
-    r.height = rect.height;
-    return r;
+  WRRect r;
+  r.x = rect.x;
+  r.y = rect.y;
+  r.width = rect.width;
+  r.height = rect.height;
+  return r;
+}
+
+template<class T>
+static inline WRRect toWrRect(const gfx::IntRectTyped<T>& rect)
+{
+  return toWrRect(IntRectToRect(rect));
 }
 
 
