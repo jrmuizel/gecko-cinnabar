@@ -34,6 +34,7 @@ protected:
   }
 
 public:
+  Layer* GetLayer() override { return this; }
   void RenderLayer(wrstate* aWRState) override;
 };
 
