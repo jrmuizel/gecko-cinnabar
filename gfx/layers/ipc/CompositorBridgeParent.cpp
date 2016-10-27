@@ -196,6 +196,14 @@ typedef map<uint64_t, CompositorBridgeParent::LayerTreeState> LayerTreeMap;
 LayerTreeMap sIndirectLayerTrees;
 static StaticAutoPtr<mozilla::Monitor> sIndirectLayerTreesLock;
 
+/* static */
+void
+CompositorBridgeParent::SetWRLayerManager(uint64_t aLayersId,
+                                          WebRenderLayerManager* aLayerManager)
+{
+  sIndirectLayerTrees[aLayersId].mWRManager = aLayerManager;
+}
+
 static void EnsureLayerTreeMapReady()
 {
   MOZ_ASSERT(NS_IsMainThread());
