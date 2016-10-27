@@ -12,8 +12,15 @@ namespace layers {
 void
 WebRenderColorLayer::RenderLayer(wrstate* aWRState)
 {
-  printf("rendering color layer %p\n", this);
-  wr_dp_push_rect(aWRState, mBounds.x, mBounds.y, mBounds.width, mBounds.height,
+  Rect rect = RelativeToParent(GetTransform().TransformBounds(IntRectToRect(mBounds)));
+  Rect clip;
+  if (GetClipRect().isSome()) {
+      clip = RelativeToParent(IntRectToRect(GetClipRect().ref().ToUnknownRect()));
+  } else {
+      clip = rect;
+  }
+  if (gfxPrefs::LayersDump()) printf_stderr("ColorLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
+  wr_dp_push_rect(aWRState, toWrRect(rect), toWrRect(clip),
                   mColor.r, mColor.g, mColor.b, mColor.a);
 }
 

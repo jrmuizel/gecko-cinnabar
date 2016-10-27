@@ -40,25 +40,24 @@ WebRenderImageLayer::RenderLayer(wrstate* aWRState)
   WRImageKey key;
   key = wr_add_image(aWRState, size.width, size.height, RGBA8, map.GetData(), size.height * map.GetStride());
 
-  auto transform = GetTransform();
   Rect rect(0, 0, size.width, size.height);
 
   Rect clip;
-  auto combinedClip = GetCombinedClipRect();
-  if (combinedClip.isSome()) {
-      printf("some clip\n");
-      clip = IntRectToRect(combinedClip.ref().ToUnknownRect());
+  if (GetClipRect().isSome()) {
+      clip = RelativeToTransformedVisible(IntRectToRect(GetClipRect().ref().ToUnknownRect()));
   } else {
       clip = rect;
   }
+  if (gfxPrefs::LayersDump()) printf_stderr("ImageLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
   wr_push_dl_builder(aWRState);
-  wr_push_dl_builder(aWRState);
-  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(rect), NULL, key);
+  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), NULL, key);
   Manager()->AddImageKeyForDiscard(key);
-  printf("clip, %f %f %f %f\n", clip.x, clip.y, clip.width, clip.height);
-  wr_pop_dl_builder(aWRState, toWrRect(Rect()), toWrRect(Rect(0, 0, rect.width, rect.height)), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
-  Matrix4x4 identity;
-  wr_pop_dl_builder(aWRState, toWrRect(Rect()), toWrRect(Rect(clip.x, clip.y, 0, 0)), &identity.components[0], FrameMetrics::NULL_SCROLL_ID);
+
+  Rect relBounds = TransformedVisibleBoundsRelativeToParent();
+  Matrix4x4 transform;// = GetTransform();
+  if (gfxPrefs::LayersDump()) printf_stderr("ImageLayer %p using %s as bounds/overflow, %s for transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
+  wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
+
   //mContainer->SetImageFactory(originalIF);
 }
 

@@ -26,6 +26,43 @@ using namespace widget;
 
 namespace layers {
 
+Rect
+WebRenderLayer::RelativeToVisible(Rect aRect)
+{
+  IntRect bounds = GetLayer()->GetVisibleRegion().GetBounds().ToUnknownRect();
+  aRect.MoveBy(-bounds.x, -bounds.y);
+  return aRect;
+}
+
+Rect
+WebRenderLayer::RelativeToTransformedVisible(Rect aRect)
+{
+  IntRect bounds = GetLayer()->GetVisibleRegion().GetBounds().ToUnknownRect();
+  Rect transformed = GetLayer()->GetTransform().TransformBounds(IntRectToRect(bounds));
+  aRect.MoveBy(-transformed.x, -transformed.y);
+  return aRect;
+}
+
+Rect
+WebRenderLayer::RelativeToParent(Rect aRect)
+{
+  IntRect parentBounds;
+  if (GetLayer()->GetParent()) {
+    parentBounds = GetLayer()->GetParent()->GetVisibleRegion().GetBounds().ToUnknownRect();
+  }
+  aRect.MoveBy(-parentBounds.x, -parentBounds.y);
+  return aRect;
+}
+
+Rect
+WebRenderLayer::TransformedVisibleBoundsRelativeToParent()
+{
+  IntRect bounds = GetLayer()->GetVisibleRegion().GetBounds().ToUnknownRect();
+  Rect transformed = GetLayer()->GetTransform().TransformBounds(IntRectToRect(bounds));
+  return RelativeToParent(transformed);
+}
+
+
 WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
                                              uint64_t aLayersId,
                                              APZCTreeManager* aAPZC)
