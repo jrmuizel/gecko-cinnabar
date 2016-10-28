@@ -3671,7 +3671,7 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
   RECT windowRect;
   ::GetClientRect(mWnd, &windowRect);
 
-  if (CreateWebrenderLayerManager()) {
+  if (CreateWebRenderLayerManager()) {
     MOZ_ASSERT(mLayerManager);
     return mLayerManager;
   }

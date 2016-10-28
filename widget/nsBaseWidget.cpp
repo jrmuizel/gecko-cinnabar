@@ -1399,9 +1399,9 @@ bool nsBaseWidget::ShouldUseOffMainThreadCompositing()
   return gfxPlatform::UsesOffMainThreadCompositing();
 }
 
-bool nsBaseWidget::CreateWebrenderLayerManager()
+bool nsBaseWidget::CreateWebRenderLayerManager()
 {
-  if (!XRE_IsParentProcess()) {
+  if (!XRE_IsParentProcess() || mLayerManager) {
     return false;
   }
 
@@ -1430,7 +1430,7 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
       return nullptr;
     }
 
-    if (CreateWebrenderLayerManager()) {
+    if (CreateWebRenderLayerManager()) {
       MOZ_ASSERT(mLayerManager);
       return mLayerManager;
     }
