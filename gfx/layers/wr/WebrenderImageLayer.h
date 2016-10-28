@@ -21,6 +21,7 @@ public:
     MOZ_COUNT_CTOR(WebRenderImageLayer);
   }
 
+  virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override;
 protected:
   virtual ~WebRenderImageLayer()
   {
