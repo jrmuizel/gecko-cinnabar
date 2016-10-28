@@ -1401,7 +1401,7 @@ bool nsBaseWidget::ShouldUseOffMainThreadCompositing()
 
 bool nsBaseWidget::CreateWebrenderLayerManager()
 {
-  if (!XRE_IsContentProcess()) {
+  if (!XRE_IsParentProcess()) {
     return false;
   }
 
