@@ -10,23 +10,27 @@ namespace layers {
 
 using namespace gfx;
 
-void
-WebRenderImageLayer::RenderLayer(wrstate* aWRState)
+already_AddRefed<gfx::SourceSurface>
+WebRenderImageLayer::GetAsSourceSurface()
 {
-  //RefPtr<ImageFactory> originalIF = mContainer->GetImageFactory();
-  //mContainer->SetImageFactory(BasicManager()->GetImageFactory());
-
   AutoLockImage autoLock(mContainer);
   Image *image = autoLock.GetImage();
   if (!image) {
-    //mContainer->SetImageFactory(originalIF);
-    return;
+    return nullptr;
   }
   RefPtr<gfx::SourceSurface> surface = image->GetAsSourceSurface();
   if (!surface || !surface->IsValid()) {
-    //mContainer->SetImageFactory(originalIF);
-    return;
+    return nullptr;
   }
+  return surface.forget();
+}
+
+void
+WebRenderImageLayer::RenderLayer(wrstate* aWRState)
+{
+  RefPtr<gfx::SourceSurface> surface = GetAsSourceSurface();
+  if (!surface)
+    return;
 
   RefPtr<DataSourceSurface> dataSurface = surface->GetDataSurface();
   DataSourceSurface::ScopedMap map(dataSurface, DataSourceSurface::MapType::READ);
