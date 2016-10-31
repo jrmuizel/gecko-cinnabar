@@ -405,6 +405,15 @@ pub extern fn wr_dp_push_rect(state:&mut WrState, rect: WrRect, clip: WrRect, r:
                                ColorF::new(r, g, b, a));
 }
 
+#[no_mangle]
+pub extern fn wr_set_async_scroll(state: &mut WrState, scroll_id: u64, x: f32, y: f32) {
+    let scroll_layer_id = webrender_traits::ScrollLayerId::new(
+        state.frame_builder.root_pipeline_id,
+        scroll_id as usize,
+        ServoScrollRootId(0));
+    state.api.set_scroll_offset(scroll_layer_id, Point2D::new(x, y));
+}
+
 #[repr(C)]
 pub struct WrRect
 {

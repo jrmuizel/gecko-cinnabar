@@ -129,7 +129,9 @@ public:
   void AddImageKeyForDiscard(WRImageKey);
   void DiscardImages();
 
+  // APZ stuff
   void SetIsFirstPaint() override { mIsFirstPaint = true; }
+  void ApplyAPZOffsets();
 
   // CompositorController
   NS_IMETHOD_(MozExternalRefCountType) AddRef() override { return LayerManager::AddRef(); }
