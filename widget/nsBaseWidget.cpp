@@ -1399,6 +1399,27 @@ bool nsBaseWidget::ShouldUseOffMainThreadCompositing()
   return gfxPlatform::UsesOffMainThreadCompositing();
 }
 
+bool nsBaseWidget::CreateWebRenderLayerManager()
+{
+  if (!XRE_IsParentProcess() || mLayerManager) {
+    return false;
+  }
+
+  mRootLayerTreeId = Some(gfx::GPUProcessManager::Get()->AllocateLayerTreeId());
+  APZCTreeManager* apzc = nullptr;
+  if (gfxPlatform::AsyncPanZoomEnabled()) {
+    apzc = new APZCTreeManager();
+    mAPZC = apzc;
+    ConfigureAPZCTreeManager();
+  }
+
+  WebRenderLayerManager* manager = new WebRenderLayerManager(this,
+  mRootLayerTreeId.value(), apzc);
+  mCompositorWidgetDelegate = manager->GetCompositorWidgetDelegate();
+  mLayerManager = manager;
+  return true;
+}
+
 LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
                                             LayersBackend aBackendHint,
                                             LayerManagerPersistence aPersistence)
@@ -1409,18 +1430,9 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
       return nullptr;
     }
 
-    if (!XRE_IsContentProcess()) {
-      mRootLayerTreeId = Some(gfx::GPUProcessManager::Get()->AllocateLayerTreeId());
-      APZCTreeManager* apzc = nullptr;
-      if (gfxPlatform::AsyncPanZoomEnabled()) {
-        apzc = new APZCTreeManager();
-        mAPZC = apzc;
-        ConfigureAPZCTreeManager();
-      }
-      WebRenderLayerManager* manager = new WebRenderLayerManager(this,
-        mRootLayerTreeId.value(), apzc);
-      mCompositorWidgetDelegate = manager->GetCompositorWidgetDelegate();
-      mLayerManager = manager;
+    if (CreateWebRenderLayerManager()) {
+      MOZ_ASSERT(mLayerManager);
+      return mLayerManager;
     }
 
     // Try to use an async compositor first, if possible
