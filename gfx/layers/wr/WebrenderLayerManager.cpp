@@ -167,16 +167,16 @@ WebRenderLayerManager::GetMaxTextureSize() const
   return 4096;
 }
 
-void
+bool
 WebRenderLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
 {
-  BeginTransaction();
+  return BeginTransaction();
 }
 
-void
+bool
 WebRenderLayerManager::BeginTransaction()
 {
-
+  return true;
 }
 
 bool
