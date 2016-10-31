@@ -86,6 +86,10 @@ mod macos {
             let symbol = unsafe {
                 CFBundleGetFunctionPointerForName(self.0, symbol_name.as_concrete_TypeRef())
             };
+
+            if symbol.is_null() {
+                println!("Could not find symbol for {:?}", symbol_name);
+            }
             symbol as *const _
         }
     }
@@ -97,28 +101,61 @@ mod win {
     use kernel32;
     use std::ffi::CString;
     use std::os::raw::c_void;
+    use std::mem::transmute;
+
+    #[allow(non_camel_case_types)] // Because this is what the actual func name by MSFT is named
+    type wglGetProcAddress = extern "system" fn (lpszProc : winapi::winnt::LPCSTR) -> winapi::minwindef::PROC;
 
     // This is a tuple struct
-    pub struct Library(winapi::HMODULE);
+    pub struct Library {
+        ogl_lib: winapi::HMODULE,
+        ogl_ext_lib: wglGetProcAddress,
+    }
 
     // TODO: Maybe switch this out with crate libloading for a safer alternative
     impl Library {
         pub fn new() -> Library {
-            let lib = unsafe {
+            let system_ogl_lib = unsafe {
                 kernel32::LoadLibraryA(b"opengl32.dll\0".as_ptr() as *const _)
             };
 
-            if lib.is_null() {
-                println!("Could not load opengl32 library");
+            if system_ogl_lib.is_null() {
+                panic!("Could not load opengl32 library");
             }
 
-            Library(lib)
+            let wgl_lookup_func_name = CString::new("wglGetProcAddress").unwrap();
+            let wgl_lookup_func = unsafe {
+                kernel32::GetProcAddress(system_ogl_lib, wgl_lookup_func_name.as_ptr())
+            };
+
+            if wgl_lookup_func.is_null() {
+                panic!("Could not load wglGetProcAddress from Opengl32.dll");
+            }
+
+            Library {
+                ogl_lib: system_ogl_lib,
+                ogl_ext_lib: unsafe {
+                    transmute::<*const c_void, wglGetProcAddress>(wgl_lookup_func)
+                },
+            }
         }
         pub fn query(&self, name: &str) -> *const c_void {
             let symbol_name = CString::new(name).unwrap();
-            let symbol = unsafe {
-                kernel32::GetProcAddress(self.0, symbol_name.as_ptr())
+            let mut symbol = unsafe {
+                // Try opengl32.dll first
+                kernel32::GetProcAddress(self.ogl_lib, symbol_name.as_ptr())
             };
+
+            if symbol.is_null() {
+                // Then try through wglGetProcAddress, which is what Gecko does
+                symbol = (self.ogl_ext_lib)(symbol_name.as_ptr());
+            }
+
+            // For now panic, not sure we should be though or if we can recover
+            if symbol.is_null() {
+                panic!("Could not find symbol {:?} in Opengl32.dll or wglGetProcAddress", symbol_name);
+            }
+
             symbol as *const _
         }
     }
