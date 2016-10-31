@@ -94,7 +94,7 @@ WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
   WRImageKey key;
   key = wr_add_image(aWRState, size.width, size.height, RGBA8, map.GetData(), size.height * map.GetStride());
 
-  Matrix4x4 transform;// = GetTransform();
+  gfx::Matrix4x4 transform;// = GetTransform();
   const bool needsYFlip = (mOriginPos == gl::OriginPos::BottomLeft);
   if (needsYFlip) {
     transform.PreTranslate(0, size.height, 0).PreScale(1, -1, 1);
@@ -112,7 +112,7 @@ WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
   wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), NULL, key);
   Manager()->AddImageKeyForDiscard(key);
 
-  Rect relBounds = TransformedVisibleBoundsRelativeToParent();
+  gfx::Rect relBounds = TransformedVisibleBoundsRelativeToParent();
   if (gfxPrefs::LayersDump()) printf_stderr("CanvasLayer %p using %s as bounds/overflow, %s for transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
   wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
 }

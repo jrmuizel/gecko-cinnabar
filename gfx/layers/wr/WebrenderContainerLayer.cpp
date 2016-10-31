@@ -17,8 +17,8 @@ WebRenderContainerLayer::RenderLayer(wrstate* aWRState)
   AutoTArray<Layer*, 12> children;
   SortChildrenBy3DZOrder(children);
 
-  Rect relBounds = TransformedVisibleBoundsRelativeToParent();
-  Matrix4x4 transform;// = GetTransform();
+  gfx::Rect relBounds = TransformedVisibleBoundsRelativeToParent();
+  gfx::Matrix4x4 transform;// = GetTransform();
   if (gfxPrefs::LayersDump()) printf_stderr("ContainerLayer %p using %s as bounds/overflow, %s as transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
 
   wr_push_dl_builder(aWRState);
