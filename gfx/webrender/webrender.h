@@ -29,7 +29,7 @@ struct WRRect {
 
 struct WRImageMask
 {
-    WRImageKey key;
+    WRImageKey image;
     WRRect rect;
     bool repeat;
 };
