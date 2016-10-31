@@ -5,13 +5,16 @@
 
 #include "WebrenderLayerManager.h"
 
+#include "apz/src/AsyncPanZoomController.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
 #include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/AsyncCompositionManager.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #include "nsThreadUtils.h"
+#include "TreeTraversal.h"
 #include "WebrenderCanvasLayer.h"
 #include "WebrenderColorLayer.h"
 #include "WebrenderContainerLayer.h"
@@ -117,7 +120,7 @@ WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
       printf_stderr("Popping stacking context id %" PRIu64 " with bounds=%s overflow=%s\n",
         fm.GetScrollId(), Stringify(bounds).c_str(), Stringify(overflow).c_str());
     }
-    wr_pop_dl_builder(mWRState, toWrRect(bounds), toWrRect(overflow), &identity.components[0], FrameMetrics::NULL_SCROLL_ID);
+    wr_pop_dl_builder(mWRState, toWrRect(bounds), toWrRect(overflow), &identity.components[0], fm.GetScrollId());
   }
 }
 
@@ -212,6 +215,7 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   wr_dp_begin(mWRState, size.width, size.height);
 
   WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer(mWRState);
+  ApplyAPZOffsets();
   mGLContext->MakeCurrent();
 
   printf("WR Ending\n");
@@ -224,12 +228,36 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
 }
 
 void
+WebRenderLayerManager::ApplyAPZOffsets()
+{
+  // This will probably set the same scroll offset multiple times because
+  // multiple layers will have the same scrollIds. TODO: We should just keep
+  // a list with unique ScrollMetadatas somewhere.
+  ForEachNode<ForwardIterator>(mRoot.get(), [this](Layer* aLayer) {
+    for (size_t i = 0; i < aLayer->GetScrollMetadataCount(); i++) {
+      AsyncPanZoomController* apzc = aLayer->GetAsyncPanZoomController(i);
+      if (apzc) {
+        ParentLayerPoint offset = apzc->GetCurrentAsyncTransform(AsyncPanZoomController::RESPECT_FORCE_DISABLE).mTranslation;
+        wr_set_async_scroll(mWRState, apzc->GetGuid().mScrollId, offset.x, offset.y);
+        if (gfxPrefs::LayersDump()) {
+          printf("Setting async scroll %s for guid %s\n",
+            Stringify(offset).c_str(), Stringify(apzc->GetGuid()).c_str());
+        }
+      }
+    }
+  });
+}
+
+void
 WebRenderLayerManager::Composite()
 {
   if (!mWRState) {
     return;
   }
   printf("WR Compositing\n");
+
+  ApplyAPZOffsets();
+
   mGLContext->MakeCurrent();
   wr_composite(mWRState);
   mGLContext->SwapBuffers();
