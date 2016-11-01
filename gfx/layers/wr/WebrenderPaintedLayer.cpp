@@ -5,6 +5,7 @@
 
 #include "WebrenderPaintedLayer.h"
 
+#include "LayersLogging.h"
 #include "mozilla/ArrayUtils.h"
 #include "gfxUtils.h"
 

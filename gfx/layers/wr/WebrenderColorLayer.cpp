@@ -4,6 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "WebrenderColorLayer.h"
+
+#include "LayersLogging.h"
 #include "webrender.h"
 
 namespace mozilla {
