@@ -39,7 +39,7 @@ uniform sampler2DArray sCache;
 #ifdef WR_VERTEX_SHADER
 
 #define VECS_PER_LAYER             13
-#define VECS_PER_TILE               2
+#define VECS_PER_RENDER_TASK        2
 #define VECS_PER_PRIM_GEOM          2
 
 #define GRADIENT_HORIZONTAL     0
@@ -115,10 +115,26 @@ Layer fetch_layer(int index) {
 
     layer.screen_vertices[0] = texelFetchOffset(sLayers, uv1, 0, ivec2(1, 0));
     layer.screen_vertices[1] = texelFetchOffset(sLayers, uv1, 0, ivec2(2, 0));
-    layer.screen_vertices[2] = texelFetchOffset(sLayers, uv1, 0, ivec2(2, 0));
-    layer.screen_vertices[3] = texelFetchOffset(sLayers, uv1, 0, ivec2(3, 0));
+    layer.screen_vertices[2] = texelFetchOffset(sLayers, uv1, 0, ivec2(3, 0));
+    layer.screen_vertices[3] = texelFetchOffset(sLayers, uv1, 0, ivec2(4, 0));
 
     return layer;
+}
+
+struct RenderTaskData {
+    vec4 data0;
+    vec4 data1;
+};
+
+RenderTaskData fetch_render_task(int index) {
+    RenderTaskData task;
+
+    ivec2 uv = get_fetch_uv(index, VECS_PER_RENDER_TASK);
+
+    task.data0 = texelFetchOffset(sRenderTasks, uv, 0, ivec2(0, 0));
+    task.data1 = texelFetchOffset(sRenderTasks, uv, 0, ivec2(1, 0));
+
+    return task;
 }
 
 struct Tile {
@@ -127,12 +143,11 @@ struct Tile {
 };
 
 Tile fetch_tile(int index) {
+    RenderTaskData task = fetch_render_task(index);
+
     Tile tile;
-
-    ivec2 uv = get_fetch_uv(index, VECS_PER_TILE);
-
-    tile.screen_origin_task_origin = texelFetchOffset(sRenderTasks, uv, 0, ivec2(0, 0));
-    tile.size_target_index = texelFetchOffset(sRenderTasks, uv, 0, ivec2(1, 0));
+    tile.screen_origin_task_origin = task.data0;
+    tile.size_target_index = task.data1;
 
     return tile;
 }
@@ -259,6 +274,27 @@ PrimitiveInstance fetch_instance(int index) {
 
     return pi;
 }
+
+struct CachePrimitiveInstance {
+    int global_prim_index;
+    int specific_prim_index;
+    int render_task_index;
+};
+
+CachePrimitiveInstance fetch_cache_instance(int index) {
+    CachePrimitiveInstance cpi;
+
+    int offset = index * 1;
+
+    ivec4 data0 = int_data[offset + 0];
+
+    cpi.global_prim_index = data0.x;
+    cpi.specific_prim_index = data0.y;
+    cpi.render_task_index = data0.z;
+
+    return cpi;
+}
+
 struct Primitive {
     Layer layer;
     Tile tile;
@@ -354,11 +390,14 @@ ClipInfo fetch_clip(int index) {
     clip.top_right = fetch_clip_corner(index + 2);
     clip.bottom_left = fetch_clip_corner(index + 3);
     clip.bottom_right = fetch_clip_corner(index + 4);
-    clip.mask_info = fetch_mask_info(index+5);
+    clip.mask_info = fetch_mask_info(index + 5);
 
     return clip;
 }
 
+// Return the intersection of the plane (set up by "normal" and "point")
+// with the ray (set up by "ray_origin" and "ray_dir"),
+// writing the resulting scaler into "t".
 bool ray_plane(vec3 normal, vec3 point, vec3 ray_origin, vec3 ray_dir, out float t)
 {
     float denom = dot(normal, ray_dir);
@@ -371,25 +410,37 @@ bool ray_plane(vec3 normal, vec3 point, vec3 ray_origin, vec3 ray_dir, out float
     return false;
 }
 
+// Apply the inverse transform "inv_transform"
+// to the reference point "ref" in CSS space,
+// producing a local point on a layer plane,
+// set by a base point "a" and a normal "n".
 vec4 untransform(vec2 ref, vec3 n, vec3 a, mat4 inv_transform) {
     vec3 p = vec3(ref, -10000.0);
     vec3 d = vec3(0, 0, 1.0);
 
-    float t;
+    float t = 0.0;
+    // get an intersection of the layer plane with Z axis vector,
+    // originated from the "ref" point
     ray_plane(n, a, p, d, t);
-    vec3 c = p + d * t;
+    float z = p.z + d.z * t; // Z of the visible point on the layer
 
-    vec4 r = inv_transform * vec4(c, 1.0);
+    vec4 r = inv_transform * vec4(ref, z, 1.0);
     return r;
 }
 
-vec3 get_layer_pos(vec2 pos, Layer layer) {
+// Given a CSS space position, transform it back into the layer space.
+vec4 get_layer_pos(vec2 pos, Layer layer) {
+    // get 3 of the layer corners in CSS space
     vec3 a = layer.screen_vertices[0].xyz / layer.screen_vertices[0].w;
     vec3 b = layer.screen_vertices[3].xyz / layer.screen_vertices[3].w;
     vec3 c = layer.screen_vertices[2].xyz / layer.screen_vertices[2].w;
+    // get the normal to the layer plane
     vec3 n = normalize(cross(b-a, c-a));
-    vec4 local_pos = untransform(pos, n, a, layer.inv_transform);
-    return local_pos.xyw;
+    return untransform(pos, n, a, layer.inv_transform);
+}
+
+vec2 clamp_rect(vec2 point, vec4 rect) {
+    return clamp(point, rect.xy, rect.xy + rect.zw);
 }
 
 struct Rect {
@@ -416,9 +467,7 @@ VertexInfo write_vertex(vec4 instance_rect,
     vec2 cp1 = floor(0.5 + (local_clip_rect.xy + local_clip_rect.zw) * uDevicePixelRatio) / uDevicePixelRatio;
     local_pos = clamp(local_pos, cp0, cp1);
 
-    local_pos = clamp(local_pos,
-                      vec2(layer.local_clip_rect.xy),
-                      vec2(layer.local_clip_rect.xy + layer.local_clip_rect.zw));
+    local_pos = clamp_rect(local_pos, layer.local_clip_rect);
 
     vec4 world_pos = layer.transform * vec4(local_pos, 0, 1);
     world_pos.xyz /= world_pos.w;
@@ -426,19 +475,21 @@ VertexInfo write_vertex(vec4 instance_rect,
     vec2 device_pos = world_pos.xy * uDevicePixelRatio;
 
     vec2 clamped_pos = clamp(device_pos,
-                             vec2(tile.screen_origin_task_origin.xy),
-                             vec2(tile.screen_origin_task_origin.xy + tile.size_target_index.xy));
+                             tile.screen_origin_task_origin.xy,
+                             tile.screen_origin_task_origin.xy + tile.size_target_index.xy);
 
     vec4 local_clamped_pos = layer.inv_transform * vec4(clamped_pos / uDevicePixelRatio, world_pos.z, 1);
     local_clamped_pos.xyz /= local_clamped_pos.w;
 
-    vec2 final_pos = clamped_pos + vec2(tile.screen_origin_task_origin.zw) - vec2(tile.screen_origin_task_origin.xy);
+    vec2 final_pos = clamped_pos + tile.screen_origin_task_origin.zw - tile.screen_origin_task_origin.xy;
 
     gl_Position = uTransform * vec4(final_pos, 0, 1);
 
     VertexInfo vi = VertexInfo(Rect(p0, p1), local_clamped_pos.xy, clamped_pos.xy);
     return vi;
 }
+
+#ifdef WR_FEATURE_TRANSFORM
 
 struct TransformVertexInfo {
     vec3 local_pos;
@@ -449,15 +500,13 @@ TransformVertexInfo write_transform_vertex(vec4 instance_rect,
                                            vec4 local_clip_rect,
                                            Layer layer,
                                            Tile tile) {
-    vec2 lp0 = instance_rect.xy;
-    vec2 lp1 = instance_rect.xy + instance_rect.zw;
+    vec2 lp0_base = instance_rect.xy;
+    vec2 lp1_base = instance_rect.xy + instance_rect.zw;
 
-    lp0 = clamp(lp0,
-                layer.local_clip_rect.xy,
-                layer.local_clip_rect.xy + layer.local_clip_rect.zw);
-    lp1 = clamp(lp1,
-                layer.local_clip_rect.xy,
-                layer.local_clip_rect.xy + layer.local_clip_rect.zw);
+    vec2 lp0 = clamp_rect(clamp_rect(lp0_base, local_clip_rect),
+                          layer.local_clip_rect);
+    vec2 lp1 = clamp_rect(clamp_rect(lp1_base, local_clip_rect),
+                          layer.local_clip_rect);
 
     vec4 clipped_local_rect = vec4(lp0, lp1 - lp0);
 
@@ -476,29 +525,36 @@ TransformVertexInfo write_transform_vertex(vec4 instance_rect,
     vec2 tp2 = t2.xy / t2.w;
     vec2 tp3 = t3.xy / t3.w;
 
-    vec2 min_pos = min(tp0.xy, min(tp1.xy, min(tp2.xy, tp3.xy)));
-    vec2 max_pos = max(tp0.xy, max(tp1.xy, max(tp2.xy, tp3.xy)));
+    // compute a CSS space aligned bounding box
+    vec2 min_pos = min(min(tp0.xy, tp1.xy), min(tp2.xy, tp3.xy));
+    vec2 max_pos = max(max(tp0.xy, tp1.xy), max(tp2.xy, tp3.xy));
 
+    // clamp to the tile boundaries, in device space
     vec2 min_pos_clamped = clamp(min_pos * uDevicePixelRatio,
-                                 vec2(tile.screen_origin_task_origin.xy),
-                                 vec2(tile.screen_origin_task_origin.xy + tile.size_target_index.xy));
+                                 tile.screen_origin_task_origin.xy,
+                                 tile.screen_origin_task_origin.xy + tile.size_target_index.xy);
 
     vec2 max_pos_clamped = clamp(max_pos * uDevicePixelRatio,
-                                 vec2(tile.screen_origin_task_origin.xy),
-                                 vec2(tile.screen_origin_task_origin.xy + tile.size_target_index.xy));
+                                 tile.screen_origin_task_origin.xy,
+                                 tile.screen_origin_task_origin.xy + tile.size_target_index.xy);
 
+    // compute the device space position of this vertex
     vec2 clamped_pos = mix(min_pos_clamped,
                            max_pos_clamped,
                            aPosition.xy);
 
-    vec3 layer_pos = get_layer_pos(clamped_pos / uDevicePixelRatio, layer);
+    // compute the point position in side the layer, in CSS space
+    vec4 layer_pos = get_layer_pos(clamped_pos / uDevicePixelRatio, layer);
 
-    vec2 final_pos = clamped_pos + vec2(tile.screen_origin_task_origin.zw) - vec2(tile.screen_origin_task_origin.xy);
+    // apply the task offset
+    vec2 final_pos = clamped_pos + tile.screen_origin_task_origin.zw - tile.screen_origin_task_origin.xy;
 
     gl_Position = uTransform * vec4(final_pos, 0, 1);
 
-    return TransformVertexInfo(layer_pos, clipped_local_rect);
+    return TransformVertexInfo(layer_pos.xyw, clipped_local_rect);
 }
+
+#endif //WR_FEATURE_TRANSFORM
 
 struct Rectangle {
     vec4 color;
@@ -553,7 +609,7 @@ struct BoxShadow {
     vec4 src_rect;
     vec4 bs_rect;
     vec4 color;
-    vec4 border_radii_blur_radius_inverted;
+    vec4 border_radius_edge_size_blur_radius_inverted;
 };
 
 BoxShadow fetch_boxshadow(int index) {
@@ -564,7 +620,7 @@ BoxShadow fetch_boxshadow(int index) {
     bs.src_rect = texelFetchOffset(sData64, uv, 0, ivec2(0, 0));
     bs.bs_rect = texelFetchOffset(sData64, uv, 0, ivec2(1, 0));
     bs.color = texelFetchOffset(sData64, uv, 0, ivec2(2, 0));
-    bs.border_radii_blur_radius_inverted = texelFetchOffset(sData64, uv, 0, ivec2(3, 0));
+    bs.border_radius_edge_size_blur_radius_inverted = texelFetchOffset(sData64, uv, 0, ivec2(3, 0));
 
     return bs;
 }
