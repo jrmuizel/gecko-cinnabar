@@ -29,7 +29,7 @@ webrender_traits = {path = "../webrender_traits", default-features = false}
 bitflags = "0.7"
 
 [target.'cfg(any(target_os = "android", target_os = "windows", all(unix, not(target_os = "macos"))))'.dependencies]
-freetype = {git = "https://github.com/servo/rust-freetype"}
+freetype = "0.1.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.4.1"
