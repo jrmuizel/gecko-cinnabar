@@ -8,6 +8,7 @@
 #include "apz/src/AsyncPanZoomController.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
+#include "LayersLogging.h"
 #include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
@@ -24,6 +25,7 @@
 
 namespace mozilla {
 
+using namespace gfx;
 using namespace gl;
 using namespace widget;
 

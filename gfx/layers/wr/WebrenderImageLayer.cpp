@@ -5,6 +5,8 @@
 
 #include "WebrenderImageLayer.h"
 
+#include "LayersLogging.h"
+
 namespace mozilla {
 namespace layers {
 
