@@ -144,7 +144,6 @@ private:
   RefPtr<widget::CompositorWidget> mWidget;
   RefPtr<gl::GLContext> mGLContext;
   wrstate* mWRState;
-  uint32_t mCounter;
   std::vector<WRImageKey> mImageKeys;
 
   /* PaintedLayer callbacks; valid at the end of a transaciton,

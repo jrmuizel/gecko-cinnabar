@@ -247,7 +247,7 @@ pub struct WrState {
 }
  
 #[no_mangle]
-pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut WrState {
+pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState {
     // hack to find the directory for the shaders
     let res_path = concat!(env!("CARGO_MANIFEST_DIR"),"/res");
 
@@ -286,7 +286,7 @@ pub extern fn wr_create(width: u32, height: u32, counter: u32) -> *mut WrState {
     // let notifier = Box::new(Notifier::new(window.create_window_proxy()));
     // renderer.set_render_notifier(notifier);
 
-    let pipeline_id = PipelineId(0, counter);
+    let pipeline_id = PipelineId((layers_id >> 32) as u32, layers_id as u32);
 
     let builder = WebRenderFrameBuilder::new(pipeline_id);
 

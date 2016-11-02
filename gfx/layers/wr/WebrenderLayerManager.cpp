@@ -204,7 +204,7 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   if (!mWRState) {
     mGLContext->MakeCurrent();
-    mWRState = wr_create(size.width, size.height, mCounter);
+    mWRState = wr_create(size.width, size.height, mLayersId);
   }
 
   if (gfxPrefs::LayersDump()) {

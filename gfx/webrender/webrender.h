@@ -37,7 +37,7 @@ struct WRImageMask
 
 struct wrstate;
 
-wrstate* wr_create(uint32_t width, uint32_t height, uint32_t counter);
+wrstate* wr_create(uint32_t width, uint32_t height, uint64_t layers_id);
 void wr_destroy(wrstate* wrstate);
 WRImageKey wr_add_image(wrstate* wrstate, uint32_t width, uint32_t height,
                         WRImageFormat format, uint8_t *bytes, size_t size);
