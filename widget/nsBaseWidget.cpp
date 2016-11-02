@@ -59,6 +59,7 @@
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/WebrenderLayerManager.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/gfx/GPUProcessManager.h"
@@ -76,7 +77,6 @@
 #include "gfxConfig.h"
 #include "mozilla/layers/CompositorSession.h"
 #include "VRManagerChild.h"
-#include "mozilla/layers/WebrenderLayerManager.h"
 
 #ifdef DEBUG
 #include "nsIObserver.h"
@@ -940,12 +940,6 @@ nsBaseWidget::ComputeShouldAccelerate()
          WidgetTypeSupportsAcceleration();
 }
 
-uint64_t
-nsBaseWidget::RootLayerTreeId()
-{
-  return mRootLayerTreeId ? mRootLayerTreeId.value() : mCompositorSession->RootLayerTreeId();
-}
-
 bool
 nsBaseWidget::UseAPZ()
 {
@@ -1003,11 +997,7 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
 
   mRootContentController = CreateRootContentController();
   if (mRootContentController) {
-    if (mCompositorSession) {
-      mCompositorSession->SetContentController(mRootContentController);
-    } else {
-      CompositorBridgeParent::SetControllerForLayerTree(RootLayerTreeId(), mRootContentController.get());
-    }
+    mCompositorSession->SetContentController(mRootContentController);
   }
 
   // When APZ is enabled, we can actually enable raw touch events because we
@@ -1056,7 +1046,7 @@ nsBaseWidget::UpdateZoomConstraints(const uint32_t& aPresShellId,
     }
     return;
   }
-  uint64_t layersId = RootLayerTreeId();
+  uint64_t layersId = mCompositorSession->RootLayerTreeId();
   mAPZC->UpdateZoomConstraints(ScrollableLayerGuid(layersId, aPresShellId, aViewId),
                                aConstraints);
 }
@@ -1081,7 +1071,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
   // event. If the event is instead targeted to an APZC in the child process,
   // the transform will be applied in the child process before dispatching
   // the event there (see e.g. TabChild::RecvRealTouchEvent()).
-  if (aGuid.mLayersId == RootLayerTreeId()) {
+  if (aGuid.mLayersId == mCompositorSession->RootLayerTreeId()) {
     APZCCallbackHelper::ApplyCallbackTransform(*aEvent, aGuid,
         GetDefaultScale());
   }
@@ -1405,16 +1395,8 @@ bool nsBaseWidget::CreateWebRenderLayerManager()
     return false;
   }
 
-  mRootLayerTreeId = Some(gfx::GPUProcessManager::Get()->AllocateLayerTreeId());
-  APZCTreeManager* apzc = nullptr;
-  if (gfxPlatform::AsyncPanZoomEnabled()) {
-    apzc = new APZCTreeManager();
-    mAPZC = apzc;
-    ConfigureAPZCTreeManager();
-  }
-
-  WebRenderLayerManager* manager = new WebRenderLayerManager(this,
-  mRootLayerTreeId.value(), apzc);
+  uint64_t layersId = gfx::GPUProcessManager::Get()->AllocateLayerTreeId();
+  WebRenderLayerManager* manager = new WebRenderLayerManager(this, layersId);
   mCompositorWidgetDelegate = manager->GetCompositorWidgetDelegate();
   mLayerManager = manager;
   return true;
@@ -1900,7 +1882,7 @@ nsBaseWidget::ZoomToRect(const uint32_t& aPresShellId,
   if (!mCompositorSession || !mAPZC) {
     return;
   }
-  uint64_t layerId = RootLayerTreeId();
+  uint64_t layerId = mCompositorSession->RootLayerTreeId();
   mAPZC->ZoomToRect(ScrollableLayerGuid(layerId, aPresShellId, aViewId), aRect, aFlags);
 }
 
@@ -1959,7 +1941,7 @@ nsBaseWidget::StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics)
 
   MOZ_ASSERT(XRE_IsParentProcess() && mCompositorSession);
 
-  int layersId = RootLayerTreeId();
+  int layersId = mCompositorSession->RootLayerTreeId();
   ScrollableLayerGuid guid(layersId, aDragMetrics.mPresShellId, aDragMetrics.mViewId);
 
   APZThreadUtils::RunOnControllerThread(NewRunnableMethod
