@@ -3462,13 +3462,14 @@ nsWindow::SynthesizeNativeMouseMove(LayoutDeviceIntPoint aPoint,
 }
 
 bool
-nsWindow::PreRender(LayerManagerComposite* aManager)
+nsWindow::PreRender(LayerManager* aManager)
 {
     if (Destroyed()) {
         return true;
     }
 
-    layers::Compositor* compositor = aManager->GetCompositor();
+    LayerManagerComposite* manager = aManager->AsLayerManagerComposite();
+    layers::Compositor* compositor = manager->GetCompositor();
 
     GeckoLayerClient::LocalRef client;
 

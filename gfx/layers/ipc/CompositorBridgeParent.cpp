@@ -84,6 +84,9 @@
 #ifdef MOZ_WIDGET_SUPPORTS_OOP_COMPOSITING
 # include "mozilla/widget/CompositorWidgetParent.h"
 #endif
+#ifdef MOZ_ENABLE_WEBRENDER
+#include "WebrenderLayerManager.h"
+#endif
 
 #include "LayerScope.h"
 
