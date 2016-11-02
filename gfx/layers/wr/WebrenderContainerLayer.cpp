@@ -28,5 +28,16 @@ WebRenderContainerLayer::RenderLayer(wrstate* aWRState)
   wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
 }
 
+void
+WebRenderRefLayer::RenderLayer(wrstate* aWRState)
+{
+  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
+
+  gfx::Rect relBounds = TransformedVisibleBoundsRelativeToParent();
+  gfx::Matrix4x4 transform;// = GetTransform();
+  if (gfxPrefs::LayersDump()) printf_stderr("RefLayer %p (%" PRIu64 ") using %s as bounds/overflow, %s as transform\n", this, mId, Stringify(relBounds).c_str(), Stringify(transform).c_str());
+  wr_dp_push_iframe(aWRState, toWrRect(relBounds), toWrRect(relBounds), mId);
+}
+
 } // namespace layers
 } // namespace mozilla
