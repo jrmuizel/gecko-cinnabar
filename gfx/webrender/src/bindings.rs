@@ -443,6 +443,21 @@ pub extern fn wr_dp_push_rect(state:&mut WrState, rect: WrRect, clip: WrRect, r:
 }
 
 #[no_mangle]
+pub extern fn wr_dp_push_iframe(state: &mut WrState, rect: WrRect, clip: WrRect, layers_id: u64) {
+    if state.dl_builder.len() == 0 {
+        return;
+    }
+
+    let clip_region = webrender_traits::ClipRegion::new(&clip.to_rect(),
+                                                        Vec::new(),
+                                                        None,
+                                                        &mut state.frame_builder.auxiliary_lists_builder);
+    let pipeline_id = PipelineId((layers_id >> 32) as u32, layers_id as u32);
+    state.dl_builder.last_mut().unwrap().push_iframe(rect.to_rect(),
+                                clip_region, pipeline_id);
+}
+
+#[no_mangle]
 pub extern fn wr_set_async_scroll(state: &mut WrState, scroll_id: u64, x: f32, y: f32) {
     let scroll_layer_id = webrender_traits::ScrollLayerId::new(
         state.frame_builder.root_pipeline_id,
