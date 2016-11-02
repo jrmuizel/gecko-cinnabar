@@ -11,7 +11,6 @@
 #include "LayersLogging.h"
 #include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
-#include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #include "nsThreadUtils.h"
@@ -128,32 +127,22 @@ WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
 
 
 WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
-                                             uint64_t aLayersId,
-                                             APZCTreeManager* aAPZC)
+                                             uint64_t aLayersId)
   : mWRState(nullptr)
-  , mLayersId(aLayersId)
-  , mAPZC(aAPZC)
-  , mIsFirstPaint(false)
 {
   CompositorWidgetInitData initData;
   aWidget->GetCompositorWidgetInitData(&initData);
   mWidget = CompositorWidget::CreateLocal(initData, aWidget);
   mGLContext = GLContextProvider::CreateForWindow(aWidget, true);
 
-  CompositorBridgeParent::SetWRLayerManager(aLayersId, this);
-
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   mGLContext->MakeCurrent();
-  mWRState = wr_create(size.width, size.height, mLayersId);
+  mWRState = wr_create(size.width, size.height, aLayersId);
 }
 
 void
 WebRenderLayerManager::Destroy()
 {
-  if (mAPZC) {
-    mAPZC->ClearTree();
-    mAPZC = nullptr;
-  }
   DiscardImages();
 }
 
@@ -197,10 +186,6 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
                                       void* aCallbackData,
                                       EndTransactionFlags aFlags)
 {
-  if (mAPZC) {
-    mAPZC->UpdateHitTestingTree(mLayersId, GetRoot(), mIsFirstPaint, mLayersId, 0);
-  }
-
   DiscardImages();
 
   mPaintedLayerCallback = aCallback;
@@ -222,7 +207,6 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   wr_dp_begin(mWRState, size.width, size.height);
 
   WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer(mWRState);
-  ApplyAPZOffsets();
   mGLContext->MakeCurrent();
 
   printf("WR Ending\n");
@@ -232,48 +216,6 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
 
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
-}
-
-void
-WebRenderLayerManager::ApplyAPZOffsets()
-{
-  // This will probably set the same scroll offset multiple times because
-  // multiple layers will have the same scrollIds. TODO: We should just keep
-  // a list with unique ScrollMetadatas somewhere.
-  ForEachNode<ForwardIterator>(mRoot.get(), [this](Layer* aLayer) {
-    for (size_t i = 0; i < aLayer->GetScrollMetadataCount(); i++) {
-      AsyncPanZoomController* apzc = aLayer->GetAsyncPanZoomController(i);
-      if (apzc) {
-        ParentLayerPoint offset = apzc->GetCurrentAsyncTransform(AsyncPanZoomController::RESPECT_FORCE_DISABLE).mTranslation;
-        wr_set_async_scroll(mWRState, apzc->GetGuid().mScrollId, offset.x, offset.y);
-        if (gfxPrefs::LayersDump()) {
-          printf("Setting async scroll %s for guid %s\n",
-            Stringify(offset).c_str(), Stringify(apzc->GetGuid()).c_str());
-        }
-      }
-    }
-  });
-}
-
-void
-WebRenderLayerManager::Composite()
-{
-  if (!mWRState) {
-    return;
-  }
-  printf("WR Compositing\n");
-
-  ApplyAPZOffsets();
-
-  mGLContext->MakeCurrent();
-  wr_composite(mWRState);
-  mGLContext->SwapBuffers();
-}
-
-void
-WebRenderLayerManager::ScheduleRenderOnCompositorThread()
-{
-  NS_DispatchToMainThread(NewRunnableMethod(this, &WebRenderLayerManager::Composite));
 }
 
 void

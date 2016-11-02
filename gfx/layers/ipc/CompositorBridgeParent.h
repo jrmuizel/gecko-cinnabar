@@ -69,7 +69,6 @@ class PAPZParent;
 class CrossProcessCompositorBridgeParent;
 class CompositorThreadHolder;
 class InProcessCompositorSession;
-class WebRenderLayerManager;
 
 struct ScopedLayerTreeRegistration
 {
@@ -249,9 +248,6 @@ public:
                                   const TimeDuration& aVsyncRate,
                                   bool aUseExternalSurfaceSize,
                                   const gfx::IntSize& aSurfaceSize);
-
-  static void SetWRLayerManager(uint64_t aLayersId,
-                                WebRenderLayerManager* aLayerManager);
 
   // Must only be called by CompositorBridgeChild. After invoking this, the
   // IPC channel is active and RecvWillStop/ActorDestroy must be called to
@@ -444,7 +440,6 @@ public:
     APZCTreeManagerParent* mApzcTreeManagerParent;
     CompositorBridgeParent* mParent;
     LayerManagerComposite* mLayerManager;
-    WebRenderLayerManager* mWRManager;
     // Pointer to the CrossProcessCompositorBridgeParent. Used by APZCs to share
     // their FrameMetrics with the corresponding child process that holds
     // the PCompositorBridgeChild
