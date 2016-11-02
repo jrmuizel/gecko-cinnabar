@@ -74,12 +74,11 @@ private:
   WebRenderLayer* mLayer;
 };
 
-class WebRenderLayerManager final : public LayerManager, public CompositorController
+class WebRenderLayerManager final : public LayerManager
 {
 public:
   explicit WebRenderLayerManager(nsIWidget* aWidget,
-                                 uint64_t aLayersId,
-                                 APZCTreeManager* aAPZC);
+                                 uint64_t aLayersId);
 
   virtual void Destroy() override;
 
@@ -98,7 +97,6 @@ public:
   virtual void EndTransaction(DrawPaintedLayerCallback aCallback,
                               void* aCallbackData,
                               EndTransactionFlags aFlags = END_DEFAULT) override;
-  virtual void Composite() override;
 
   virtual LayersBackend GetBackendType() override { return LayersBackend::LAYERS_WR; }
   virtual void GetBackendName(nsAString& name) override { name.AssignLiteral("WebRender"); }
@@ -129,17 +127,6 @@ public:
   void AddImageKeyForDiscard(WRImageKey);
   void DiscardImages();
 
-  // APZ stuff
-  void SetIsFirstPaint() override { mIsFirstPaint = true; }
-  void ApplyAPZOffsets();
-
-  // CompositorController
-  NS_IMETHOD_(MozExternalRefCountType) AddRef() override { return LayerManager::AddRef(); }
-  NS_IMETHOD_(MozExternalRefCountType) Release() override { return LayerManager::Release(); }
-  void ScheduleRenderOnCompositorThread() override;
-  void ScheduleHideAllPluginWindows() override {}
-  void ScheduleShowAllPluginWindows() override {}
-
 private:
   RefPtr<widget::CompositorWidget> mWidget;
   RefPtr<gl::GLContext> mGLContext;
@@ -150,11 +137,6 @@ private:
    * while rendering */
   DrawPaintedLayerCallback mPaintedLayerCallback;
   void *mPaintedLayerCallbackData;
-
-  // APZ stuff
-  uint64_t mLayersId;
-  RefPtr<APZCTreeManager> mAPZC;
-  bool mIsFirstPaint;
 };
 
 } // namespace layers

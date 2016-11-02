@@ -86,7 +86,6 @@
 #endif
 
 #include "LayerScope.h"
-#include "mozilla/layers/WebrenderLayerManager.h"
 
 namespace mozilla {
 
@@ -195,14 +194,6 @@ CompositorBridgeParent::LayerTreeState::~LayerTreeState()
 typedef map<uint64_t, CompositorBridgeParent::LayerTreeState> LayerTreeMap;
 LayerTreeMap sIndirectLayerTrees;
 static StaticAutoPtr<mozilla::Monitor> sIndirectLayerTreesLock;
-
-/* static */
-void
-CompositorBridgeParent::SetWRLayerManager(uint64_t aLayersId,
-                                          WebRenderLayerManager* aLayerManager)
-{
-  sIndirectLayerTrees[aLayersId].mWRManager = aLayerManager;
-}
 
 static void EnsureLayerTreeMapReady()
 {
@@ -2184,9 +2175,6 @@ private:
 CompositorController*
 CompositorBridgeParent::LayerTreeState::GetCompositorController() const
 {
-  if (mWRManager) {
-    return mWRManager;
-  }
   return mParent;
 }
 
