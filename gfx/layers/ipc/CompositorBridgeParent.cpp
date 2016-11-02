@@ -48,6 +48,7 @@
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/PLayerTransactionParent.h"
 #include "mozilla/layers/RemoteContentController.h"
+#include "mozilla/layers/WebRenderBridgeParent.h"
 #include "mozilla/layout/RenderFrameParent.h"
 #include "mozilla/media/MediaSystemResourceService.h" // for MediaSystemResourceService
 #include "mozilla/mozalloc.h"           // for operator new, etc
@@ -83,9 +84,6 @@
 #include "mozilla/widget/CompositorWidget.h"
 #ifdef MOZ_WIDGET_SUPPORTS_OOP_COMPOSITING
 # include "mozilla/widget/CompositorWidgetParent.h"
-#endif
-#ifdef MOZ_ENABLE_WEBRENDER
-#include "WebrenderLayerManager.h"
 #endif
 
 #include "LayerScope.h"
@@ -1838,6 +1836,34 @@ CompositorBridgeParent::RecvAdoptChild(const uint64_t& child)
   return true;
 }
 
+PWebRenderBridgeParent*
+CompositorBridgeParent::AllocPWebRenderBridgeParent(const uint64_t& aPipelineId)
+{
+  MOZ_ASSERT(aPipelineId == mRootLayerTreeID);
+
+  WebRenderBridgeParent* parent = new WebRenderBridgeParent(aPipelineId);
+  parent->AddRef(); // IPDL reference
+  MonitorAutoLock lock(*sIndirectLayerTreesLock);
+  MOZ_ASSERT(sIndirectLayerTrees[aPipelineId].mWRBridge == nullptr);
+  sIndirectLayerTrees[aPipelineId].mWRBridge = parent;
+  return parent;
+}
+
+bool
+CompositorBridgeParent::DeallocPWebRenderBridgeParent(PWebRenderBridgeParent* aActor)
+{
+  WebRenderBridgeParent* parent = static_cast<WebRenderBridgeParent*>(aActor);
+  {
+    MonitorAutoLock lock(*sIndirectLayerTreesLock);
+    auto it = sIndirectLayerTrees.find(parent->PipelineId());
+    if (it != sIndirectLayerTrees.end()) {
+      it->second.mWRBridge = nullptr;
+    }
+  }
+  parent->Release(); // IPDL reference
+  return true;
+}
+
 static void
 EraseLayerState(uint64_t aId)
 {
@@ -2165,6 +2191,9 @@ public:
 
     state->mParent->UpdatePaintTime(aLayerTree, aPaintTime);
   }
+
+  PWebRenderBridgeParent* AllocPWebRenderBridgeParent(const uint64_t& aPipelineId) override;
+  bool DeallocPWebRenderBridgeParent(PWebRenderBridgeParent* aActor) override;
 
 protected:
   void OnChannelConnected(int32_t pid) override {
@@ -2590,6 +2619,39 @@ CrossProcessCompositorBridgeParent::DeallocPAPZParent(PAPZParent* aActor)
 {
   RemoteContentController* controller = static_cast<RemoteContentController*>(aActor);
   controller->Release();
+  return true;
+}
+
+PWebRenderBridgeParent*
+CrossProcessCompositorBridgeParent::AllocPWebRenderBridgeParent(const uint64_t& aPipelineId)
+{
+  // Check to see if this child process has access to this layer tree.
+  if (!LayerTreeOwnerTracker::Get()->IsMapped(aPipelineId, OtherPid())) {
+    NS_ERROR("Unexpected layers id in AllocPAPZCTreeManagerParent; dropping message...");
+    return nullptr;
+  }
+
+  MonitorAutoLock lock(*sIndirectLayerTreesLock);
+  MOZ_ASSERT(sIndirectLayerTrees.find(aPipelineId) != sIndirectLayerTrees.end());
+  MOZ_ASSERT(sIndirectLayerTrees[aPipelineId].mWRBridge == nullptr);
+  WebRenderBridgeParent* parent = new WebRenderBridgeParent(aPipelineId);
+  parent->AddRef(); // IPDL reference
+  sIndirectLayerTrees[aPipelineId].mWRBridge = parent;
+  return parent;
+}
+
+bool
+CrossProcessCompositorBridgeParent::DeallocPWebRenderBridgeParent(PWebRenderBridgeParent* aActor)
+{
+  WebRenderBridgeParent* parent = static_cast<WebRenderBridgeParent*>(aActor);
+  {
+    MonitorAutoLock lock(*sIndirectLayerTreesLock);
+    auto it = sIndirectLayerTrees.find(parent->PipelineId());
+    if (it != sIndirectLayerTrees.end()) {
+      it->second.mWRBridge = nullptr;
+    }
+  }
+  parent->Release(); // IPDL reference
   return true;
 }
 

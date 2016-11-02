@@ -69,6 +69,7 @@ class PAPZParent;
 class CrossProcessCompositorBridgeParent;
 class CompositorThreadHolder;
 class InProcessCompositorSession;
+class WebRenderBridgeParent;
 
 struct ScopedLayerTreeRegistration
 {
@@ -440,6 +441,7 @@ public:
     APZCTreeManagerParent* mApzcTreeManagerParent;
     CompositorBridgeParent* mParent;
     LayerManagerComposite* mLayerManager;
+    RefPtr<WebRenderBridgeParent> mWRBridge;
     // Pointer to the CrossProcessCompositorBridgeParent. Used by APZCs to share
     // their FrameMetrics with the corresponding child process that holds
     // the PCompositorBridgeChild
@@ -532,6 +534,9 @@ public:
   bool AsyncPanZoomEnabled() const {
     return !!mApzcTreeManager;
   }
+
+  PWebRenderBridgeParent* AllocPWebRenderBridgeParent(const uint64_t& aPipelineId) override;
+  bool DeallocPWebRenderBridgeParent(PWebRenderBridgeParent* aActor) override;
 
 private:
 
