@@ -388,20 +388,23 @@ if CONFIG['COMPILE_ENVIRONMENT']:
     ]
     FINAL_TARGET_FILES += ['!dependentlibs.list']
 
-if CONFIG['OS_ARCH'] == 'Linux':
-    OS_LIBS += [
-        'GL',
-        'EGL',
-    ]
+# Webrender dependencies
+if CONFIG['MOZ_ENABLE_WEBRENDER']:
+    if CONFIG['OS_ARCH'] == 'Linux':
+        OS_LIBS += [
+            'GL',
+            'EGL',
+        ]
+    elif CONFIG['OS_ARCH'] == 'WINNT':
+        OS_LIBS += [
+            'opengl32',
+        ]
 
-if CONFIG['OS_ARCH'] == 'WINNT':
-  #OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/webrender/target/debug webrender"]
-  OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/webrender/target/release webrender"]
-  OS_LIBS += [
-    'opengl32',
-  ]
-else:
-  OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/webrender/target/release -lwebrender"]
+    if CONFIG['OS_ARCH'] == 'WINNT':
+        #OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/webrender/target/debug webrender"]
+        OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/webrender/target/release webrender"]
+    else:
+        OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/webrender/target/release -lwebrender"]
 
 # This library needs to be last to make XPCOM module registration work.
 

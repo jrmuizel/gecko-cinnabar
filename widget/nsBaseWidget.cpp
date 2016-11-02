@@ -58,7 +58,6 @@
 #include "mozilla/layers/ChromeProcessController.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
-#include "mozilla/layers/WebrenderLayerManager.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/gfx/GPUProcessManager.h"
@@ -76,6 +75,9 @@
 #include "gfxConfig.h"
 #include "mozilla/layers/CompositorSession.h"
 #include "VRManagerChild.h"
+#ifdef MOZ_ENABLE_WEBRENDER
+#include "mozilla/layers/WebrenderLayerManager.h"
+#endif
 
 #ifdef DEBUG
 #include "nsIObserver.h"
@@ -1394,6 +1396,7 @@ bool nsBaseWidget::ShouldUseOffMainThreadCompositing()
 
 bool nsBaseWidget::CreateWebRenderLayerManager()
 {
+#ifdef MOZ_ENABLE_WEBRENDER
   if (!XRE_IsParentProcess() || mLayerManager) {
     return false;
   }
@@ -1403,6 +1406,9 @@ bool nsBaseWidget::CreateWebRenderLayerManager()
   mCompositorWidgetDelegate = manager->GetCompositorWidgetDelegate();
   mLayerManager = manager;
   return true;
+#else
+  return false;
+#endif
 }
 
 LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
