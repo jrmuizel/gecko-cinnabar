@@ -398,24 +398,6 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'opengl/MacIOSurfaceTextureHostOGL.cpp',
     ]
 
-if CONFIG['MOZ_ENABLE_WEBRENDER']:
-    EXPORTS += [
-        'wr/WebrenderLayerManager.h',
-    ]
-
-    EXPORTS.mozilla.layers += [
-        'wr/WebrenderLayerManager.h',
-    ]
-
-    UNIFIED_SOURCES += [
-        'wr/WebrenderCanvasLayer.cpp',
-        'wr/WebrenderColorLayer.cpp',
-        'wr/WebrenderContainerLayer.cpp',
-        'wr/WebrenderImageLayer.cpp',
-        'wr/WebrenderLayerManager.cpp',
-        'wr/WebrenderPaintedLayer.cpp',
-    ]
-
 IPDL_SOURCES = [
     'ipc/LayersMessages.ipdlh',
     'ipc/LayersSurfaces.ipdlh',
@@ -430,6 +412,28 @@ IPDL_SOURCES = [
     'ipc/PTexture.ipdl',
     'ipc/PVideoBridge.ipdl',
 ]
+
+if CONFIG['MOZ_ENABLE_WEBRENDER']:
+    EXPORTS.mozilla.layers += [
+        'wr/WebRenderBridgeChild.h',
+        'wr/WebRenderBridgeParent.h',
+        'wr/WebrenderLayerManager.h',
+    ]
+
+    UNIFIED_SOURCES += [
+        'wr/WebRenderBridgeChild.cpp',
+        'wr/WebRenderBridgeParent.cpp',
+        'wr/WebrenderCanvasLayer.cpp',
+        'wr/WebrenderColorLayer.cpp',
+        'wr/WebrenderContainerLayer.cpp',
+        'wr/WebrenderImageLayer.cpp',
+        'wr/WebrenderLayerManager.cpp',
+        'wr/WebrenderPaintedLayer.cpp',
+    ]
+
+    IPDL_SOURCES += [
+        'ipc/PWebRenderBridge.ipdl',
+    ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
