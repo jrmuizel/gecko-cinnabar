@@ -13,10 +13,6 @@
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
 
-#ifdef MOZ_ENABLE_WEBRENDER
-#include "mozilla/layers/WebrenderLayerManager.h"
-#endif
-
 using namespace mozilla::gl;
 
 namespace mozilla {
@@ -90,36 +86,6 @@ GLManager::CreateGLManager(LayerManagerComposite* aManager)
   }
   return nullptr;
 }
-
-/* static */ GLManager*
-GLManager::CreateGLManager(WebRenderLayerManager* aManager)
-{
-#ifdef MOZ_ENABLE_WEBRENDER
-  if (aManager) {
-    return new GLManagerGLContext(aManager->gl());
-  }
-  return nullptr;
-#else
-  return nullptr;
-#endif
-}
-
-/* static */ GLManager*
-GLManager::CreateGLManager(LayerManager* aManager)
-{
-  if (aManager) {
-    if (aManager->AsLayerManagerComposite()) {
-      return CreateGLManager(aManager->AsLayerManagerComposite());
-    }
-#ifdef MOZ_ENABLE_WEBRENDER
-    if (aManager->GetBackendType() == LayersBackend::LAYERS_WR) {
-      return CreateGLManager(static_cast<WebRenderLayerManager*>(aManager));
-    }
-#endif
-  }
-  return nullptr;
-}
-
 
 } // namespace layers
 } // namespace mozilla

@@ -139,15 +139,14 @@ WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
 
 WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
                                              uint64_t aLayersId)
-  : mWRChild(new WebRenderBridgeChild(aLayersId))
 {
   CompositorWidgetInitData initData;
   aWidget->GetCompositorWidgetInitData(&initData);
   mWidget = CompositorWidget::CreateLocal(initData, aWidget);
-  mGLContext = GLContextProvider::CreateForWindow(aWidget, true);
+  RefPtr<GLContext> glc(GLContextProvider::CreateForWindow(aWidget, true));
+  mWRChild = new WebRenderBridgeChild(aLayersId, mWidget, glc.get());
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
-  mGLContext->MakeCurrent();
   WRBridge()->CallCreate(size.width, size.height);
 }
 
@@ -207,23 +206,13 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   }
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
-
-  mozilla::widget::WidgetRenderingContext widgetContext;
-#if defined(XP_MACOSX)
-  widgetContext.mLayerManager = this;
-#endif
-  mWidget->PreRender(&widgetContext);
-  mGLContext->MakeCurrent();
   printf("WR Beginning size %i %i\n", size.width, size.height);
   WRBridge()->CallDPBegin(size.width, size.height);
 
   WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer();
-  mGLContext->MakeCurrent();
 
   printf("WR Ending\n");
   WRBridge()->CallDPEnd();
-  mGLContext->SwapBuffers();
-  mWidget->PostRender(&widgetContext);
 
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();

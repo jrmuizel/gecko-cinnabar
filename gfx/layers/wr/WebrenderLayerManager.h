@@ -13,9 +13,6 @@
 class nsIWidget;
 
 namespace mozilla {
-namespace gl {
-class GLContext;
-}
 namespace widget {
 class CompositorWidget;
 class CompositorWidgetDelegate;
@@ -89,9 +86,6 @@ protected:
   virtual ~WebRenderLayerManager();
 
 public:
-
-  gl::GLContext* gl() const { return mGLContext; }
-
   virtual int32_t GetMaxTextureSize() const override;
 
   virtual bool BeginTransactionWithTarget(gfxContext* aTarget) override;
@@ -134,7 +128,6 @@ public:
 
 private:
   RefPtr<widget::CompositorWidget> mWidget;
-  RefPtr<gl::GLContext> mGLContext;
   std::vector<WRImageKey> mImageKeys;
 
   /* PaintedLayer callbacks; valid at the end of a transaciton,
