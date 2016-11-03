@@ -10,7 +10,6 @@
 #include "mozilla/layers/CompositorController.h"
 #include "webrender.h"
 
-struct wrstate;
 class nsIWidget;
 
 namespace mozilla {
@@ -50,7 +49,7 @@ class WebRenderLayer
 {
 public:
   virtual Layer* GetLayer() = 0;
-  virtual void RenderLayer(wrstate* aWRState) = 0;
+  virtual void RenderLayer() = 0;
 
   virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() { return nullptr; }
   static inline WebRenderLayer*
@@ -72,10 +71,9 @@ public:
 class MOZ_RAII WRScrollFrameStackingContextGenerator
 {
 public:
-  WRScrollFrameStackingContextGenerator(wrstate* aWRState, WebRenderLayer* aLayer);
+  explicit WRScrollFrameStackingContextGenerator(WebRenderLayer* aLayer);
   ~WRScrollFrameStackingContextGenerator();
 private:
-  wrstate* mWRState;
   WebRenderLayer* mLayer;
 };
 
@@ -137,7 +135,6 @@ public:
 private:
   RefPtr<widget::CompositorWidget> mWidget;
   RefPtr<gl::GLContext> mGLContext;
-  wrstate* mWRState;
   std::vector<WRImageKey> mImageKeys;
 
   /* PaintedLayer callbacks; valid at the end of a transaciton,
