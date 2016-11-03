@@ -13,10 +13,6 @@
 class nsIWidget;
 
 namespace mozilla {
-namespace widget {
-class CompositorWidget;
-class CompositorWidgetDelegate;
-}
 namespace layers {
 
 class WebRenderBridgeChild;
@@ -77,8 +73,8 @@ private:
 class WebRenderLayerManager final : public LayerManager
 {
 public:
-  explicit WebRenderLayerManager(nsIWidget* aWidget,
-                                 uint64_t aLayersId);
+  explicit WebRenderLayerManager(nsIWidget* aWidget);
+  void Initialize(uint64_t aLayersId);
 
   virtual void Destroy() override;
 
@@ -86,6 +82,9 @@ protected:
   virtual ~WebRenderLayerManager();
 
 public:
+  WebRenderLayerManager* AsWebRenderLayerManager() override { return this; }
+  CompositorBridgeChild* GetCompositorBridgeChild();
+
   virtual int32_t GetMaxTextureSize() const override;
 
   virtual bool BeginTransactionWithTarget(gfxContext* aTarget) override;
@@ -111,8 +110,6 @@ public:
 
   virtual bool NeedsWidgetInvalidation() override { return true; }
 
-  widget::CompositorWidgetDelegate* GetCompositorWidgetDelegate();
-
   DrawPaintedLayerCallback GetPaintedLayerCallback() const
   { return mPaintedLayerCallback; }
 
@@ -127,7 +124,7 @@ public:
   WebRenderBridgeChild* WRBridge() { return mWRChild; }
 
 private:
-  RefPtr<widget::CompositorWidget> mWidget;
+  nsIWidget* MOZ_NON_OWNING_REF mWidget;
   std::vector<WRImageKey> mImageKeys;
 
   /* PaintedLayer callbacks; valid at the end of a transaciton,

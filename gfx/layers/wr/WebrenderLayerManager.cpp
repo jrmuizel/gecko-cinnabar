@@ -137,15 +137,22 @@ WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
 }
 
 
-WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
-                                             uint64_t aLayersId)
+WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
+  : mWidget(aWidget)
 {
-  CompositorWidgetInitData initData;
-  aWidget->GetCompositorWidgetInitData(&initData);
-  mWidget = CompositorWidget::CreateLocal(initData, aWidget);
-  RefPtr<GLContext> glc(GLContextProvider::CreateForWindow(aWidget, true));
-  mWRChild = new WebRenderBridgeChild(aLayersId, mWidget, glc.get());
+}
 
+void
+WebRenderLayerManager::Initialize(uint64_t aLayersId)
+{
+  MOZ_ASSERT(mWRChild == nullptr);
+
+  CompositorWidgetInitData initData;
+  mWidget->GetCompositorWidgetInitData(&initData);
+  RefPtr<CompositorWidget> widget = CompositorWidget::CreateLocal(initData, mWidget);
+
+  RefPtr<GLContext> glc(GLContextProvider::CreateForWindow(mWidget, true));
+  mWRChild = new WebRenderBridgeChild(aLayersId, widget.get(), glc.get());
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   WRBridge()->CallCreate(size.width, size.height);
 }
@@ -161,10 +168,10 @@ WebRenderLayerManager::~WebRenderLayerManager()
   WRBridge()->CallDestroy();
 }
 
-widget::CompositorWidgetDelegate*
-WebRenderLayerManager::GetCompositorWidgetDelegate()
+CompositorBridgeChild*
+WebRenderLayerManager::GetCompositorBridgeChild()
 {
-  return mWidget->AsDelegate();
+  return mWidget ? mWidget->GetRemoteRenderer() : nullptr;
 }
 
 int32_t

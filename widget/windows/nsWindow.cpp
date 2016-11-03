@@ -210,10 +210,6 @@
 
 #include "mozilla/Telemetry.h"
 
-#ifdef MOZ_ENABLE_WEBRENDER
-#include "mozilla/layers/WebrenderLayerManager.h"
-#endif
-
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
@@ -3673,11 +3669,6 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
 {
   RECT windowRect;
   ::GetClientRect(mWnd, &windowRect);
-
-  if (CreateWebRenderLayerManager()) {
-    MOZ_ASSERT(mLayerManager);
-    return mLayerManager;
-  }
 
   // Try OMTC first.
   if (!mLayerManager && ShouldUseOffMainThreadCompositing()) {
