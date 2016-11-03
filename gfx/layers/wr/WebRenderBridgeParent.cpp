@@ -6,13 +6,22 @@
 
 #include "mozilla/layers/WebRenderBridgeParent.h"
 
+#include "GLContext.h"
+#include "GLContextProvider.h"
+#include "mozilla/widget/CompositorWidget.h"
+
 namespace mozilla {
 namespace layers {
 
-WebRenderBridgeParent::WebRenderBridgeParent(const uint64_t& aPipelineId)
+WebRenderBridgeParent::WebRenderBridgeParent(const uint64_t& aPipelineId,
+                                             widget::CompositorWidget* aWidget,
+                                             gl::GLContext* aGlContext)
   : mPipelineId(aPipelineId)
+  , mWidget(aWidget)
   , mWRState(nullptr)
+  , mGLContext(aGlContext)
 {
+  MOZ_ASSERT(mGLContext);
 }
 
 bool
@@ -22,6 +31,7 @@ WebRenderBridgeParent::RecvCreate(const uint32_t& aWidth,
   if (mWRState) {
     return true;
   }
+  mGLContext->MakeCurrent();
   mWRState = wr_create(aWidth, aHeight, mPipelineId);
   return true;
 }
@@ -94,6 +104,14 @@ WebRenderBridgeParent::RecvDPBegin(const uint32_t& aWidth,
                                    const uint32_t& aHeight)
 {
   MOZ_ASSERT(mWRState);
+  if (mWidget) {
+    mozilla::widget::WidgetRenderingContext widgetContext;
+#if defined(XP_MACOSX)
+    widgetContext.mGL = mGLContext;
+#endif
+    mWidget->PreRender(&widgetContext);
+  }
+  mGLContext->MakeCurrent();
   wr_dp_begin(mWRState, aWidth, aHeight);
   return true;
 }
@@ -102,7 +120,16 @@ bool
 WebRenderBridgeParent::RecvDPEnd()
 {
   MOZ_ASSERT(mWRState);
+  mGLContext->MakeCurrent();
   wr_dp_end(mWRState);
+  mGLContext->SwapBuffers();
+  if (mWidget) {
+    mozilla::widget::WidgetRenderingContext widgetContext;
+#if defined(XP_MACOSX)
+    widgetContext.mGL = mGLContext;
+#endif
+    mWidget->PostRender(&widgetContext);
+  }
   return true;
 }
 

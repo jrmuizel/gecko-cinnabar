@@ -16,6 +16,9 @@ class nsBaseWidget;
 
 namespace mozilla {
 class VsyncObserver;
+namespace gl {
+class GLContext;
+} // namespace gl
 namespace layers {
 class Compositor;
 class LayerManager;
@@ -58,8 +61,11 @@ class WidgetRenderingContext
 {
 public:
 #if defined(XP_MACOSX)
-  WidgetRenderingContext() : mLayerManager(nullptr) {}
-  layers::LayerManager* mLayerManager;
+  WidgetRenderingContext()
+    : mLayerManager(nullptr)
+    , mGL(nullptr) {}
+  layers::LayerManagerComposite* mLayerManager;
+  gl::GLContext* mGL;
 #elif defined(MOZ_WIDGET_ANDROID)
   WidgetRenderingContext() : mCompositor(nullptr) {}
   layers::Compositor* mCompositor;

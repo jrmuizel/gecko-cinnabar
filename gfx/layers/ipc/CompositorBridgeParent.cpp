@@ -1841,7 +1841,8 @@ CompositorBridgeParent::AllocPWebRenderBridgeParent(const uint64_t& aPipelineId)
 {
   MOZ_ASSERT(aPipelineId == mRootLayerTreeID);
 
-  WebRenderBridgeParent* parent = new WebRenderBridgeParent(aPipelineId);
+  RefPtr<gl::GLContext> glc(gl::GLContextProvider::CreateForCompositorWidget(mWidget, true));
+  WebRenderBridgeParent* parent = new WebRenderBridgeParent(aPipelineId, mWidget, glc.get());
   parent->AddRef(); // IPDL reference
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
   MOZ_ASSERT(sIndirectLayerTrees[aPipelineId].mWRBridge == nullptr);
@@ -2634,9 +2635,13 @@ CrossProcessCompositorBridgeParent::AllocPWebRenderBridgeParent(const uint64_t& 
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
   MOZ_ASSERT(sIndirectLayerTrees.find(aPipelineId) != sIndirectLayerTrees.end());
   MOZ_ASSERT(sIndirectLayerTrees[aPipelineId].mWRBridge == nullptr);
-  WebRenderBridgeParent* parent = new WebRenderBridgeParent(aPipelineId);
+  CompositorBridgeParent* cbp = sIndirectLayerTrees[aPipelineId].mParent;
+  gl::GLContext* gl = sIndirectLayerTrees[cbp->RootLayerTreeId()].mWRBridge->GLContext();
+
+  WebRenderBridgeParent* parent = new WebRenderBridgeParent(aPipelineId, nullptr, gl);
   parent->AddRef(); // IPDL reference
   sIndirectLayerTrees[aPipelineId].mWRBridge = parent;
+
   return parent;
 }
 

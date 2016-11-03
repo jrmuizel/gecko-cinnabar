@@ -7,10 +7,20 @@
 #ifndef mozilla_layers_WebRenderBridgeParent_h
 #define mozilla_layers_WebRenderBridgeParent_h
 
+#include "GLContextProvider.h"
 #include "mozilla/layers/PWebRenderBridgeParent.h"
 #include "mozilla/layers/WebRenderTypes.h"
 
 namespace mozilla {
+
+namespace gl {
+class GLContext;
+}
+
+namespace widget {
+class CompositorWidget;
+}
+
 namespace layers {
 
 class WebRenderBridgeParent final : public PWebRenderBridgeParent
@@ -18,8 +28,11 @@ class WebRenderBridgeParent final : public PWebRenderBridgeParent
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WebRenderBridgeParent)
 
 public:
-  WebRenderBridgeParent(const uint64_t& aPipelineId);
+  WebRenderBridgeParent(const uint64_t& aPipelineId,
+                        widget::CompositorWidget* aWidget,
+                        gl::GLContext* aGlContext);
   uint64_t PipelineId() { return mPipelineId; }
+  gl::GLContext* GLContext() { return mGLContext.get(); }
 
   bool RecvCreate(const uint32_t& aWidth,
                   const uint32_t& aHeight) override;
@@ -61,7 +74,9 @@ protected:
 
 private:
   uint64_t mPipelineId;
+  RefPtr<widget::CompositorWidget> mWidget;
   wrstate* mWRState;
+  RefPtr<gl::GLContext> mGLContext;
 };
 
 } // namespace layers

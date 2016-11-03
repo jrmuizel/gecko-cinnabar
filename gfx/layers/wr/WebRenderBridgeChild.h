@@ -10,6 +10,15 @@
 #include "mozilla/layers/PWebRenderBridgeChild.h"
 
 namespace mozilla {
+
+namespace gl {
+class GLContext;
+}
+
+namespace widget {
+class CompositorWidget;
+}
+
 namespace layers {
 
 class WebRenderBridgeParent;
@@ -19,7 +28,9 @@ class WebRenderBridgeChild final : public PWebRenderBridgeChild
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WebRenderBridgeChild)
 
 public:
-  WebRenderBridgeChild(const uint64_t& aPipelineId);
+  WebRenderBridgeChild(const uint64_t& aPipelineId,
+                       widget::CompositorWidget* aWidget,
+                       gl::GLContext* aGlContext);
 protected:
   ~WebRenderBridgeChild() {}
 

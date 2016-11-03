@@ -11,8 +11,10 @@
 namespace mozilla {
 namespace layers {
 
-WebRenderBridgeChild::WebRenderBridgeChild(const uint64_t& aPipelineId)
-  : mWRParent(new WebRenderBridgeParent(aPipelineId))
+WebRenderBridgeChild::WebRenderBridgeChild(const uint64_t& aPipelineId,
+                                           widget::CompositorWidget* aWidget,
+                                           gl::GLContext* aGlContext)
+  : mWRParent(new WebRenderBridgeParent(aPipelineId, aWidget, aGlContext))
 {
 }
 
