@@ -8,6 +8,7 @@
 #define mozilla_layers_WebRenderBridgeParent_h
 
 #include "mozilla/layers/PWebRenderBridgeParent.h"
+#include "mozilla/layers/WebRenderTypes.h"
 
 namespace mozilla {
 namespace layers {
@@ -20,6 +21,39 @@ public:
   WebRenderBridgeParent(const uint64_t& aPipelineId);
   uint64_t PipelineId() { return mPipelineId; }
 
+  bool RecvCreate(const uint32_t& aWidth,
+                  const uint32_t& aHeight) override;
+  bool RecvDestroy() override;
+  bool RecvAddImage(const uint32_t& aWidth,
+                    const uint32_t& aHeight,
+                    const uint32_t& aStride,
+                    const WRImageFormat& aFormat,
+                    const ByteBuffer& aBuffer,
+                    WRImageKey* aOutImageKey) override;
+  bool RecvUpdateImage(const WRImageKey& aImageKey,
+                       const uint32_t& aWidth,
+                       const uint32_t& aHeight,
+                       const WRImageFormat& aFormat,
+                       const ByteBuffer& aBuffer) override;
+  bool RecvDeleteImage(const WRImageKey& aImageKey) override;
+  bool RecvPushDLBuilder() override;
+  bool RecvPopDLBuilder(const WRRect& aBounds,
+                        const WRRect& aOverflow,
+                        const gfx::Matrix4x4& aMatrix,
+                        const uint64_t& aScrollId) override;
+  bool RecvDPBegin(const uint32_t& aWidth, const uint32_t& aHeight) override;
+  bool RecvDPEnd() override;
+  bool RecvDPPushRect(const WRRect& aBounds,
+                      const WRRect& aClip,
+                      const float& r, const float& g, const float& b, const float& a) override;
+  bool RecvDPPushImage(const WRRect& aBounds,
+                       const WRRect& aClip,
+                       const Maybe<WRImageMask>& aMask,
+                       const WRImageKey& aKey) override;
+  bool RecvDPPushIframe(const WRRect& aBounds,
+                        const WRRect& aClip,
+                        const uint64_t& aLayersId) override;
+
   void ActorDestroy(ActorDestroyReason aWhy) override {}
 
 protected:
@@ -27,6 +61,7 @@ protected:
 
 private:
   uint64_t mPipelineId;
+  wrstate* mWRState;
 };
 
 } // namespace layers

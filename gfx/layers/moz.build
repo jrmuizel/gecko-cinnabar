@@ -418,6 +418,7 @@ if CONFIG['MOZ_ENABLE_WEBRENDER']:
         'wr/WebRenderBridgeChild.h',
         'wr/WebRenderBridgeParent.h',
         'wr/WebrenderLayerManager.h',
+        'wr/WebRenderTypes.h',
     ]
 
     UNIFIED_SOURCES += [
