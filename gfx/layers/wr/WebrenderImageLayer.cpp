@@ -6,6 +6,7 @@
 #include "WebrenderImageLayer.h"
 
 #include "LayersLogging.h"
+#include "mozilla/layers/WebRenderBridgeChild.h"
 
 namespace mozilla {
 namespace layers {
@@ -28,13 +29,13 @@ WebRenderImageLayer::GetAsSourceSurface()
 }
 
 void
-WebRenderImageLayer::RenderLayer(wrstate* aWRState)
+WebRenderImageLayer::RenderLayer()
 {
   RefPtr<gfx::SourceSurface> surface = GetAsSourceSurface();
   if (!surface)
     return;
 
-  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
+  WRScrollFrameStackingContextGenerator scrollFrames(this);
 
   RefPtr<DataSourceSurface> dataSurface = surface->GetDataSurface();
   DataSourceSurface::ScopedMap map(dataSurface, DataSourceSurface::MapType::READ);
@@ -45,8 +46,8 @@ WebRenderImageLayer::RenderLayer(wrstate* aWRState)
   gfx::IntSize size = surface->GetSize();
 
   WRImageKey key;
-  key = wr_add_image(aWRState, size.width, size.height, map.GetStride(),
-                     RGBA8, map.GetData(), size.height * map.GetStride());
+  gfx::ByteBuffer buf(size.height * map.GetStride(), map.GetData());
+  WRBridge()->CallAddImage(size.width, size.height, map.GetStride(), RGBA8, buf, &key);
 
   Rect rect(0, 0, size.width, size.height);
 
@@ -57,14 +58,14 @@ WebRenderImageLayer::RenderLayer(wrstate* aWRState)
       clip = rect;
   }
   if (gfxPrefs::LayersDump()) printf_stderr("ImageLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
-  wr_push_dl_builder(aWRState);
-  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), NULL, key);
+  WRBridge()->CallPushDLBuilder();
+  WRBridge()->CallDPPushImage(toWrRect(rect), toWrRect(clip), Nothing(), key);
   Manager()->AddImageKeyForDiscard(key);
 
   Rect relBounds = TransformedVisibleBoundsRelativeToParent();
   Matrix4x4 transform;// = GetTransform();
   if (gfxPrefs::LayersDump()) printf_stderr("ImageLayer %p using %s as bounds/overflow, %s for transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
-  wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
+  WRBridge()->CallPopDLBuilder(toWrRect(relBounds), toWrRect(relBounds), transform, FrameMetrics::NULL_SCROLL_ID);
 
   //mContainer->SetImageFactory(originalIF);
 }

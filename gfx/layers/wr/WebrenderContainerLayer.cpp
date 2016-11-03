@@ -6,15 +6,16 @@
 #include "WebrenderContainerLayer.h"
 
 #include <inttypes.h>
+#include "mozilla/layers/WebRenderBridgeChild.h"
 #include "LayersLogging.h"
 
 namespace mozilla {
 namespace layers {
 
 void
-WebRenderContainerLayer::RenderLayer(wrstate* aWRState)
+WebRenderContainerLayer::RenderLayer()
 {
-  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
+  WRScrollFrameStackingContextGenerator scrollFrames(this);
 
   AutoTArray<Layer*, 12> children;
   SortChildrenBy3DZOrder(children);
@@ -23,22 +24,22 @@ WebRenderContainerLayer::RenderLayer(wrstate* aWRState)
   gfx::Matrix4x4 transform;// = GetTransform();
   if (gfxPrefs::LayersDump()) printf_stderr("ContainerLayer %p using %s as bounds/overflow, %s as transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
 
-  wr_push_dl_builder(aWRState);
+  WRBridge()->CallPushDLBuilder();
   for (Layer* child : children) {
-    ToWebRenderLayer(child)->RenderLayer(aWRState);
+    ToWebRenderLayer(child)->RenderLayer();
   }
-  wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
+  WRBridge()->CallPopDLBuilder(toWrRect(relBounds), toWrRect(relBounds), transform, FrameMetrics::NULL_SCROLL_ID);
 }
 
 void
-WebRenderRefLayer::RenderLayer(wrstate* aWRState)
+WebRenderRefLayer::RenderLayer()
 {
-  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
+  WRScrollFrameStackingContextGenerator scrollFrames(this);
 
   gfx::Rect relBounds = TransformedVisibleBoundsRelativeToParent();
   gfx::Matrix4x4 transform;// = GetTransform();
   if (gfxPrefs::LayersDump()) printf_stderr("RefLayer %p (%" PRIu64 ") using %s as bounds/overflow, %s as transform\n", this, mId, Stringify(relBounds).c_str(), Stringify(transform).c_str());
-  wr_dp_push_iframe(aWRState, toWrRect(relBounds), toWrRect(relBounds), mId);
+  WRBridge()->CallDPPushIframe(toWrRect(relBounds), toWrRect(relBounds), mId);
 }
 
 } // namespace layers

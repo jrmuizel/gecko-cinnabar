@@ -6,15 +6,16 @@
 #include "WebrenderColorLayer.h"
 
 #include "LayersLogging.h"
+#include "mozilla/layers/WebRenderBridgeChild.h"
 #include "webrender.h"
 
 namespace mozilla {
 namespace layers {
 
 void
-WebRenderColorLayer::RenderLayer(wrstate* aWRState)
+WebRenderColorLayer::RenderLayer()
 {
-  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
+  WRScrollFrameStackingContextGenerator scrollFrames(this);
 
   gfx::Rect rect = RelativeToParent(GetTransform().TransformBounds(IntRectToRect(mBounds)));
   gfx::Rect clip;
@@ -24,7 +25,7 @@ WebRenderColorLayer::RenderLayer(wrstate* aWRState)
       clip = rect;
   }
   if (gfxPrefs::LayersDump()) printf_stderr("ColorLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
-  wr_dp_push_rect(aWRState, toWrRect(rect), toWrRect(clip),
+  WRBridge()->CallDPPushRect(toWrRect(rect), toWrRect(clip),
                   mColor.r, mColor.g, mColor.b, mColor.a);
 }
 

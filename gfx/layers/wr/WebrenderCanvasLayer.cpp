@@ -12,6 +12,7 @@
 #include "LayersLogging.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/layers/TextureClientSharedSurface.h"
+#include "mozilla/layers/WebRenderBridgeChild.h"
 #include "PersistentBufferProvider.h"
 #include "SharedSurface.h"
 
@@ -24,7 +25,7 @@ WebRenderCanvasLayer::~WebRenderCanvasLayer()
 }
 
 void
-WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
+WebRenderCanvasLayer::RenderLayer()
 {
   FirePreTransactionCallback();
   RefPtr<gfx::SourceSurface> surface;
@@ -81,7 +82,7 @@ WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
     return;
   }
 
-  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
+  WRScrollFrameStackingContextGenerator scrollFrames(this);
 
   RefPtr<gfx::DataSourceSurface> dataSurface = surface->GetDataSurface();
   gfx::DataSourceSurface::ScopedMap map(dataSurface, gfx::DataSourceSurface::MapType::READ);
@@ -92,8 +93,8 @@ WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
   gfx::IntSize size = surface->GetSize();
 
   WRImageKey key;
-  key = wr_add_image(aWRState, size.width, size.height, map.GetStride(),
-                     RGBA8, map.GetData(), size.height * map.GetStride());
+  gfx::ByteBuffer buf(size.height * map.GetStride(), map.GetData());
+  WRBridge()->CallAddImage(size.width, size.height, map.GetStride(), RGBA8, buf, &key);
 
   gfx::Matrix4x4 transform;// = GetTransform();
   const bool needsYFlip = (mOriginPos == gl::OriginPos::BottomLeft);
@@ -109,13 +110,13 @@ WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
       clip = rect;
   }
   if (gfxPrefs::LayersDump()) printf_stderr("CanvasLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
-  wr_push_dl_builder(aWRState);
-  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), NULL, key);
+  WRBridge()->CallPushDLBuilder();
+  WRBridge()->CallDPPushImage(toWrRect(rect), toWrRect(clip), Nothing(), key);
   Manager()->AddImageKeyForDiscard(key);
 
   gfx::Rect relBounds = TransformedVisibleBoundsRelativeToParent();
   if (gfxPrefs::LayersDump()) printf_stderr("CanvasLayer %p using %s as bounds/overflow, %s for transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
-  wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
+  WRBridge()->CallPopDLBuilder(toWrRect(relBounds), toWrRect(relBounds), transform, FrameMetrics::NULL_SCROLL_ID);
 }
 
 } // namespace layers

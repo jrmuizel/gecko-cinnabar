@@ -95,10 +95,8 @@ WebRenderLayer::TransformedVisibleBoundsRelativeToParent()
 }
 
 WRScrollFrameStackingContextGenerator::WRScrollFrameStackingContextGenerator(
-        wrstate* aWRState,
         WebRenderLayer* aLayer)
-  : mWRState(aWRState)
-  , mLayer(aLayer)
+  : mLayer(aLayer)
 {
   Layer* layer = mLayer->GetLayer();
   for (size_t i = layer->GetScrollMetadataCount(); i > 0; i--) {
@@ -107,7 +105,7 @@ WRScrollFrameStackingContextGenerator::WRScrollFrameStackingContextGenerator(
       continue;
     }
     if (gfxPrefs::LayersDump()) printf_stderr("Pushing stacking context id %" PRIu64"\n", fm.GetScrollId());
-    wr_push_dl_builder(mWRState);
+    mLayer->WRBridge()->CallPushDLBuilder();
   }
 }
 
@@ -134,15 +132,14 @@ WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
       printf_stderr("Popping stacking context id %" PRIu64 " with bounds=%s overflow=%s\n",
         fm.GetScrollId(), Stringify(bounds).c_str(), Stringify(overflow).c_str());
     }
-    wr_pop_dl_builder(mWRState, toWrRect(bounds), toWrRect(overflow), &identity.components[0], fm.GetScrollId());
+    mLayer->WRBridge()->CallPopDLBuilder(toWrRect(bounds), toWrRect(overflow), identity, fm.GetScrollId());
   }
 }
 
 
 WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
                                              uint64_t aLayersId)
-  : mWRState(nullptr)
-  , mWRChild(new WebRenderBridgeChild(aLayersId))
+  : mWRChild(new WebRenderBridgeChild(aLayersId))
 {
   CompositorWidgetInitData initData;
   aWidget->GetCompositorWidgetInitData(&initData);
@@ -151,7 +148,7 @@ WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   mGLContext->MakeCurrent();
-  mWRState = wr_create(size.width, size.height, aLayersId);
+  WRBridge()->CallCreate(size.width, size.height);
 }
 
 void
@@ -162,7 +159,7 @@ WebRenderLayerManager::Destroy()
 
 WebRenderLayerManager::~WebRenderLayerManager()
 {
-  wr_destroy(mWRState);
+  WRBridge()->CallDestroy();
 }
 
 widget::CompositorWidgetDelegate*
@@ -218,13 +215,13 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   mWidget->PreRender(&widgetContext);
   mGLContext->MakeCurrent();
   printf("WR Beginning size %i %i\n", size.width, size.height);
-  wr_dp_begin(mWRState, size.width, size.height);
+  WRBridge()->CallDPBegin(size.width, size.height);
 
-  WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer(mWRState);
+  WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer();
   mGLContext->MakeCurrent();
 
   printf("WR Ending\n");
-  wr_dp_end(mWRState);
+  WRBridge()->CallDPEnd();
   mGLContext->SwapBuffers();
   mWidget->PostRender(&widgetContext);
 
@@ -242,7 +239,7 @@ void
 WebRenderLayerManager::DiscardImages()
 {
   for (auto key : mImageKeys) {
-      wr_delete_image(mWRState, key);
+      WRBridge()->CallDeleteImage(key);
   }
   mImageKeys.clear();
 }

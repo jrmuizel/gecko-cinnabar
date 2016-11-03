@@ -7,6 +7,7 @@
 
 #include "LayersLogging.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/layers/WebRenderBridgeChild.h"
 #include "gfxUtils.h"
 
 namespace mozilla {
@@ -15,7 +16,7 @@ namespace layers {
 using namespace mozilla::gfx;
 
 void
-WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
+WebRenderPaintedLayer::RenderLayer()
 {
   LayerIntRegion visibleRegion = GetVisibleRegion();
   LayerIntRect bounds = visibleRegion.GetBounds();
@@ -25,8 +26,8 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
       return;
   }
 
-  WRScrollFrameStackingContextGenerator scrollFrames(aWRState, this);
-  wr_push_dl_builder(aWRState);
+  WRScrollFrameStackingContextGenerator scrollFrames(this);
+  WRBridge()->CallPushDLBuilder();
 
   RefPtr<DrawTarget> target = gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, size.ToUnknownSize(), SurfaceFormat::B8G8R8A8);
   target->SetTransform(Matrix().PreTranslate(-bounds.x, -bounds.y));
@@ -51,8 +52,8 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
       int32_t stride;
       SurfaceFormat format;
       target->LockBits(&data, &size, &stride, &format);
-      key = wr_add_image(aWRState, size.width, size.height, stride,
-                         RGBA8, data, size.height * stride);
+      gfx::ByteBuffer buf(size.height * stride, data);
+      WRBridge()->CallAddImage(size.width, size.height, stride, RGBA8, buf, &key);
       target->ReleaseBits(data);
   }
 
@@ -67,13 +68,13 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
       clip = rect;
   }
   if (gfxPrefs::LayersDump()) printf_stderr("PaintedLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
-  wr_dp_push_image(aWRState, toWrRect(rect), toWrRect(clip), NULL, key);
+  WRBridge()->CallDPPushImage(toWrRect(rect), toWrRect(clip), Nothing(), key);
   Manager()->AddImageKeyForDiscard(key);
 
   Rect relBounds = TransformedVisibleBoundsRelativeToParent();
   Matrix4x4 transform;// = GetTransform();
   if (gfxPrefs::LayersDump()) printf_stderr("PaintedLayer %p using %s as bounds/overflow, %s for transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
-  wr_pop_dl_builder(aWRState, toWrRect(relBounds), toWrRect(relBounds), &transform.components[0], FrameMetrics::NULL_SCROLL_ID);
+  WRBridge()->CallPopDLBuilder(toWrRect(relBounds), toWrRect(relBounds), transform, FrameMetrics::NULL_SCROLL_ID);
 }
 
 } // namespace layers
