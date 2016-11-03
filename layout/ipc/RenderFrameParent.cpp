@@ -36,6 +36,7 @@
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "ClientLayerManager.h"
 #include "FrameLayerBuilder.h"
+#include "mozilla/layers/WebrenderLayerManager.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
@@ -121,6 +122,10 @@ RenderFrameParent::Init(nsFrameLoader* aFrameLoader)
     browser->Manager()->AsContentParent()->AllocateLayerTreeId(browser, &mLayersId);
     if (lm && lm->AsClientLayerManager()) {
       if (!lm->AsClientLayerManager()->GetRemoteRenderer()->SendNotifyChildCreated(mLayersId)) {
+        return false;
+      }
+    } else if (lm && lm->AsWebRenderLayerManager()) {
+      if (!lm->AsWebRenderLayerManager()->GetCompositorBridgeChild()->SendNotifyChildCreated(mLayersId)) {
         return false;
       }
     }

@@ -1301,7 +1301,7 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
 
   CreateCompositorVsyncDispatcher();
 
-  RefPtr<ClientLayerManager> lm = new ClientLayerManager(this);
+  RefPtr<LayerManager> lm = new WebRenderLayerManager(this);
 
   bool useAPZ = UseAPZ();
 
@@ -1331,10 +1331,8 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
   }
 
   ShadowLayerForwarder* lf = lm->AsShadowForwarder();
-  // As long as we are creating a ClientLayerManager above lf must be non-null.
-  MOZ_ASSERT(lf);
-
   if (lf) {
+    // lf is non-null if we are creating a ClientLayerManager above
     TextureFactoryIdentifier textureFactoryIdentifier;
     PLayerTransactionChild* shadowManager = nullptr;
 
@@ -1394,23 +1392,6 @@ bool nsBaseWidget::ShouldUseOffMainThreadCompositing()
   return gfxPlatform::UsesOffMainThreadCompositing();
 }
 
-bool nsBaseWidget::CreateWebRenderLayerManager()
-{
-#ifdef MOZ_ENABLE_WEBRENDER
-  if (!XRE_IsParentProcess() || mLayerManager) {
-    return false;
-  }
-
-  uint64_t layersId = gfx::GPUProcessManager::Get()->AllocateLayerTreeId();
-  WebRenderLayerManager* manager = new WebRenderLayerManager(this, layersId);
-  mCompositorWidgetDelegate = manager->GetCompositorWidgetDelegate();
-  mLayerManager = manager;
-  return true;
-#else
-  return false;
-#endif
-}
-
 LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
                                             LayersBackend aBackendHint,
                                             LayerManagerPersistence aPersistence)
@@ -1421,13 +1402,8 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayerTransactionChild* aShadowManag
       return nullptr;
     }
 
-    if (CreateWebRenderLayerManager()) {
-      MOZ_ASSERT(mLayerManager);
-      return mLayerManager;
-    }
-
     // Try to use an async compositor first, if possible
-    if (!mLayerManager && ShouldUseOffMainThreadCompositing()) {
+    if (ShouldUseOffMainThreadCompositing()) {
       // e10s uses the parameter to pass in the shadow manager from the TabChild
       // so we don't expect to see it there since this doesn't support e10s.
       NS_ASSERTION(aShadowManager == nullptr, "Async Compositor not supported with e10s");
