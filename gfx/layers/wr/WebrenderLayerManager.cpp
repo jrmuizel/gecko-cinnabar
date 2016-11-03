@@ -57,7 +57,7 @@ WebRenderLayer::ParentStackingContextBounds(size_t aScrollMetadataIndex)
   Layer* layer = GetLayer();
   for (size_t i = aScrollMetadataIndex + 1; i < layer->GetScrollMetadataCount(); i++) {
     if (layer->GetFrameMetrics(i).IsScrollable()) {
-      return layer->GetFrameMetrics(i).CalculateCompositedRectInCssPixels().ToUnknownRect();
+      return layer->GetFrameMetrics(i).GetCompositionBounds().ToUnknownRect();
     }
   }
   if (layer->GetParent()) {
@@ -108,9 +108,9 @@ WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
     if (!fm.IsScrollable()) {
       continue;
     }
-    CSSRect bounds = fm.CalculateCompositedRectInCssPixels();
-    CSSRect overflow = fm.GetExpandedScrollableRect();
-    CSSPoint scrollPos = fm.GetScrollOffset();
+    Rect bounds = fm.GetCompositionBounds().ToUnknownRect();
+    Rect overflow = (fm.GetExpandedScrollableRect() * fm.LayersPixelsPerCSSPixel()).ToUnknownRect();
+    Point scrollPos = (fm.GetScrollOffset() * fm.LayersPixelsPerCSSPixel()).ToUnknownPoint();
     Rect parentBounds = mLayer->ParentStackingContextBounds(i);
     bounds.MoveBy(-parentBounds.x, -parentBounds.y);
     // Subtract the MT scroll position from the overflow here so that the WR
