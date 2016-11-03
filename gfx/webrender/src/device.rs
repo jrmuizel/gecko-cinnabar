@@ -1066,7 +1066,9 @@ impl Device {
                             internal_format: u32,
                             format: u32,
                             type_: u32,
+                            align: u32,
                             pixels: Option<&[u8]>) {
+        if align != 1 { gl::pixel_store_i(gl::UNPACK_ALIGNMENT, align as i32); }
         gl::tex_image_2d(target,
                          0,
                          internal_format as gl::GLint,
@@ -1075,6 +1077,7 @@ impl Device {
                          format,
                          type_,
                          pixels);
+        if align != 1 { gl::pixel_store_i(gl::UNPACK_ALIGNMENT, 1); }
     }
 
     pub fn init_texture(&mut self,
@@ -1084,6 +1087,7 @@ impl Device {
                         format: ImageFormat,
                         filter: TextureFilter,
                         mode: RenderTargetMode,
+                        align: u32,
                         pixels: Option<&[u8]>) {
         debug_assert!(self.inside_frame);
 
@@ -1109,6 +1113,7 @@ impl Device {
                                           internal_format as u32,
                                           gl_format,
                                           type_,
+                                          1,
                                           None);
                 self.create_fbo_for_texture_if_necessary(texture_id, None);
             }
@@ -1126,6 +1131,7 @@ impl Device {
                                           internal_format as u32,
                                           gl_format,
                                           type_,
+                                          align,
                                           pixels);
             }
         }
@@ -1208,7 +1214,7 @@ impl Device {
         let (old_width, old_height) = self.get_texture_dimensions(texture_id);
 
         let temp_texture_id = self.create_texture_ids(1, TextureTarget::Default)[0];
-        self.init_texture(temp_texture_id, old_width, old_height, format, filter, mode, None);
+        self.init_texture(temp_texture_id, old_width, old_height, format, filter, mode, 1, None);
         self.create_fbo_for_texture_if_necessary(temp_texture_id, None);
 
         self.bind_render_target(Some((texture_id, 0)), None);
@@ -1224,7 +1230,7 @@ impl Device {
                                   old_height as i32);
 
         self.deinit_texture(texture_id);
-        self.init_texture(texture_id, new_width, new_height, format, filter, mode, None);
+        self.init_texture(texture_id, new_width, new_height, format, filter, mode, 1, None);
         self.create_fbo_for_texture_if_necessary(texture_id, None);
         self.bind_render_target(Some((temp_texture_id, 0)), None);
         self.bind_texture(TextureSampler::Color, texture_id);
@@ -1518,7 +1524,9 @@ impl Device {
                                    width: gl::GLint,
                                    height: gl::GLint,
                                    format: gl::GLuint,
+                                   align: u32,
                                    data: &[u8]) {
+        if align != 1 { gl::pixel_store_i(gl::UNPACK_ALIGNMENT, align as i32); }
         gl::tex_sub_image_2d(target,
                              0,
                              x0, y0,
@@ -1526,6 +1534,7 @@ impl Device {
                              format,
                              gl::UNSIGNED_BYTE,
                              data);
+        if align != 1 { gl::pixel_store_i(gl::UNPACK_ALIGNMENT, 1); }
     }
 
     pub fn update_texture(&mut self,
@@ -1534,6 +1543,7 @@ impl Device {
                           y0: u32,
                           width: u32,
                           height: u32,
+                          alignment: u32,
                           data: &[u8]) {
         debug_assert!(self.inside_frame);
 
@@ -1558,7 +1568,8 @@ impl Device {
             ImageFormat::Invalid | ImageFormat::RGBAF32 => unreachable!(),
         };
 
-        assert!(data.len() as u32 == bpp * width * height);
+        let align = |x| ((x + alignment - 1) / alignment) * alignment;
+        assert!(data.len() as u32 == align(bpp * width) * height);
 
         self.bind_texture(TextureSampler::Color, texture_id);
         self.update_image_for_2d_texture(texture_id.target,
@@ -1567,6 +1578,7 @@ impl Device {
                                          width as gl::GLint,
                                          height as gl::GLint,
                                          gl_format,
+                                         alignment,
                                          data);
     }
 

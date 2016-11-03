@@ -92,7 +92,7 @@ WebRenderCanvasLayer::RenderLayer(wrstate* aWRState)
   gfx::IntSize size = surface->GetSize();
 
   WRImageKey key;
-  key = wr_add_image(aWRState, size.width, size.height, RGBA8, map.GetData(), size.height * map.GetStride());
+  key = wr_add_image(aWRState, size.width, size.height, RGBA8, 1, map.GetData(), size.height * map.GetStride());
 
   gfx::Matrix4x4 transform;// = GetTransform();
   const bool needsYFlip = (mOriginPos == gl::OriginPos::BottomLeft);

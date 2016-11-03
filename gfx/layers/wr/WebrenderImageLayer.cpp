@@ -46,7 +46,7 @@ WebRenderImageLayer::RenderLayer(wrstate* aWRState)
 
 
   WRImageKey key;
-  key = wr_add_image(aWRState, size.width, size.height, RGBA8, map.GetData(), size.height * map.GetStride());
+  key = wr_add_image(aWRState, size.width, size.height, RGBA8, 1, map.GetData(), size.height * map.GetStride());
 
   Rect rect(0, 0, size.width, size.height);
 

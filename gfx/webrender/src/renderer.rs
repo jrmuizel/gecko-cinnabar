@@ -136,6 +136,7 @@ impl VertexDataTexture {
                             ImageFormat::RGBAF32,
                             TextureFilter::Nearest,
                             RenderTargetMode::None,
+                            1,
                             Some(unsafe { mem::transmute(data.as_slice()) } ));
     }
 }
@@ -535,7 +536,7 @@ impl Renderer {
                              2,
                              ImageFormat::RGBA8,
                              TextureFilter::Linear,
-                             TextureInsertOp::Blit(white_pixels),
+                             TextureInsertOp::Blit(1, white_pixels),
                              BorderType::SinglePixel);
 
         let dummy_mask_image_id = texture_cache.new_item_id();
@@ -546,7 +547,7 @@ impl Renderer {
                              2,
                              ImageFormat::A8,
                              TextureFilter::Linear,
-                             TextureInsertOp::Blit(mask_pixels),
+                             TextureInsertOp::Blit(1, mask_pixels),
                              BorderType::SinglePixel);
 
         let dummy_resources = DummyResources {
@@ -563,6 +564,7 @@ impl Renderer {
                             ImageFormat::A8,
                             TextureFilter::Nearest,
                             RenderTargetMode::SimpleRenderTarget,
+                            1,
                             None);
 
         let raster_op_target_rgba8 = device.create_texture_ids(1, TextureTarget::Default)[0];
@@ -572,6 +574,7 @@ impl Renderer {
                             ImageFormat::RGBA8,
                             TextureFilter::Nearest,
                             RenderTargetMode::SimpleRenderTarget,
+                            1,
                             None);
 
         let layer_texture = VertexDataTexture::new(&mut device);
@@ -846,7 +849,7 @@ impl Renderer {
         for update_list in pending_texture_updates.drain(..) {
             for update in update_list.updates {
                 match update.op {
-                    TextureUpdateOp::Create(width, height, format, filter, mode, maybe_bytes) => {
+                    TextureUpdateOp::Create(width, height, format, filter, mode, align, maybe_bytes) => {
                         // TODO: clean up match
                         match maybe_bytes {
                             Some(bytes) => {
@@ -856,6 +859,7 @@ impl Renderer {
                                                          format,
                                                          filter,
                                                          mode,
+                                                         align,
                                                          Some(bytes.as_slice()));
                             }
                             None => {
@@ -865,6 +869,7 @@ impl Renderer {
                                                          format,
                                                          filter,
                                                          mode,
+                                                         1,
                                                          None);
                             }
                         }
@@ -886,12 +891,13 @@ impl Renderer {
                             TextureUpdateDetails::Raw => {
                                 self.device.update_raw_texture(update.id, x, y, width, height);
                             }
-                            TextureUpdateDetails::Blit(bytes) => {
+                            TextureUpdateDetails::Blit(align, bytes) => {
                                 self.device.update_texture(
                                     update.id,
                                     x,
                                     y,
                                     width, height,
+                                    align,
                                     bytes.as_slice());
                             }
                             TextureUpdateDetails::Blur(bytes,
@@ -908,6 +914,7 @@ impl Renderer {
                                     unblurred_glyph_texture_image.pixel_uv.y,
                                     glyph_size.width,
                                     glyph_size.height,
+                                    1,
                                     bytes.as_slice());
 
                                 let blur_program_id = self.blur_program_id;
@@ -1596,6 +1603,7 @@ impl Renderer {
                                          ImageFormat::RGBA8,
                                          TextureFilter::Linear,
                                          RenderTargetMode::LayerRenderTarget(pass.targets.len() as i32),
+                                         1,
                                          None);
             }
 

@@ -37,6 +37,7 @@ struct ImageResource {
     width: u32,
     height: u32,
     format: ImageFormat,
+    align: u32,
     epoch: Epoch,
 }
 
@@ -156,11 +157,13 @@ impl ResourceCache {
                               width: u32,
                               height: u32,
                               format: ImageFormat,
+                              align: u32,
                               bytes: Vec<u8>) {
         let resource = ImageResource {
             width: width,
             height: height,
             format: format,
+            align: align,
             bytes: bytes,
             epoch: Epoch(0),
         };
@@ -173,6 +176,7 @@ impl ResourceCache {
                                  width: u32,
                                  height: u32,
                                  format: ImageFormat,
+                                 align: u32,
                                  bytes: Vec<u8>) {
         let next_epoch = match self.image_templates.get(&image_key) {
             Some(image) => {
@@ -189,6 +193,7 @@ impl ResourceCache {
             height: height,
             format: format,
             bytes: bytes,
+            align: align,
             epoch: next_epoch,
         };
 
@@ -220,6 +225,7 @@ impl ResourceCache {
                                                   image_template.width,
                                                   image_template.height,
                                                   image_template.format,
+                                                  image_template.align,
                                                   image_template.bytes.clone());
 
                         // Update the cached epoch
@@ -245,7 +251,7 @@ impl ResourceCache {
                                               image_template.height,
                                               image_template.format,
                                               filter,
-                                              TextureInsertOp::Blit(image_template.bytes.clone()),
+                                              TextureInsertOp::Blit(image_template.align, image_template.bytes.clone()),
                                               BorderType::SinglePixel);
 
                     entry.insert(CachedImageInfo {
@@ -293,7 +299,7 @@ impl ResourceCache {
                     Au(0) => {
                         texture_width = result.width;
                         texture_height = result.height;
-                        insert_op = TextureInsertOp::Blit(result.bytes);
+                        insert_op = TextureInsertOp::Blit(1, result.bytes);
                     }
                     blur_radius => {
                         let blur_radius_px = f32::ceil(blur_radius.to_f32_px() * self.device_pixel_ratio)

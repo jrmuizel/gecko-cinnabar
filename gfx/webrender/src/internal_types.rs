@@ -315,7 +315,7 @@ pub enum RenderTargetMode {
 #[derive(Debug)]
 pub enum TextureUpdateDetails {
     Raw,
-    Blit(Vec<u8>),
+    Blit(u32, Vec<u8>),
     Blur(Vec<u8>, Size2D<u32>, Au, TextureImage, TextureImage, BorderType),
 }
 
@@ -327,7 +327,7 @@ pub struct TextureImage {
 }
 
 pub enum TextureUpdateOp {
-    Create(u32, u32, ImageFormat, TextureFilter, RenderTargetMode, Option<Vec<u8>>),
+    Create(u32, u32, ImageFormat, TextureFilter, RenderTargetMode, u32, Option<Vec<u8>>),
     Update(u32, u32, u32, u32, TextureUpdateDetails),
     Grow(u32, u32, ImageFormat, TextureFilter, RenderTargetMode),
 }

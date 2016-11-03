@@ -42,6 +42,7 @@ impl DebugRenderer {
                             ImageFormat::A8,
                             TextureFilter::Linear,
                             RenderTargetMode::None,
+                            1,
                             Some(&debug_font_data::FONT_BITMAP));
 
         DebugRenderer {
