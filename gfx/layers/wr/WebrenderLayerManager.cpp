@@ -11,6 +11,7 @@
 #include "LayersLogging.h"
 #include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
+#include "mozilla/layers/WebRenderBridgeChild.h"
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #include "nsThreadUtils.h"
@@ -29,6 +30,18 @@ using namespace gl;
 using namespace widget;
 
 namespace layers {
+
+WebRenderLayerManager*
+WebRenderLayer::WRManager()
+{
+  return static_cast<WebRenderLayerManager*>(GetLayer()->Manager());
+}
+
+WebRenderBridgeChild*
+WebRenderLayer::WRBridge()
+{
+  return WRManager()->WRBridge();
+}
 
 Rect
 WebRenderLayer::RelativeToVisible(Rect aRect)
@@ -129,6 +142,7 @@ WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
 WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
                                              uint64_t aLayersId)
   : mWRState(nullptr)
+  , mWRChild(new WebRenderBridgeChild(aLayersId))
 {
   CompositorWidgetInitData initData;
   aWidget->GetCompositorWidgetInitData(&initData);

@@ -23,6 +23,8 @@ class CompositorWidgetDelegate;
 }
 namespace layers {
 
+class WebRenderBridgeChild;
+
 template<class T>
 static inline WRRect toWrRect(const gfx::RectTyped<T>& rect)
 {
@@ -56,6 +58,9 @@ public:
   {
     return static_cast<WebRenderLayer*>(aLayer->ImplData());
   }
+
+  WebRenderLayerManager* WRManager();
+  WebRenderBridgeChild* WRBridge();
 
   gfx::Rect RelativeToVisible(gfx::Rect aRect);
   gfx::Rect RelativeToTransformedVisible(gfx::Rect aRect);
@@ -127,6 +132,8 @@ public:
   void AddImageKeyForDiscard(WRImageKey);
   void DiscardImages();
 
+  WebRenderBridgeChild* WRBridge() { return mWRChild; }
+
 private:
   RefPtr<widget::CompositorWidget> mWidget;
   RefPtr<gl::GLContext> mGLContext;
@@ -137,6 +144,8 @@ private:
    * while rendering */
   DrawPaintedLayerCallback mPaintedLayerCallback;
   void *mPaintedLayerCallbackData;
+
+  RefPtr<WebRenderBridgeChild> mWRChild;
 };
 
 } // namespace layers
