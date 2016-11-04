@@ -3,9 +3,6 @@ use webrender_traits::{PipelineId, AuxiliaryListsBuilder, StackingContextId, Dis
 use renderer::{Renderer, RendererOptions};
 extern crate webrender_traits;
 
-
-//extern crate glutin;
-
 use euclid::{Size2D, Point2D, Rect, Matrix4D};
 use gleam::gl;
 use std::ffi::CStr;
@@ -168,14 +165,6 @@ use self::macos::Library as GlLibrary;
 #[cfg(target_os = "windows")]
 use self::win::Library as GlLibrary;
 
-/*
-impl Notifier {
-    fn new(window_proxy: glutin::WindowProxy) -> Notifier {
-        Notifier {
-            window_proxy: window_proxy,
-        }
-    }
-}*/
 pub struct WebRenderFrameBuilder {
     pub stacking_contexts: Vec<(StackingContextId, webrender_traits::StackingContext)>,
     pub display_lists: Vec<(DisplayListId, webrender_traits::BuiltDisplayList)>,
@@ -276,10 +265,6 @@ pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState
 
     let (renderer, sender) = Renderer::new(opts);
     let api = sender.create_api();
-
-//     let font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
-//     let font_bytes = load_file(font_path);
-//     let font_key = api.add_raw_font(font_bytes);
 
     let notifier = Box::new(Notifier{});
     renderer.set_render_notifier(notifier);
