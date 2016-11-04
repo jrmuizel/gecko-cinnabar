@@ -86,7 +86,7 @@
 #endif
 
 #include "LayerScope.h"
-#include "WebrenderLayerManager.h"
+#include "mozilla/layers/WebrenderLayerManager.h"
 
 namespace mozilla {
 
