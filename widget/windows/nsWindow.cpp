@@ -209,7 +209,7 @@
 #include "InputData.h"
 
 #include "mozilla/Telemetry.h"
-#include "WebrenderLayerManager.h"
+#include "mozilla/layers/WebrenderLayerManager.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
