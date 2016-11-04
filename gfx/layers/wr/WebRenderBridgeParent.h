@@ -56,7 +56,9 @@ public:
                         const WRRect& aOverflow,
                         const gfx::Matrix4x4& aMatrix,
                         const uint64_t& aScrollId) override;
-  bool RecvDPBegin(const uint32_t& aWidth, const uint32_t& aHeight) override;
+  bool RecvDPBegin(const uint32_t& aWidth,
+                   const uint32_t& aHeight,
+                   bool* aOutSuccess) override;
   bool RecvDPEnd() override;
   bool RecvDPPushRect(const WRRect& aBounds,
                       const WRRect& aClip,
