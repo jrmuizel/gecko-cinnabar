@@ -35,7 +35,8 @@ parent:
   sync PushDLBuilder();
   sync PopDLBuilder(WRRect aBounds, WRRect aOverflow, Matrix4x4 aMatrix,
                     uint64_t aScrollId);
-  sync DPBegin(uint32_t aWidth, uint32_t aHeight);
+  sync DPBegin(uint32_t aWidth, uint32_t aHeight)
+    returns (bool aOutSuccess);
   sync DPEnd();
   sync DPPushRect(WRRect aBounds, WRRect aClip, float r, float g, float b, float a);
   sync DPPushImage(WRRect aBounds, WRRect aClip, MaybeImageMask aMask, WRImageKey aKey);

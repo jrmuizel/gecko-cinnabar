@@ -110,7 +110,8 @@ WebRenderBridgeParent::RecvPopDLBuilder(const WRRect& aBounds,
 
 bool
 WebRenderBridgeParent::RecvDPBegin(const uint32_t& aWidth,
-                                   const uint32_t& aHeight)
+                                   const uint32_t& aHeight,
+                                   bool* aOutSuccess)
 {
   MOZ_ASSERT(mWRState);
   if (mWidget) {
@@ -118,10 +119,14 @@ WebRenderBridgeParent::RecvDPBegin(const uint32_t& aWidth,
 #if defined(XP_MACOSX)
     widgetContext.mGL = mGLContext;
 #endif
-    mWidget->PreRender(&widgetContext);
+    if (!mWidget->PreRender(&widgetContext)) {
+      *aOutSuccess = false;
+      return true;
+    }
   }
   mGLContext->MakeCurrent();
   wr_dp_begin(mWRState, aWidth, aHeight);
+  *aOutSuccess = true;
   return true;
 }
 
