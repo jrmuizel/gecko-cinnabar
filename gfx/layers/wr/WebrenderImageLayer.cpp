@@ -47,7 +47,7 @@ WebRenderImageLayer::RenderLayer()
 
   WRImageKey key;
   gfx::ByteBuffer buf(size.height * map.GetStride(), map.GetData());
-  WRBridge()->CallAddImage(size.width, size.height, map.GetStride(), RGBA8, buf, &key);
+  WRBridge()->SendAddImage(size.width, size.height, map.GetStride(), RGBA8, buf, &key);
 
   Rect rect(0, 0, size.width, size.height);
 
@@ -58,14 +58,14 @@ WebRenderImageLayer::RenderLayer()
       clip = rect;
   }
   if (gfxPrefs::LayersDump()) printf_stderr("ImageLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
-  WRBridge()->CallPushDLBuilder();
-  WRBridge()->CallDPPushImage(toWrRect(rect), toWrRect(clip), Nothing(), key);
+  WRBridge()->SendPushDLBuilder();
+  WRBridge()->SendDPPushImage(toWrRect(rect), toWrRect(clip), Nothing(), key);
   Manager()->AddImageKeyForDiscard(key);
 
   Rect relBounds = TransformedVisibleBoundsRelativeToParent();
   Matrix4x4 transform;// = GetTransform();
   if (gfxPrefs::LayersDump()) printf_stderr("ImageLayer %p using %s as bounds/overflow, %s for transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
-  WRBridge()->CallPopDLBuilder(toWrRect(relBounds), toWrRect(relBounds), transform, FrameMetrics::NULL_SCROLL_ID);
+  WRBridge()->SendPopDLBuilder(toWrRect(relBounds), toWrRect(relBounds), transform, FrameMetrics::NULL_SCROLL_ID);
 
   //mContainer->SetImageFactory(originalIF);
 }

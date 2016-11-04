@@ -1330,6 +1330,10 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
     mInitialZoomConstraints.reset();
   }
 
+  if (lm->AsWebRenderLayerManager()) {
+    lm->AsWebRenderLayerManager()->Initialize(mCompositorBridgeChild, mCompositorSession->RootLayerTreeId());
+  }
+
   ShadowLayerForwarder* lf = lm->AsShadowForwarder();
   if (lf) {
     // lf is non-null if we are creating a ClientLayerManager above

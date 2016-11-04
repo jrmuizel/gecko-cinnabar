@@ -34,6 +34,7 @@
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/ShadowLayers.h"
+#include "mozilla/layers/WebrenderLayerManager.h"
 #include "mozilla/layout/RenderFrameChild.h"
 #include "mozilla/layout/RenderFrameParent.h"
 #include "mozilla/LookAndFeel.h"
@@ -2597,6 +2598,11 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
     // As long as we are creating a ClientLayerManager for the puppet widget,
     // lf must be non-null here.
     MOZ_ASSERT(lf);
+
+    LayerManager* lm = mPuppetWidget->GetLayerManager();
+    if (lm->AsWebRenderLayerManager()) {
+      lm->AsWebRenderLayerManager()->Initialize(compositorChild, aLayersId);
+    }
 
     if (lf) {
       nsTArray<LayersBackend> backends;
