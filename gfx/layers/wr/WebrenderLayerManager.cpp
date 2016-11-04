@@ -150,11 +150,12 @@ WebRenderLayerManager::Destroy()
     mAPZC->ClearTree();
     mAPZC = nullptr;
   }
+  DiscardImages();
 }
 
 WebRenderLayerManager::~WebRenderLayerManager()
 {
-  DiscardImages();
+  wr_destroy(mWRState);
 }
 
 widget::CompositorWidgetDelegate*
