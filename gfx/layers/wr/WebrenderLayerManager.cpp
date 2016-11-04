@@ -141,6 +141,10 @@ WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget,
   mGLContext = GLContextProvider::CreateForWindow(aWidget, true);
 
   CompositorBridgeParent::SetWRLayerManager(aLayersId, this);
+
+  LayoutDeviceIntSize size = mWidget->GetClientSize();
+  mGLContext->MakeCurrent();
+  mWRState = wr_create(size.width, size.height, mLayersId);
 }
 
 void
@@ -202,16 +206,11 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   mPaintedLayerCallback = aCallback;
   mPaintedLayerCallbackData = aCallbackData;
 
-  LayoutDeviceIntSize size = mWidget->GetClientSize();
-  if (!mWRState) {
-    mGLContext->MakeCurrent();
-    mWRState = wr_create(size.width, size.height, mLayersId);
-  }
-
   if (gfxPrefs::LayersDump()) {
     this->Dump();
   }
 
+  LayoutDeviceIntSize size = mWidget->GetClientSize();
   mWidget->PreRender(this);
   mGLContext->MakeCurrent();
   printf("WR Beginning size %i %i\n", size.width, size.height);
