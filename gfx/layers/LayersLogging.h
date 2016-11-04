@@ -17,6 +17,8 @@
 #include "nsRegion.h"                   // for nsRegion, nsIntRegion
 #include "nscore.h"                     // for nsACString, etc
 
+#include <inttypes.h>
+
 namespace mozilla {
 namespace gfx {
 template <class units, class F> struct RectTyped;
