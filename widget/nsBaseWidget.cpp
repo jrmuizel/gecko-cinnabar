@@ -76,7 +76,7 @@
 #include "gfxConfig.h"
 #include "mozilla/layers/CompositorSession.h"
 #include "VRManagerChild.h"
-#include "WebrenderLayerManager.h"
+#include "mozilla/layers/WebrenderLayerManager.h"
 
 #ifdef DEBUG
 #include "nsIObserver.h"
