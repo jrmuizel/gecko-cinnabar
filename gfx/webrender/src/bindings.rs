@@ -169,10 +169,6 @@ use self::macos::Library as GlLibrary;
 use self::win::Library as GlLibrary;
 
 /*
-struct Notifier {
-    window_proxy: glutin::WindowProxy,
-}
-
 impl Notifier {
     fn new(window_proxy: glutin::WindowProxy) -> Notifier {
         Notifier {
@@ -221,20 +217,22 @@ impl WebRenderFrameBuilder {
         id
     }
 }
-/*
+
+struct Notifier {
+}
+
 impl webrender_traits::RenderNotifier for Notifier {
     fn new_frame_ready(&mut self) {
-        self.window_proxy.wakeup_event_loop();
     }
-    fn new_scroll_frame_ready(&mut self, composite_needed: bool) {
-        self.window_proxy.wakeup_event_loop();
+    fn new_scroll_frame_ready(&mut self, _: bool) {
     }
 
     fn pipeline_size_changed(&mut self,
                              _: PipelineId,
                              _: Option<Size2D<f32>>) {
     }
-}*/
+}
+
 pub struct WrState {
     size: (u32, u32),
     pipeline_id: PipelineId,
@@ -283,8 +281,8 @@ pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState
 //     let font_bytes = load_file(font_path);
 //     let font_key = api.add_raw_font(font_bytes);
 
-    // let notifier = Box::new(Notifier::new(window.create_window_proxy()));
-    // renderer.set_render_notifier(notifier);
+    let notifier = Box::new(Notifier{});
+    renderer.set_render_notifier(notifier);
 
     let pipeline_id = PipelineId((layers_id >> 32) as u32, layers_id as u32);
 
