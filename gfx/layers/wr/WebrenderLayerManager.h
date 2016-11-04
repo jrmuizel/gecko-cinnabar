@@ -74,7 +74,7 @@ class WebRenderLayerManager final : public LayerManager
 {
 public:
   explicit WebRenderLayerManager(nsIWidget* aWidget);
-  void Initialize(uint64_t aLayersId);
+  void Initialize(PCompositorBridgeChild* aCBChild, uint64_t aLayersId);
 
   virtual void Destroy() override;
 

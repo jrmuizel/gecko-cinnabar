@@ -1139,7 +1139,7 @@ CompositorBridgeChild::HandleFatalError(const char* aName, const char* aMsg) con
 PWebRenderBridgeChild*
 CompositorBridgeChild::AllocPWebRenderBridgeChild(const uint64_t& aPipelineId)
 {
-  WebRenderBridgeChild* child = new WebRenderBridgeChild(aPipelineId, nullptr, nullptr);
+  WebRenderBridgeChild* child = new WebRenderBridgeChild(aPipelineId);
   child->AddRef();
   return child;
 }

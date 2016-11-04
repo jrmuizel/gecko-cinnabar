@@ -6,13 +6,10 @@
 #include "WebrenderLayerManager.h"
 
 #include "apz/src/AsyncPanZoomController.h"
-#include "GLContext.h"
-#include "GLContextProvider.h"
 #include "LayersLogging.h"
 #include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
-#include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #include "nsThreadUtils.h"
 #include "TreeTraversal.h"
@@ -26,8 +23,6 @@
 namespace mozilla {
 
 using namespace gfx;
-using namespace gl;
-using namespace widget;
 
 namespace layers {
 
@@ -105,7 +100,7 @@ WRScrollFrameStackingContextGenerator::WRScrollFrameStackingContextGenerator(
       continue;
     }
     if (gfxPrefs::LayersDump()) printf_stderr("Pushing stacking context id %" PRIu64"\n", fm.GetScrollId());
-    mLayer->WRBridge()->CallPushDLBuilder();
+    mLayer->WRBridge()->SendPushDLBuilder();
   }
 }
 
@@ -132,7 +127,7 @@ WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
       printf_stderr("Popping stacking context id %" PRIu64 " with bounds=%s overflow=%s\n",
         fm.GetScrollId(), Stringify(bounds).c_str(), Stringify(overflow).c_str());
     }
-    mLayer->WRBridge()->CallPopDLBuilder(toWrRect(bounds), toWrRect(overflow), identity, fm.GetScrollId());
+    mLayer->WRBridge()->SendPopDLBuilder(toWrRect(bounds), toWrRect(overflow), identity, fm.GetScrollId());
   }
 }
 
@@ -143,18 +138,15 @@ WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
 }
 
 void
-WebRenderLayerManager::Initialize(uint64_t aLayersId)
+WebRenderLayerManager::Initialize(PCompositorBridgeChild* aCBChild, uint64_t aLayersId)
 {
   MOZ_ASSERT(mWRChild == nullptr);
 
-  CompositorWidgetInitData initData;
-  mWidget->GetCompositorWidgetInitData(&initData);
-  RefPtr<CompositorWidget> widget = CompositorWidget::CreateLocal(initData, mWidget);
-
-  RefPtr<GLContext> glc(GLContextProvider::CreateForWindow(mWidget, true));
-  mWRChild = new WebRenderBridgeChild(aLayersId, widget.get(), glc.get());
+  PWebRenderBridgeChild* bridge = aCBChild->SendPWebRenderBridgeConstructor(aLayersId);
+  MOZ_ASSERT(bridge);
+  mWRChild = static_cast<WebRenderBridgeChild*>(bridge);
   LayoutDeviceIntSize size = mWidget->GetClientSize();
-  WRBridge()->CallCreate(size.width, size.height);
+  WRBridge()->SendCreate(size.width, size.height);
 }
 
 void
@@ -165,7 +157,7 @@ WebRenderLayerManager::Destroy()
 
 WebRenderLayerManager::~WebRenderLayerManager()
 {
-  WRBridge()->CallDestroy();
+  WRBridge()->SendDestroy();
 }
 
 CompositorBridgeChild*
@@ -214,12 +206,12 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   printf("WR Beginning size %i %i\n", size.width, size.height);
-  WRBridge()->CallDPBegin(size.width, size.height);
+  WRBridge()->SendDPBegin(size.width, size.height);
 
   WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer();
 
   printf("WR Ending\n");
-  WRBridge()->CallDPEnd();
+  WRBridge()->SendDPEnd();
 
   // Since we don't do repeat transactions right now, just set the time
   mAnimationReadyTime = TimeStamp::Now();
@@ -235,7 +227,7 @@ void
 WebRenderLayerManager::DiscardImages()
 {
   for (auto key : mImageKeys) {
-      WRBridge()->CallDeleteImage(key);
+      WRBridge()->SendDeleteImage(key);
   }
   mImageKeys.clear();
 }

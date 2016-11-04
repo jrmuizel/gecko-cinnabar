@@ -25,7 +25,7 @@ WebRenderColorLayer::RenderLayer()
       clip = rect;
   }
   if (gfxPrefs::LayersDump()) printf_stderr("ColorLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
-  WRBridge()->CallDPPushRect(toWrRect(rect), toWrRect(clip),
+  WRBridge()->SendDPPushRect(toWrRect(rect), toWrRect(clip),
                   mColor.r, mColor.g, mColor.b, mColor.a);
 }
 
