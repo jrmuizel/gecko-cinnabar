@@ -35,27 +35,29 @@ struct WRImageMask
 };
 
 
+struct wrwindowstate;
 struct wrstate;
 
+wrwindowstate* wr_init_window(uint64_t root_pipeline_id);
 wrstate* wr_create(uint32_t width, uint32_t height, uint64_t layers_id);
 void wr_destroy(wrstate* wrstate);
-WRImageKey wr_add_image(wrstate* wrstate, uint32_t width, uint32_t height, uint32_t stride,
+WRImageKey wr_add_image(wrwindowstate* wrWindow, uint32_t width, uint32_t height, uint32_t stride,
                         WRImageFormat format, uint8_t *bytes, size_t size);
-void wr_update_image(wrstate* wrstate, WRImageKey key,
+void wr_update_image(wrwindowstate* wrWindow, WRImageKey key,
                      uint32_t width, uint32_t height,
                      WRImageFormat format, uint8_t *bytes, size_t size);
-void wr_delete_image(wrstate* wrstate, WRImageKey key);
+void wr_delete_image(wrwindowstate* wrWindow, WRImageKey key);
 
 void wr_push_dl_builder(wrstate *wrState);
 //XXX: matrix should use a proper type
-void wr_pop_dl_builder(wrstate *wrState, WRRect bounds, WRRect overflow, const float* matrix, uint64_t scrollId);
+void wr_pop_dl_builder(wrwindowstate* wrWindow, wrstate *wrState, WRRect bounds, WRRect overflow, const float* matrix, uint64_t scrollId);
 void wr_dp_begin(wrstate* wrState, uint32_t width, uint32_t height);
-void wr_dp_end(wrstate* wrState);
-void wr_composite(wrstate* wrState);
+void wr_dp_end(wrwindowstate* wrWindow, wrstate* wrState);
+void wr_composite(wrwindowstate* wrWindow, wrstate* wrState);
 void wr_dp_push_rect(wrstate* wrState, WRRect bounds, WRRect clip, float r, float g, float b, float a);
 void wr_dp_push_image(wrstate* wrState, WRRect bounds, WRRect clip, const WRImageMask* mask, WRImageKey key);
 void wr_dp_push_iframe(wrstate* wrState, WRRect bounds, WRRect clip, uint64_t layers_id);
-void wr_set_async_scroll(wrstate* wrState, uint64_t scroll_id, float x, float y);
+void wr_set_async_scroll(wrwindowstate* wrWindow, wrstate* wrState, uint64_t scroll_id, float x, float y);
 
 }
 #endif
