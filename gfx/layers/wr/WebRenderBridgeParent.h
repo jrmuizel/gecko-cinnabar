@@ -30,9 +30,11 @@ class WebRenderBridgeParent final : public PWebRenderBridgeParent
 public:
   WebRenderBridgeParent(const uint64_t& aPipelineId,
                         widget::CompositorWidget* aWidget,
-                        gl::GLContext* aGlContext);
+                        gl::GLContext* aGlContext,
+                        wrwindowstate* aWrWindowState);
   uint64_t PipelineId() { return mPipelineId; }
   gl::GLContext* GLContext() { return mGLContext.get(); }
+  wrwindowstate* WindowState() { return mWRWindowState; }
 
   bool RecvCreate(const uint32_t& aWidth,
                   const uint32_t& aHeight) override;
@@ -77,6 +79,7 @@ private:
   RefPtr<widget::CompositorWidget> mWidget;
   wrstate* mWRState;
   RefPtr<gl::GLContext> mGLContext;
+  wrwindowstate* mWRWindowState;
 };
 
 } // namespace layers

@@ -220,19 +220,22 @@ impl webrender_traits::RenderNotifier for Notifier {
     }
 }
 
+pub struct WrWindowState {
+    renderer: Renderer,
+    api: webrender_traits::RenderApi,
+    _gl_library: GlLibrary,
+}
+
 pub struct WrState {
     size: (u32, u32),
     pipeline_id: PipelineId,
-    renderer: Renderer,
     z_index: i32,
-    api: webrender_traits::RenderApi,
-    _gl_library: GlLibrary,
     frame_builder: WebRenderFrameBuilder,
     dl_builder: Vec<webrender_traits::DisplayListBuilder>,
 }
- 
+
 #[no_mangle]
-pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState {
+pub extern fn wr_init_window(root_pipeline_id: u64) -> *mut WrWindowState {
     // hack to find the directory for the shaders
     let res_path = concat!(env!("CARGO_MANIFEST_DIR"),"/res");
 
@@ -268,6 +271,19 @@ pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState
     let notifier = Box::new(Notifier{});
     renderer.set_render_notifier(notifier);
 
+    let pipeline_id = PipelineId((root_pipeline_id >> 32) as u32, root_pipeline_id as u32);
+    api.set_root_pipeline(pipeline_id);
+
+    let state = Box::new(WrWindowState {
+        renderer: renderer,
+        api: api,
+        _gl_library: library
+    });
+    Box::into_raw(state)
+}
+
+#[no_mangle]
+pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState {
     let pipeline_id = PipelineId((layers_id >> 32) as u32, layers_id as u32);
 
     let builder = WebRenderFrameBuilder::new(pipeline_id);
@@ -275,10 +291,7 @@ pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState
     let state = Box::new(WrState {
         size: (width, height),
         pipeline_id: pipeline_id,
-        renderer: renderer,
         z_index: 0,
-        api: api,
-        _gl_library: library,
         frame_builder: builder,
         dl_builder: Vec::new(),
     });
@@ -302,7 +315,7 @@ pub extern fn wr_push_dl_builder(state:&mut WrState)
 }
 
 #[no_mangle]
-pub extern fn wr_pop_dl_builder(state:&mut WrState, bounds: WrRect, overflow: WrRect, transform: &Matrix4D<f32>, scroll_id: u64)
+pub extern fn wr_pop_dl_builder(window: &mut WrWindowState, state: &mut WrState, bounds: WrRect, overflow: WrRect, transform: &Matrix4D<f32>, scroll_id: u64)
 {
     // 
     state.z_index += 1;
@@ -329,15 +342,15 @@ pub extern fn wr_pop_dl_builder(state:&mut WrState, bounds: WrRect, overflow: Wr
                                                Vec::new(),
                                                &mut state.frame_builder.auxiliary_lists_builder);
     let dl = state.dl_builder.pop().unwrap();
-    state.frame_builder.add_display_list(&mut state.api, dl.finalize(), &mut sc);
-    let stacking_context_id = state.frame_builder.add_stacking_context(&mut state.api, pipeline_id, sc);
+    state.frame_builder.add_display_list(&mut window.api, dl.finalize(), &mut sc);
+    let stacking_context_id = state.frame_builder.add_stacking_context(&mut window.api, pipeline_id, sc);
 
     state.dl_builder.last_mut().unwrap().push_stacking_context(stacking_context_id);
 
 }
 
 #[no_mangle]
-pub extern fn wr_dp_end(state:&mut WrState) {
+pub extern fn wr_dp_end(window: &mut WrWindowState, state:&mut WrState) {
     let epoch = Epoch(0);
     let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
     let pipeline_id = state.pipeline_id;
@@ -360,12 +373,12 @@ pub extern fn wr_dp_end(state:&mut WrState) {
 
     assert!(state.dl_builder.len() == 1);
     let dl = state.dl_builder.pop().unwrap();
-    state.frame_builder.add_display_list(&mut state.api, dl.finalize(), &mut sc);
-    let sc_id = state.frame_builder.add_stacking_context(&mut state.api, pipeline_id, sc);
+    state.frame_builder.add_display_list(&mut window.api, dl.finalize(), &mut sc);
+    let sc_id = state.frame_builder.add_stacking_context(&mut window.api, pipeline_id, sc);
 
     let fb = mem::replace(&mut state.frame_builder, WebRenderFrameBuilder::new(pipeline_id));
 
-    state.api.set_root_stacking_context(sc_id,
+    window.api.set_root_stacking_context(sc_id,
                                   root_background_color,
                                   epoch,
                                   pipeline_id,
@@ -375,42 +388,40 @@ pub extern fn wr_dp_end(state:&mut WrState) {
                                   fb.auxiliary_lists_builder
                                                .finalize());
 
-    state.api.set_root_pipeline(pipeline_id);
-
     gl::clear(gl::COLOR_BUFFER_BIT);
-    state.renderer.update();
+    window.renderer.update();
 
-    state.renderer.render(Size2D::new(width, height));
+    window.renderer.render(Size2D::new(width, height));
 }
 
 #[no_mangle]
-pub extern fn wr_composite(state: &mut WrState) {
-    state.api.generate_frame();
+pub extern fn wr_composite(window: &mut WrWindowState, state: &mut WrState) {
+    window.api.generate_frame();
 
-    state.renderer.update();
+    window.renderer.update();
     let (width, height) = state.size;
-    state.renderer.render(Size2D::new(width, height));
+    window.renderer.render(Size2D::new(width, height));
 }
 
 #[no_mangle]
-pub extern fn wr_add_image(state:&mut WrState, width: u32, height: u32, stride: u32, format: ImageFormat, bytes: * const u8, size: usize) -> ImageKey {
+pub extern fn wr_add_image(window: &mut WrWindowState, width: u32, height: u32, stride: u32, format: ImageFormat, bytes: * const u8, size: usize) -> ImageKey {
     let bytes = unsafe { slice::from_raw_parts(bytes, size).to_owned() };
     let stride_option = match stride {
         0 => None,
         _ => Some(stride),
     };
-    state.api.add_image(width, height, stride_option, format, bytes)
+    window.api.add_image(width, height, stride_option, format, bytes)
 }
 
 #[no_mangle]
-pub extern fn wr_update_image(state:&mut WrState, key: ImageKey, width: u32, height: u32, format: ImageFormat, bytes: * const u8, size: usize) {
+pub extern fn wr_update_image(window: &mut WrWindowState, key: ImageKey, width: u32, height: u32, format: ImageFormat, bytes: * const u8, size: usize) {
     let bytes = unsafe { slice::from_raw_parts(bytes, size).to_owned() };
-    state.api.update_image(key, width, height, format, bytes);
+    window.api.update_image(key, width, height, format, bytes);
 }
 
 #[no_mangle]
-pub extern fn wr_delete_image(state:&mut WrState, key: ImageKey) {
-    state.api.delete_image(key)
+pub extern fn wr_delete_image(window: &mut WrWindowState, key: ImageKey) {
+    window.api.delete_image(key)
 }
 
 #[no_mangle]
@@ -444,12 +455,12 @@ pub extern fn wr_dp_push_iframe(state: &mut WrState, rect: WrRect, clip: WrRect,
 }
 
 #[no_mangle]
-pub extern fn wr_set_async_scroll(state: &mut WrState, scroll_id: u64, x: f32, y: f32) {
+pub extern fn wr_set_async_scroll(window: &mut WrWindowState, state: &mut WrState, scroll_id: u64, x: f32, y: f32) {
     let scroll_layer_id = webrender_traits::ScrollLayerId::new(
         state.frame_builder.root_pipeline_id,
         scroll_id as usize,
         ServoScrollRootId(0));
-    state.api.set_scroll_offset(scroll_layer_id, Point2D::new(x, y));
+    window.api.set_scroll_offset(scroll_layer_id, Point2D::new(x, y));
 }
 
 #[repr(C)]
@@ -507,8 +518,4 @@ pub extern fn wr_destroy(state:*mut WrState) {
   unsafe {
     Box::from_raw(state);
   }
-}
-
-#[no_mangle]
-pub extern fn wr_init() {
 }

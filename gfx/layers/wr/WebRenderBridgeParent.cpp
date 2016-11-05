@@ -15,13 +15,22 @@ namespace layers {
 
 WebRenderBridgeParent::WebRenderBridgeParent(const uint64_t& aPipelineId,
                                              widget::CompositorWidget* aWidget,
-                                             gl::GLContext* aGlContext)
+                                             gl::GLContext* aGlContext,
+                                             wrwindowstate* aWrWindowState)
   : mPipelineId(aPipelineId)
   , mWidget(aWidget)
   , mWRState(nullptr)
   , mGLContext(aGlContext)
+  , mWRWindowState(aWrWindowState)
 {
   MOZ_ASSERT(mGLContext);
+  if (!mWRWindowState) {
+    // mWRWindowState should only be null for the root WRBP of a layers tree,
+    // i.e. the one created by the CompositorBridgeParent as opposed to the
+    // CrossProcessCompositorBridgeParent
+    MOZ_ASSERT(mWidget);
+    mWRWindowState = wr_init_window(mPipelineId);
+  }
 }
 
 bool
@@ -53,8 +62,8 @@ WebRenderBridgeParent::RecvAddImage(const uint32_t& aWidth,
                                     const ByteBuffer& aBuffer,
                                     WRImageKey* aOutImageKey)
 {
-  MOZ_ASSERT(mWRState);
-  *aOutImageKey = wr_add_image(mWRState, aWidth, aHeight, aStride, aFormat,
+  MOZ_ASSERT(mWRWindowState);
+  *aOutImageKey = wr_add_image(mWRWindowState, aWidth, aHeight, aStride, aFormat,
                                aBuffer.mData, aBuffer.mLength);
   return true;
 }
@@ -66,8 +75,8 @@ WebRenderBridgeParent::RecvUpdateImage(const WRImageKey& aImageKey,
                                        const WRImageFormat& aFormat,
                                        const ByteBuffer& aBuffer)
 {
-  MOZ_ASSERT(mWRState);
-  wr_update_image(mWRState, aImageKey, aWidth, aHeight, aFormat,
+  MOZ_ASSERT(mWRWindowState);
+  wr_update_image(mWRWindowState, aImageKey, aWidth, aHeight, aFormat,
                   aBuffer.mData, aBuffer.mLength);
   return true;
 }
@@ -75,8 +84,8 @@ WebRenderBridgeParent::RecvUpdateImage(const WRImageKey& aImageKey,
 bool
 WebRenderBridgeParent::RecvDeleteImage(const WRImageKey& aImageKey)
 {
-  MOZ_ASSERT(mWRState);
-  wr_delete_image(mWRState, aImageKey);
+  MOZ_ASSERT(mWRWindowState);
+  wr_delete_image(mWRWindowState, aImageKey);
   return true;
 }
 
@@ -95,7 +104,7 @@ WebRenderBridgeParent::RecvPopDLBuilder(const WRRect& aBounds,
                                         const uint64_t& aScrollId)
 {
   MOZ_ASSERT(mWRState);
-  wr_pop_dl_builder(mWRState, aBounds, aOverflow, &aMatrix.components[0], aScrollId);
+  wr_pop_dl_builder(mWRWindowState, mWRState, aBounds, aOverflow, &aMatrix.components[0], aScrollId);
   return true;
 }
 
@@ -121,7 +130,7 @@ WebRenderBridgeParent::RecvDPEnd()
 {
   MOZ_ASSERT(mWRState);
   mGLContext->MakeCurrent();
-  wr_dp_end(mWRState);
+  wr_dp_end(mWRWindowState, mWRState);
   mGLContext->SwapBuffers();
   if (mWidget) {
     mozilla::widget::WidgetRenderingContext widgetContext;
