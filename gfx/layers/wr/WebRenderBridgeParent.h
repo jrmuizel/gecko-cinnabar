@@ -73,6 +73,7 @@ public:
 
 protected:
   virtual ~WebRenderBridgeParent();
+  void DeleteOldImages();
 
 private:
   uint64_t mPipelineId;
@@ -80,6 +81,7 @@ private:
   wrstate* mWRState;
   RefPtr<gl::GLContext> mGLContext;
   wrwindowstate* mWRWindowState;
+  std::vector<WRImageKey> mKeysToDelete;
 };
 
 } // namespace layers

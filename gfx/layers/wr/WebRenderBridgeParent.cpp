@@ -85,7 +85,7 @@ bool
 WebRenderBridgeParent::RecvDeleteImage(const WRImageKey& aImageKey)
 {
   MOZ_ASSERT(mWRWindowState);
-  wr_delete_image(mWRWindowState, aImageKey);
+  mKeysToDelete.push_back(aImageKey);
   return true;
 }
 
@@ -139,6 +139,8 @@ WebRenderBridgeParent::RecvDPEnd()
 #endif
     mWidget->PostRender(&widgetContext);
   }
+
+  DeleteOldImages();
   return true;
 }
 
@@ -176,6 +178,15 @@ WebRenderBridgeParent::RecvDPPushIframe(const WRRect& aBounds,
 
 WebRenderBridgeParent::~WebRenderBridgeParent()
 {
+}
+
+void
+WebRenderBridgeParent::DeleteOldImages()
+{
+  for (WRImageKey key : mKeysToDelete) {
+    wr_delete_image(mWRWindowState, key);
+  }
+  mKeysToDelete.clear();
 }
 
 } // namespace layers
