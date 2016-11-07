@@ -17,9 +17,7 @@
  */
 
 /* a presentation of a document, part 2 */
-#include "mozilla/layers/LayerManagerComposite.h"
-#include "GLContext.h"                  // for GLContext
-#include "mozilla/layers/CompositorOGL.h"
+
 #include "mozilla/Logging.h"
 
 #include "mozilla/ArrayUtils.h"
@@ -220,7 +218,6 @@ using namespace mozilla::tasktracer;
 #define RELATIVE_SCALEFACTOR 0.0925f
 
 using namespace mozilla;
-using namespace mozilla::gl;
 using namespace mozilla::css;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
@@ -6292,7 +6289,6 @@ PresShell::Paint(nsView*        aViewToPaint,
   bool shouldInvalidate = layerManager->NeedsWidgetInvalidation();
 
   nsAutoNotifyDidPaint notifyDidPaint(this, aFlags);
-
 
   // Whether or not we should set first paint when painting is
   // suppressed is debatable. For now we'll do it because

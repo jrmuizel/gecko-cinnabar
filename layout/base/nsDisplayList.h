@@ -49,7 +49,6 @@ class nsIScrollableFrame;
 class nsDisplayLayerEventRegions;
 class nsDisplayScrollInfoLayer;
 class nsCaret;
-struct wrstate;
 
 namespace mozilla {
 class FrameLayerBuilder;
@@ -1359,8 +1358,6 @@ public:
 // Contains all the type integers for each display list item type
 #include "nsDisplayItemTypes.h"
 
-  virtual void BuildWRDisplayList(wrstate* wrState) {}
-
   struct HitTestState {
     explicit HitTestState() : mInPreserves3D(false) {}
 
@@ -2002,8 +1999,6 @@ public:
       aList->mSentinel.mAbove = nullptr;
     }
   }
-
-  void BuildWRDisplayList(wrstate* wrState);
   
   /**
    * Remove an item from the bottom of the list and return it.
@@ -2730,7 +2725,6 @@ public:
                            const nsStyleBackground* aBackgroundStyle);
   virtual ~nsDisplayBackgroundImage();
 
-  virtual void BuildWRDisplayList(wrstate* wrState) override;
   // This will create and append new items for all the layers of the
   // background. Returns whether we appended a themed background.
   // aAllowWillPaintBorderOptimization should usually be left at true, unless
@@ -2913,7 +2907,6 @@ public:
     , mColor(Color::FromABGR(aColor))
   { }
 
-  virtual void BuildWRDisplayList(wrstate* wrState) override;
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
 
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
@@ -3280,7 +3273,6 @@ public:
     mBaseVisibleRect = mVisibleRect;
   }
   virtual ~nsDisplayWrapList();
-  void BuildWRDisplayList(wrstate* wrState) override;
   /**
    * Call this if the wrapped list is changed.
    */

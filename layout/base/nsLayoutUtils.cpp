@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsLayoutUtils.h"
+
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -116,7 +117,6 @@
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "RegionBuilder.h"
-#include "webrender.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -3676,9 +3676,6 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     printf_stderr("Painted %u pixels in %fms (%u in the last 1000ms)\n",
         pixelCount, rasterizeTime, paintedInLastSecond);
   }
-
-  // BENWA
-  // list.BuildWRDisplayList();
 
   if (consoleNeedsDisplayList || profilerNeedsDisplayList) {
     *ss << "Painting --- after optimization:\n";

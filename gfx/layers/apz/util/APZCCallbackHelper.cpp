@@ -666,19 +666,11 @@ PrepareForSetTargetAPZCNotification(nsIWidget* aWidget,
 }
 
 static void
-SendLayersDependentApzcTargetConfirmation(nsIWidget* aWidget,
-                                          nsIPresShell* aShell,
-                                          uint64_t aInputBlockId,
+SendLayersDependentApzcTargetConfirmation(nsIPresShell* aShell, uint64_t aInputBlockId,
                                           const nsTArray<ScrollableLayerGuid>& aTargets)
 {
   LayerManager* lm = aShell->GetLayerManager();
   if (!lm) {
-    return;
-  }
-
-  if (!lm->AsShadowForwarder()) {
-    // lm is a WebRenderLayerManager
-    aWidget->SetConfirmedTargetAPZC(aInputBlockId, aTargets);
     return;
   }
 
@@ -692,12 +684,10 @@ SendLayersDependentApzcTargetConfirmation(nsIWidget* aWidget,
 
 class DisplayportSetListener : public nsAPostRefreshObserver {
 public:
-  DisplayportSetListener(nsIWidget* aWidget,
-                         nsIPresShell* aPresShell,
+  DisplayportSetListener(nsIPresShell* aPresShell,
                          const uint64_t& aInputBlockId,
                          const nsTArray<ScrollableLayerGuid>& aTargets)
-    : mWidget(aWidget)
-    , mPresShell(aPresShell)
+    : mPresShell(aPresShell)
     , mInputBlockId(aInputBlockId)
     , mTargets(aTargets)
   {
@@ -714,7 +704,7 @@ public:
     }
 
     APZCCH_LOG("Got refresh, sending target APZCs for input block %" PRIu64 "\n", mInputBlockId);
-    SendLayersDependentApzcTargetConfirmation(mWidget, mPresShell, mInputBlockId, Move(mTargets));
+    SendLayersDependentApzcTargetConfirmation(mPresShell, mInputBlockId, Move(mTargets));
 
     if (!mPresShell->RemovePostRefreshObserver(this)) {
       MOZ_ASSERT_UNREACHABLE("Unable to unregister post-refresh observer! Leaking it instead of leaving garbage registered");
@@ -727,7 +717,6 @@ public:
   }
 
 private:
-  RefPtr<nsIWidget> mWidget;
   RefPtr<nsIPresShell> mPresShell;
   uint64_t mInputBlockId;
   nsTArray<ScrollableLayerGuid> mTargets;
@@ -746,7 +735,7 @@ SendSetTargetAPZCNotificationHelper(nsIWidget* aWidget,
   if (waitForRefresh) {
     APZCCH_LOG("At least one target got a new displayport, need to wait for refresh\n");
     waitForRefresh = aShell->AddPostRefreshObserver(
-      new DisplayportSetListener(aWidget, aShell, aInputBlockId, Move(aTargets)));
+      new DisplayportSetListener(aShell, aInputBlockId, Move(aTargets)));
   }
   if (!waitForRefresh) {
     APZCCH_LOG("Sending target APZCs for input block %" PRIu64 "\n", aInputBlockId);
