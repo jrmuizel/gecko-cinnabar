@@ -192,7 +192,7 @@ CompositorBridgeParent::LayerTreeState::~LayerTreeState()
 }
 
 typedef map<uint64_t, CompositorBridgeParent::LayerTreeState> LayerTreeMap;
-LayerTreeMap sIndirectLayerTrees;
+static LayerTreeMap sIndirectLayerTrees;
 static StaticAutoPtr<mozilla::Monitor> sIndirectLayerTreesLock;
 
 static void EnsureLayerTreeMapReady()
@@ -1883,13 +1883,9 @@ CompositorBridgeParent::SetControllerForLayerTree(uint64_t aLayersId,
 {
   // This ref is adopted by UpdateControllerForLayersId().
   aController->AddRef();
-  if (CompositorLoop()) {
-    CompositorLoop()->PostTask(NewRunnableFunction(&UpdateControllerForLayersId,
-                                                   aLayersId,
-                                                   aController));
-  } else {
-    UpdateControllerForLayersId(aLayersId, aController);
-  }
+  CompositorLoop()->PostTask(NewRunnableFunction(&UpdateControllerForLayersId,
+                                                 aLayersId,
+                                                 aController));
 }
 
 /*static*/ already_AddRefed<APZCTreeManager>
