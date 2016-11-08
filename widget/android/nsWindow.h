@@ -204,7 +204,7 @@ public:
                                   LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
 
     virtual bool NeedsPaint() override;
-    virtual bool PreRender(LayerManagerComposite* aManager) override;
+    virtual bool PreRender(LayerManager* aManager) override;
     virtual void DrawWindowUnderlay(LayerManagerComposite* aManager, LayoutDeviceIntRect aRect) override;
     virtual void DrawWindowOverlay(LayerManagerComposite* aManager, LayoutDeviceIntRect aRect) override;
 
