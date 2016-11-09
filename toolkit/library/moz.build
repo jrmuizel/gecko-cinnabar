@@ -400,12 +400,6 @@ if CONFIG['MOZ_ENABLE_WEBRENDER']:
             'opengl32',
         ]
 
-    if CONFIG['OS_ARCH'] == 'WINNT':
-        #OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/target/debug webrender"]
-        OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/target/release webrender"]
-    else:
-        OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/target/release -lwebrender"]
-
 # This library needs to be last to make XPCOM module registration work.
 
 USE_LIBS += ['StaticXULComponentsEnd']

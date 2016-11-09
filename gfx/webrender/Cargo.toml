@@ -43,6 +43,3 @@ winapi = "0.2.8"
 [profile.release]
 panic = "abort"
 debug = true
-[lib]
-name = "webrender"
-crate-type = ["staticlib"] # could be `staticlib` as well
