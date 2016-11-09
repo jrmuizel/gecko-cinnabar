@@ -394,9 +394,13 @@ pub extern fn wr_composite(state: &mut WrState) {
 }
 
 #[no_mangle]
-pub extern fn wr_add_image(state:&mut WrState, width: u32, height: u32, format: ImageFormat, bytes: * const u8, size: usize) -> ImageKey {
+pub extern fn wr_add_image(state:&mut WrState, width: u32, height: u32, stride: u32, format: ImageFormat, bytes: * const u8, size: usize) -> ImageKey {
     let bytes = unsafe { slice::from_raw_parts(bytes, size).to_owned() };
-    state.api.add_image(width, height, format, bytes)
+    let stride_option = match stride {
+        0 => None,
+        _ => Some(stride),
+    };
+    state.api.add_image(width, height, stride_option, format, bytes)
 }
 
 #[no_mangle]
