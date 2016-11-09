@@ -14,15 +14,15 @@ use internal_types::{ANGLE_FLOAT_TO_FIXED, LowLevelFilterOp};
 use layer::Layer;
 use prim_store::{PrimitiveGeometry, RectanglePrimitive, PrimitiveContainer};
 use prim_store::{BorderPrimitiveCpu, BorderPrimitiveGpu, BoxShadowPrimitiveGpu};
-use prim_store::{ClipInfo, ImagePrimitiveCpu, ImagePrimitiveKind};
-use prim_store::{PrimitiveKind, PrimitiveIndex, PrimitiveMetadata, PrimitiveCacheInfo};
+use prim_store::{ImagePrimitiveCpu, ImagePrimitiveGpu, ImagePrimitiveKind};
+use prim_store::{PrimitiveKind, PrimitiveIndex, PrimitiveMetadata};
+use prim_store::PrimitiveClipSource;
 use prim_store::{GradientPrimitiveCpu, GradientPrimitiveGpu, GradientType};
 use prim_store::{PrimitiveCacheKey, TextRunPrimitiveGpu, TextRunPrimitiveCpu};
 use prim_store::{PrimitiveStore, GpuBlock16, GpuBlock32, GpuBlock64, GpuBlock128};
 use profiler::FrameProfileCounters;
 use renderer::BlendMode;
-use resource_cache::ResourceCache;
-use resource_list::ResourceList;
+use resource_cache::{DummyResources, ResourceCache};
 use std::cmp;
 use std::collections::{HashMap};
 use std::f32;
@@ -33,14 +33,24 @@ use std::usize;
 use texture_cache::TexturePage;
 use util::{self, rect_from_points, MatrixHelpers, rect_from_points_f};
 use util::{TransformedRect, TransformedRectKind, subtract_rect, pack_as_float};
-use webrender_traits::{ColorF, FontKey, ImageKey, ImageRendering, ComplexClipRegion, MixBlendMode};
-use webrender_traits::{BorderDisplayItem, BorderStyle, ItemRange, AuxiliaryLists, BorderSide};
-use webrender_traits::{BoxShadowClipMode, PipelineId, ScrollLayerId, WebGLContextId};
+use webrender_traits::{ColorF, FontKey, ImageKey, ImageRendering, MixBlendMode};
+use webrender_traits::{BorderDisplayItem, BorderSide, BorderStyle};
+use webrender_traits::{AuxiliaryLists, ItemRange, BoxShadowClipMode, ClipRegion};
+use webrender_traits::{PipelineId, ScrollLayerId, WebGLContextId, FontRenderMode};
 
 const FLOATS_PER_RENDER_TASK_INFO: usize = 8;
 
+pub type LayerMap = HashMap<ScrollLayerId,
+                            Layer,
+                            BuildHasherDefault<FnvHasher>>;
+pub type AuxiliaryListsMap = HashMap<PipelineId,
+                                     AuxiliaryLists,
+                                     BuildHasherDefault<FnvHasher>>;
+
 trait AlphaBatchHelpers {
     fn get_batch_kind(&self, metadata: &PrimitiveMetadata) -> AlphaBatchKind;
+    fn get_texture_id(&self, metadata: &PrimitiveMetadata) -> TextureId;
+    fn get_blend_mode(&self, needs_blending: bool, metadata: &PrimitiveMetadata) -> BlendMode;
     fn prim_affects_tile(&self,
                          prim_index: PrimitiveIndex,
                          tile_rect: &DeviceRect,
@@ -62,7 +72,17 @@ impl AlphaBatchHelpers for PrimitiveStore {
             PrimitiveKind::BoxShadow => AlphaBatchKind::BoxShadow,
             PrimitiveKind::Image => AlphaBatchKind::Image,
             PrimitiveKind::Rectangle => AlphaBatchKind::Rectangle,
-            PrimitiveKind::TextRun => AlphaBatchKind::TextRun,
+            PrimitiveKind::TextRun => {
+                let text_run_cpu = &self.cpu_text_runs[metadata.cpu_prim_index.0];
+                if text_run_cpu.blur_radius.0 == 0 {
+                    AlphaBatchKind::TextRun
+                } else {
+                    // Select a generic primitive shader that can blit the
+                    // results of the cached text blur to the framebuffer,
+                    // applying tile clipping etc.
+                    AlphaBatchKind::CacheImage
+                }
+            }
             PrimitiveKind::Gradient => {
                 let gradient = &self.cpu_gradients[metadata.cpu_prim_index.0];
                 match gradient.kind {
@@ -77,6 +97,47 @@ impl AlphaBatchHelpers for PrimitiveStore {
         };
 
         batch_kind
+    }
+
+    fn get_texture_id(&self, metadata: &PrimitiveMetadata) -> TextureId {
+        match metadata.prim_kind {
+            PrimitiveKind::Border |
+            PrimitiveKind::BoxShadow |
+            PrimitiveKind::Rectangle |
+            PrimitiveKind::Gradient => TextureId::invalid(),
+            PrimitiveKind::Image => {
+                let image_cpu = &self.cpu_images[metadata.cpu_prim_index.0];
+                image_cpu.color_texture_id
+            }
+            PrimitiveKind::TextRun => {
+                let text_run_cpu = &self.cpu_text_runs[metadata.cpu_prim_index.0];
+                text_run_cpu.color_texture_id
+            }
+        }
+    }
+
+    fn get_blend_mode(&self, needs_blending: bool, metadata: &PrimitiveMetadata) -> BlendMode {
+        match metadata.prim_kind {
+            PrimitiveKind::TextRun => {
+                let text_run_cpu = &self.cpu_text_runs[metadata.cpu_prim_index.0];
+                if text_run_cpu.blur_radius.0 == 0 {
+                    match text_run_cpu.render_mode {
+                        FontRenderMode::Subpixel => BlendMode::Subpixel(text_run_cpu.color),
+                        FontRenderMode::Alpha | FontRenderMode::Mono => BlendMode::Alpha,
+                    }
+                } else {
+                    // Text runs drawn to blur never get drawn with subpixel AA.
+                    BlendMode::Alpha
+                }
+            }
+            _ => {
+                if needs_blending {
+                    BlendMode::Alpha
+                } else {
+                    BlendMode::None
+                }
+            }
+        }
     }
 
     // Optional narrow phase intersection test, depending on primitive type.
@@ -129,12 +190,11 @@ impl AlphaBatchHelpers for PrimitiveStore {
                     global_prim_id: global_prim_id,
                     prim_address: prim_address,
                     clip_address: clip_address,
-                    user_data: [0, 0, 0],
+                    sub_index: 0,
+                    user_data: [0, 0],
                 });
             }
             &mut PrimitiveBatchData::TextRun(ref mut data) => {
-                let metadata = self.get_metadata(prim_index);
-
                 for glyph_index in 0..metadata.gpu_data_count {
                     data.push(PrimitiveInstance {
                         task_id: task_id,
@@ -142,7 +202,8 @@ impl AlphaBatchHelpers for PrimitiveStore {
                         global_prim_id: global_prim_id,
                         prim_address: prim_address,
                         clip_address: clip_address,
-                        user_data: [ metadata.gpu_data_address.0, glyph_index, 0 ],
+                        sub_index: metadata.gpu_data_address.0 + glyph_index,
+                        user_data: [ 0, 0 ],
                     });
                 }
             }
@@ -153,7 +214,8 @@ impl AlphaBatchHelpers for PrimitiveStore {
                     global_prim_id: global_prim_id,
                     prim_address: prim_address,
                     clip_address: clip_address,
-                    user_data: [ 0, 0, 0 ],
+                    sub_index: 0,
+                    user_data: [ 0, 0 ],
                 });
             }
             &mut PrimitiveBatchData::Borders(ref mut data) => {
@@ -164,13 +226,12 @@ impl AlphaBatchHelpers for PrimitiveStore {
                         global_prim_id: global_prim_id,
                         prim_address: prim_address,
                         clip_address: clip_address,
-                        user_data: [ border_segment, 0, 0 ],
+                        sub_index: border_segment,
+                        user_data: [ 0, 0 ],
                     });
                 }
             }
             &mut PrimitiveBatchData::AlignedGradient(ref mut data) => {
-                let metadata = self.get_metadata(prim_index);
-
                 for part_index in 0..(metadata.gpu_data_count - 1) {
                     data.push(PrimitiveInstance {
                         task_id: task_id,
@@ -178,12 +239,30 @@ impl AlphaBatchHelpers for PrimitiveStore {
                         global_prim_id: global_prim_id,
                         prim_address: prim_address,
                         clip_address: clip_address,
-                        user_data: [ metadata.gpu_data_address.0, part_index, 0 ],
+                        sub_index: metadata.gpu_data_address.0 + part_index,
+                        user_data: [ 0, 0 ],
                     });
                 }
             }
             &mut PrimitiveBatchData::AngleGradient(ref mut data) => {
-                let metadata = self.get_metadata(prim_index);
+                data.push(PrimitiveInstance {
+                    task_id: task_id,
+                    layer_index: layer_index,
+                    global_prim_id: global_prim_id,
+                    prim_address: prim_address,
+                    clip_address: clip_address,
+                    sub_index: metadata.gpu_data_address.0,
+                    user_data: [ metadata.gpu_data_count, 0 ],
+                });
+            }
+            &mut PrimitiveBatchData::CacheImage(ref mut data) => {
+                // Find the render task index for the render task
+                // that this primitive depends on. Pass it to the
+                // shader so that it can sample from the cache texture
+                // at the correct location.
+                let cache_task_id = &metadata.render_task.as_ref().unwrap().id;
+                let cache_task_index = render_tasks.get_task_index(cache_task_id,
+                                                                   child_pass_index);
 
                 data.push(PrimitiveInstance {
                     task_id: task_id,
@@ -191,14 +270,13 @@ impl AlphaBatchHelpers for PrimitiveStore {
                     global_prim_id: global_prim_id,
                     prim_address: prim_address,
                     clip_address: clip_address,
-                    user_data: [ metadata.gpu_data_address.0, metadata.gpu_data_count, 0 ],
+                    sub_index: 0,
+                    user_data: [ cache_task_index.0 as i32, 0 ],
                 });
             }
-             &mut PrimitiveBatchData::BoxShadow(ref mut data) => {
-                let metadata = self.get_metadata(prim_index);
-                let cache_key = metadata.cache_info.as_ref().unwrap().key;
-                let cache_task_id = RenderTaskId::Dynamic(RenderTaskKey::CachePrimitive(cache_key));
-                let cache_task_index = render_tasks.get_task_index(&cache_task_id,
+            &mut PrimitiveBatchData::BoxShadow(ref mut data) => {
+                let cache_task_id = &metadata.render_task.as_ref().unwrap().id;
+                let cache_task_index = render_tasks.get_task_index(cache_task_id,
                                                                    child_pass_index);
 
                 for rect_index in 0..metadata.gpu_data_count {
@@ -208,9 +286,8 @@ impl AlphaBatchHelpers for PrimitiveStore {
                         global_prim_id: global_prim_id,
                         prim_address: prim_address,
                         clip_address: clip_address,
-                        user_data: [ metadata.gpu_data_address.0,
-                                     rect_index,
-                                     cache_task_index.0 as i32, ],
+                        sub_index: metadata.gpu_data_address.0 + rect_index,
+                        user_data: [ cache_task_index.0 as i32, 0 ],
                     });
                 }
             }
@@ -237,22 +314,34 @@ pub enum PrimitiveFlags {
     Scrollbar(ScrollLayerId, f32)
 }
 
+// TODO(gw): I've had to make several of these types below public
+//           with the changes for text-shadow. The proper solution
+//           is to split the render task and render target code into
+//           its own module. However, I'm avoiding that for now since
+//           this PR is large enough already, and other people are working
+//           on PRs that make use of render tasks.
+
 #[derive(Debug, Copy, Clone)]
-struct RenderTargetIndex(usize);
+pub struct RenderTargetIndex(usize);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 struct RenderPassIndex(isize);
 
 #[derive(Debug, Copy, Clone)]
-struct RenderTaskIndex(usize);
+pub struct RenderTaskIndex(usize);
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-enum RenderTaskKey {
+pub enum RenderTaskKey {
+    // Draw this primitive to a cache target.
     CachePrimitive(PrimitiveCacheKey),
+    // Apply a vertical blur pass of given radius for this primitive.
+    VerticalBlur(i32, PrimitiveIndex),
+    // Apply a horizontal blur pass of given radius for this primitive.
+    HorizontalBlur(i32, PrimitiveIndex),
 }
 
 #[derive(Debug, Copy, Clone)]
-enum RenderTaskId {
+pub enum RenderTaskId {
     Static(RenderTaskIndex),
     Dynamic(RenderTaskKey),
 }
@@ -388,18 +477,22 @@ impl AlphaBatcher {
                         let needs_blending = transform_kind == TransformedRectKind::Complex ||
                                              !prim_metadata.is_opaque ||
                                              needs_clipping;
-                        let flags = AlphaBatchKeyFlags::new(transform_kind,
-                                                            needs_clipping);
-                        let blend_mode = if needs_blending {
-                            BlendMode::Alpha
+                        let blend_mode = ctx.prim_store.get_blend_mode(needs_blending, prim_metadata);
+                        let needs_clipping_flag = if needs_clipping {
+                            NEEDS_CLIPPING
                         } else {
-                            BlendMode::None
+                            AlphaBatchKeyFlags::empty()
+                        };
+                        let flags = match transform_kind {
+                            TransformedRectKind::AxisAligned => AXIS_ALIGNED | needs_clipping_flag,
+                            _ => needs_clipping_flag,
                         };
                         let batch_kind = ctx.prim_store.get_batch_kind(prim_metadata);
+                        let color_texture_id = ctx.prim_store.get_texture_id(prim_metadata);
                         batch_key = AlphaBatchKey::primitive(batch_kind,
                                                              flags,
                                                              blend_mode,
-                                                             prim_metadata.color_texture_id,
+                                                             color_texture_id,
                                                              prim_metadata.mask_texture_id);
                     }
                 }
@@ -458,16 +551,34 @@ impl AlphaBatcher {
     }
 }
 
-struct RenderTargetContext<'a> {
-    layer_store: &'a Vec<StackingContext>,
+struct CompileTileContext<'a> {
+    layer_store: &'a [StackingContext],
     prim_store: &'a PrimitiveStore,
     render_task_id_counter: AtomicUsize,
+}
+
+struct RenderTargetContext<'a> {
+    layer_store: &'a [StackingContext],
+    prim_store: &'a PrimitiveStore,
 }
 
 /// A render target represents a number of rendering operations on a surface.
 pub struct RenderTarget {
     pub alpha_batcher: AlphaBatcher,
     pub box_shadow_cache_prims: Vec<CachePrimitiveInstance>,
+    // List of text runs to be cached to this render target.
+    // TODO(gw): For now, assume that these all come from
+    //           the same source texture id. This is almost
+    //           always true except for pathological test
+    //           cases with more than 4k x 4k of unique
+    //           glyphs visible. Once the future glyph / texture
+    //           cache changes land, this restriction will
+    //           be removed anyway.
+    pub text_run_cache_prims: Vec<CachePrimitiveInstance>,
+    pub text_run_color_texture_id: TextureId,
+    // List of blur operations to apply for this render target.
+    pub vertical_blurs: Vec<BlurCommand>,
+    pub horizontal_blurs: Vec<BlurCommand>,
     page_allocator: TexturePage,
 }
 
@@ -476,6 +587,10 @@ impl RenderTarget {
         RenderTarget {
             alpha_batcher: AlphaBatcher::new(),
             box_shadow_cache_prims: Vec::new(),
+            text_run_cache_prims: Vec::new(),
+            text_run_color_texture_id: TextureId::invalid(),
+            vertical_blurs: Vec::new(),
+            horizontal_blurs: Vec::new(),
             page_allocator: TexturePage::new(TextureId::invalid(), RENDERABLE_CACHE_SIZE as u32),
         }
     }
@@ -484,7 +599,9 @@ impl RenderTarget {
              ctx: &RenderTargetContext,
              render_tasks: &mut RenderTaskCollection,
              child_pass_index: RenderPassIndex) {
-        self.alpha_batcher.build(ctx, render_tasks, child_pass_index);
+        self.alpha_batcher.build(ctx,
+                                 render_tasks,
+                                 child_pass_index);
     }
 
     fn add_task(&mut self,
@@ -499,6 +616,34 @@ impl RenderTarget {
                     items: info.items,
                 });
             }
+            RenderTaskKind::VerticalBlur(_, prim_index) => {
+                // Find the child render task that we are applying
+                // a vertical blur on.
+                // TODO(gw): Consider a simpler way for render tasks to find
+                //           their child tasks than having to construct the
+                //           correct id here.
+                let child_pass_index = RenderPassIndex(pass_index.0 - 1);
+                let task_key = RenderTaskKey::CachePrimitive(PrimitiveCacheKey::TextShadow(prim_index));
+                let src_id = RenderTaskId::Dynamic(task_key);
+                self.vertical_blurs.push(BlurCommand {
+                    task_id: render_tasks.get_task_index(&task.id, pass_index).0 as i32,
+                    src_task_id: render_tasks.get_task_index(&src_id, child_pass_index).0 as i32,
+                    blur_direction: BlurDirection::Vertical as i32,
+                    padding: 0,
+                });
+            }
+            RenderTaskKind::HorizontalBlur(blur_radius, prim_index) => {
+                // Find the child render task that we are applying
+                // a horizontal blur on.
+                let child_pass_index = RenderPassIndex(pass_index.0 - 1);
+                let src_id = RenderTaskId::Dynamic(RenderTaskKey::VerticalBlur(blur_radius.0, prim_index));
+                self.horizontal_blurs.push(BlurCommand {
+                    task_id: render_tasks.get_task_index(&task.id, pass_index).0 as i32,
+                    src_task_id: render_tasks.get_task_index(&src_id, child_pass_index).0 as i32,
+                    blur_direction: BlurDirection::Horizontal as i32,
+                    padding: 0,
+                });
+            }
             RenderTaskKind::CachePrimitive(prim_index) => {
                 let prim_metadata = ctx.prim_store.get_metadata(prim_index);
 
@@ -508,8 +653,31 @@ impl RenderTarget {
                             task_id: render_tasks.get_task_index(&task.id, pass_index).0 as i32,
                             global_prim_id: prim_index.0 as i32,
                             prim_address: prim_metadata.gpu_prim_index,
-                            padding: 0,
+                            sub_index: 0,
                         });
+                    }
+                    PrimitiveKind::TextRun => {
+                        let text = &ctx.prim_store.cpu_text_runs[prim_metadata.cpu_prim_index.0];
+                        // We only cache text runs with a text-shadow (for now).
+                        debug_assert!(text.blur_radius.0 != 0);
+
+                        // TODO(gw): This should always be fine for now, since the texture
+                        // atlas grows to 4k. However, it won't be a problem soon, once
+                        // we switch the texture atlas to use texture layers!
+                        let color_texture_id = ctx.prim_store.get_texture_id(prim_metadata);
+                        debug_assert!(color_texture_id != TextureId::invalid());
+                        debug_assert!(self.text_run_color_texture_id == TextureId::invalid() ||
+                                      self.text_run_color_texture_id == color_texture_id);
+                        self.text_run_color_texture_id = color_texture_id;
+
+                        for glyph_index in 0..prim_metadata.gpu_data_count {
+                            self.text_run_cache_prims.push(CachePrimitiveInstance {
+                                task_id: render_tasks.get_task_index(&task.id, pass_index).0 as i32,
+                                global_prim_id: prim_index.0 as i32,
+                                prim_address: prim_metadata.gpu_prim_index,
+                                sub_index: prim_metadata.gpu_data_address.0 + glyph_index,
+                            });
+                        }
                     }
                     _ => {
                         // No other primitives make use of primitive caching yet!
@@ -547,6 +715,24 @@ impl RenderPass {
         self.tasks.push(task);
     }
 
+    fn allocate_target(targets: &mut Vec<RenderTarget>, size: Size2D<u32>) -> Point2D<u32> {
+        let existing_origin = targets.last_mut()
+                                     .unwrap()
+                                     .page_allocator.allocate(&size);
+        match existing_origin {
+            Some(origin) => origin,
+            None => {
+                let mut new_target = RenderTarget::new();
+                let origin = new_target.page_allocator
+                                       .allocate(&size)
+                                       .expect("Each render task must allocate <= size of one target!");
+                targets.push(new_target);
+                origin
+            }
+        }
+    }
+
+
     fn build(&mut self,
              ctx: &RenderTargetContext,
              render_tasks: &mut RenderTaskCollection) {
@@ -575,27 +761,11 @@ impl RenderPass {
 
                     let alloc_size = Size2D::new(size.width as u32,
                                                  size.height as u32);
+                    let alloc_origin = Self::allocate_target(&mut self.targets, alloc_size);
 
-                    let alloc_origin = self.targets
-                                           .last_mut()
-                                           .unwrap()
-                                           .page_allocator.allocate(&alloc_size);
-
-                    let alloc_origin = match alloc_origin {
-                        Some(alloc_origin) => alloc_origin,
-                        None => {
-                            let mut new_target = RenderTarget::new();
-                            let origin = new_target.page_allocator
-                                                   .allocate(&alloc_size)
-                                                   .expect("Each render task must allocate <= size of one target!");
-                            self.targets.push(new_target);
-                            origin
-                        }
-                    };
-
-                    let alloc_origin = DevicePoint::new(alloc_origin.x as i32,
-                                                        alloc_origin.y as i32);
-                    *origin = Some((alloc_origin, RenderTargetIndex(self.targets.len() - 1)));
+                    *origin = Some((DevicePoint::new(alloc_origin.x as i32,
+                                                     alloc_origin.y as i32),
+                                    RenderTargetIndex(self.targets.len() - 1)));
                 }
             }
 
@@ -613,41 +783,46 @@ impl RenderPass {
     }
 }
 
-#[derive(Debug)]
-enum RenderTaskLocation {
+#[derive(Debug, Clone)]
+pub enum RenderTaskLocation {
     Fixed(DeviceRect),
     Dynamic(Option<(DevicePoint, RenderTargetIndex)>, DeviceSize),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum AlphaRenderItem {
     Primitive(StackingContextIndex, PrimitiveIndex),
     Blend(RenderTaskId, LowLevelFilterOp),
     Composite(RenderTaskId, RenderTaskId, MixBlendMode),
 }
 
-#[derive(Debug)]
-struct AlphaRenderTask {
+#[derive(Debug, Clone)]
+pub struct AlphaRenderTask {
     actual_rect: DeviceRect,
     items: Vec<AlphaRenderItem>,
 }
 
-#[derive(Debug)]
-enum RenderTaskKind {
+#[derive(Debug, Clone)]
+pub enum RenderTaskKind {
     Alpha(AlphaRenderTask),
     CachePrimitive(PrimitiveIndex),
+    VerticalBlur(DeviceLength, PrimitiveIndex),
+    HorizontalBlur(DeviceLength, PrimitiveIndex),
 }
 
-#[derive(Debug)]
-struct RenderTask {
-    id: RenderTaskId,
-    location: RenderTaskLocation,
-    children: Vec<RenderTask>,
-    kind: RenderTaskKind,
+// TODO(gw): Consider storing these in a separate array and having
+//           primitives hold indices - this could avoid cloning
+//           when adding them as child tasks to tiles.
+#[derive(Debug, Clone)]
+pub struct RenderTask {
+    pub id: RenderTaskId,
+    pub location: RenderTaskLocation,
+    pub children: Vec<RenderTask>,
+    pub kind: RenderTaskKind,
 }
 
 impl RenderTask {
-    fn new_alpha_batch(actual_rect: DeviceRect, ctx: &RenderTargetContext) -> RenderTask {
+    fn new_alpha_batch(actual_rect: DeviceRect, ctx: &CompileTileContext) -> RenderTask {
         let task_index = ctx.render_task_id_counter.fetch_add(1, Ordering::Relaxed);
 
         RenderTask {
@@ -661,23 +836,72 @@ impl RenderTask {
         }
     }
 
-    fn new_prim_cache(cache_info: &PrimitiveCacheInfo,
+    pub fn new_prim_cache(key: PrimitiveCacheKey,
+                      size: DeviceSize,
                       prim_index: PrimitiveIndex) -> RenderTask {
         RenderTask {
-            id: RenderTaskId::Dynamic(RenderTaskKey::CachePrimitive(cache_info.key)),
+            id: RenderTaskId::Dynamic(RenderTaskKey::CachePrimitive(key)),
             children: Vec::new(),
-            location: RenderTaskLocation::Dynamic(None, cache_info.size),
+            location: RenderTaskLocation::Dynamic(None, size),
             kind: RenderTaskKind::CachePrimitive(prim_index),
         }
+    }
+
+    // Construct a render task to apply a blur to a primitive. For now,
+    // this is only used for text runs, but we can probably extend this
+    // to handle general blurs to any render task in the future.
+    // The render task chain that is constructed looks like:
+    //
+    //    PrimitiveCacheTask: Draw the text run.
+    //           ^
+    //           |
+    //    VerticalBlurTask: Apply the separable vertical blur to the primitive.
+    //           ^
+    //           |
+    //    HorizontalBlurTask: Apply the separable horizontal blur to the vertical blur.
+    //           |
+    //           +---- This is stored as the input task to the primitive shader.
+    //
+    pub fn new_blur(key: PrimitiveCacheKey,
+                    size: DeviceSize,
+                    blur_radius: DeviceLength,
+                    prim_index: PrimitiveIndex) -> RenderTask {
+        let prim_cache_task = RenderTask::new_prim_cache(key,
+                                                         size,
+                                                         prim_index);
+
+        let blur_target_size = size + DeviceSize::new(2 * blur_radius.0,
+                                                      2 * blur_radius.0);
+
+        let blur_task_v = RenderTask {
+            id: RenderTaskId::Dynamic(RenderTaskKey::VerticalBlur(blur_radius.0, prim_index)),
+            children: vec![prim_cache_task],
+            location: RenderTaskLocation::Dynamic(None, blur_target_size),
+            kind: RenderTaskKind::VerticalBlur(blur_radius, prim_index),
+        };
+
+        let blur_task_h = RenderTask {
+            id: RenderTaskId::Dynamic(RenderTaskKey::HorizontalBlur(blur_radius.0, prim_index)),
+            children: vec![blur_task_v],
+            location: RenderTaskLocation::Dynamic(None, blur_target_size),
+            kind: RenderTaskKind::HorizontalBlur(blur_radius, prim_index),
+        };
+
+        blur_task_h
     }
 
     fn as_alpha_batch<'a>(&'a mut self) -> &'a mut AlphaRenderTask {
         match self.kind {
             RenderTaskKind::Alpha(ref mut task) => task,
-            RenderTaskKind::CachePrimitive(..) => unreachable!(),
+            RenderTaskKind::CachePrimitive(..) |
+            RenderTaskKind::VerticalBlur(..) |
+            RenderTaskKind::HorizontalBlur(..) => unreachable!(),
         }
     }
 
+    // Write (up to) 8 floats of data specific to the type
+    // of render task that is provided to the GPU shaders
+    // via a vertex texture.
     fn write_task_data(&self) -> RenderTaskData {
         match self.kind {
             RenderTaskKind::Alpha(ref task) => {
@@ -712,6 +936,23 @@ impl RenderTask {
                         0.0,
                         0.0,
                     ],
+                }
+            }
+            RenderTaskKind::VerticalBlur(blur_radius, _) |
+            RenderTaskKind::HorizontalBlur(blur_radius, _) => {
+                let (target_rect, target_index) = self.get_target_rect();
+
+                RenderTaskData {
+                    data: [
+                        target_rect.origin.x as f32,
+                        target_rect.origin.y as f32,
+                        target_rect.size.width as f32,
+                        target_rect.size.height as f32,
+                        target_index.0 as f32,
+                        blur_radius.0 as f32,
+                        0.0,
+                        0.0,
+                    ]
                 }
             }
         }
@@ -763,29 +1004,6 @@ impl RenderTask {
 pub const SCREEN_TILE_SIZE: i32 = 256;
 pub const RENDERABLE_CACHE_SIZE: i32 = 2048;
 
-#[derive(Clone, Copy, Debug)]
-pub enum MaskImageSource {
-    User(ImageKey),
-    Renderer(TextureId),
-}
-
-/// Per-batch clipping info merged with the mask image.
-#[derive(Clone, Debug)]
-pub struct Clip {
-    pub clip: Box<ClipInfo>,
-    pub mask: MaskImageSource,
-}
-
-impl Clip {
-    pub fn new(clip: ClipInfo, mask: MaskImageSource) ->Clip {
-        Clip {
-            clip: Box::new(clip),
-            mask: mask,
-        }
-    }
-}
-
-
 #[derive(Debug, Clone)]
 pub struct DebugRect {
     pub label: String,
@@ -805,6 +1023,28 @@ enum AlphaBatchKind {
     AlignedGradient,
     AngleGradient,
     BoxShadow,
+    CacheImage,
+}
+
+bitflags! {
+    pub flags AlphaBatchKeyFlags: u8 {
+        const NEEDS_CLIPPING  = 0b00000001,
+        const AXIS_ALIGNED    = 0b00000010,
+    }
+}
+
+impl AlphaBatchKeyFlags {
+    pub fn transform_kind(&self) -> TransformedRectKind {
+        if self.contains(AXIS_ALIGNED) {
+            TransformedRectKind::AxisAligned
+        } else {
+            TransformedRectKind::Complex
+        }
+    }
+
+    pub fn needs_clipping(&self) -> bool {
+        self.contains(NEEDS_CLIPPING)
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -820,8 +1060,7 @@ impl AlphaBatchKey {
     fn blend() -> AlphaBatchKey {
         AlphaBatchKey {
             kind: AlphaBatchKind::Blend,
-            flags: AlphaBatchKeyFlags::new(TransformedRectKind::AxisAligned,
-                                           false),
+            flags: AXIS_ALIGNED,
             blend_mode: BlendMode::Alpha,
             color_texture_id: TextureId::invalid(),
             mask_texture_id: TextureId::invalid(),
@@ -831,8 +1070,7 @@ impl AlphaBatchKey {
     fn composite() -> AlphaBatchKey {
         AlphaBatchKey {
             kind: AlphaBatchKind::Composite,
-            flags: AlphaBatchKeyFlags::new(TransformedRectKind::AxisAligned,
-                                           false),
+            flags: AXIS_ALIGNED,
             blend_mode: BlendMode::Alpha,
             color_texture_id: TextureId::invalid(),
             mask_texture_id: TextureId::invalid(),
@@ -857,6 +1095,7 @@ impl AlphaBatchKey {
     fn is_compatible_with(&self, other: &AlphaBatchKey) -> bool {
         self.kind == other.kind &&
             self.flags == other.flags &&
+            self.blend_mode == other.blend_mode &&
         (self.color_texture_id == TextureId::invalid() || other.color_texture_id == TextureId::invalid() ||
              self.color_texture_id == other.color_texture_id) &&
             (self.mask_texture_id == TextureId::invalid() || other.mask_texture_id == TextureId::invalid() ||
@@ -864,38 +1103,28 @@ impl AlphaBatchKey {
     }
 }
 
-// FIXME(gw): Change these to use the bitflags!()
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct AlphaBatchKeyFlags(u8);
-
-impl AlphaBatchKeyFlags {
-    fn new(transform_kind: TransformedRectKind,
-           needs_clipping: bool) -> AlphaBatchKeyFlags {
-        AlphaBatchKeyFlags( ((transform_kind as u8) << 1) |
-                            ((needs_clipping as u8) << 0) )
-    }
-
-    pub fn transform_kind(&self) -> TransformedRectKind {
-        if ((self.0 >> 1) & 1) == 0 {
-            TransformedRectKind::AxisAligned
-        } else {
-            TransformedRectKind::Complex
-        }
-    }
-
-    pub fn needs_clipping(&self) -> bool {
-        (self.0 & 1) != 0
-    }
+#[repr(C)]
+#[derive(Debug)]
+pub enum BlurDirection {
+    Horizontal = 0,
+    Vertical,
 }
 
 // All Packed Primitives below must be 16 byte aligned.
+#[derive(Debug)]
+pub struct BlurCommand {
+    task_id: i32,
+    src_task_id: i32,
+    blur_direction: i32,
+    padding: i32,
+}
+
 #[derive(Debug)]
 pub struct CachePrimitiveInstance {
     global_prim_id: i32,
     prim_address: GpuStoreAddress,
     task_id: i32,
-    padding: i32,
+    sub_index: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -905,7 +1134,8 @@ pub struct PrimitiveInstance {
     task_id: i32,
     layer_index: i32,
     clip_address: GpuStoreAddress,
-    user_data: [i32; 3],
+    sub_index: i32,
+    user_data: [i32; 2],
 }
 
 #[derive(Debug, Clone)]
@@ -933,6 +1163,7 @@ pub enum PrimitiveBatchData {
     AlignedGradient(Vec<PrimitiveInstance>),
     AngleGradient(Vec<PrimitiveInstance>),
     BoxShadow(Vec<PrimitiveInstance>),
+    CacheImage(Vec<PrimitiveInstance>),
     Blend(Vec<PackedBlendPrimitive>),
     Composite(Vec<PackedCompositePrimitive>),
 }
@@ -1020,6 +1251,7 @@ impl PrimitiveBatch {
             AlphaBatchKind::AngleGradient => PrimitiveBatchData::AngleGradient(Vec::new()),
             AlphaBatchKind::BoxShadow => PrimitiveBatchData::BoxShadow(Vec::new()),
             AlphaBatchKind::Blend | AlphaBatchKind::Composite => unreachable!(),
+            AlphaBatchKind::CacheImage => PrimitiveBatchData::CacheImage(Vec::new()),
         };
 
         PrimitiveBatch {
@@ -1051,7 +1283,6 @@ struct StackingContext {
     xf_rect: Option<TransformedRect>,
     composite_kind: CompositeKind,
     local_clip_rect: Rect<f32>,
-    prims_to_prepare: Vec<PrimitiveIndex>,
     tile_range: Option<TileRange>,
 }
 
@@ -1132,12 +1363,15 @@ pub struct ClearTile {
 #[derive(Clone, Copy)]
 pub struct FrameBuilderConfig {
     pub enable_scrollbars: bool,
+    pub enable_subpixel_aa: bool,
 }
 
 impl FrameBuilderConfig {
-    pub fn new(enable_scrollbars: bool) -> FrameBuilderConfig {
+    pub fn new(enable_scrollbars: bool,
+               enable_subpixel_aa: bool) -> FrameBuilderConfig {
         FrameBuilderConfig {
             enable_scrollbars: enable_scrollbars,
+            enable_subpixel_aa: enable_subpixel_aa,
         }
     }
 }
@@ -1147,7 +1381,9 @@ pub struct FrameBuilder {
     prim_store: PrimitiveStore,
     cmds: Vec<PrimitiveRunCmd>,
     device_pixel_ratio: f32,
+    dummy_resources: DummyResources,
     debug: bool,
+    config: FrameBuilderConfig,
 
     layer_store: Vec<StackingContext>,
     packed_layers: Vec<PackedStackingContext>,
@@ -1268,7 +1504,7 @@ impl ScreenTile {
         }
     }
 
-    fn compile(self, ctx: &RenderTargetContext) -> Option<CompiledScreenTile> {
+    fn compile(self, ctx: &CompileTileContext) -> Option<CompiledScreenTile> {
         if self.prim_count == 0 {
             return None;
         }
@@ -1348,9 +1584,8 @@ impl ScreenTile {
                     }
 
                     // Add any dynamic render tasks needed to render this primitive
-                    if let Some(ref cache_info) = prim_metadata.cache_info {
-                        let cache_task = RenderTask::new_prim_cache(cache_info, prim_index);
-                        current_task.children.push(cache_task);
+                    if let Some(ref render_task) = prim_metadata.render_task {
+                        current_task.children.push(render_task.clone());
                     }
 
                     actual_prim_count += 1;
@@ -1375,8 +1610,9 @@ impl ScreenTile {
 impl FrameBuilder {
     pub fn new(viewport_size: Size2D<f32>,
                device_pixel_ratio: f32,
+               dummy_resources: DummyResources,
                debug: bool,
-               _config: FrameBuilderConfig) -> FrameBuilder {
+               config: FrameBuilderConfig) -> FrameBuilder {
         let viewport_size = Size2D::new(viewport_size.width as i32, viewport_size.height as i32);
         FrameBuilder {
             screen_rect: Rect::new(Point2D::zero(), viewport_size),
@@ -1384,20 +1620,20 @@ impl FrameBuilder {
             prim_store: PrimitiveStore::new(device_pixel_ratio),
             cmds: Vec::new(),
             device_pixel_ratio: device_pixel_ratio,
+            dummy_resources: dummy_resources,
             debug: debug,
             packed_layers: Vec::new(),
             scrollbar_prims: Vec::new(),
+            config: config,
         }
     }
 
     fn add_primitive(&mut self,
                      rect: &Rect<f32>,
-                     clip_rect: &Rect<f32>,
-                     clip: Option<Clip>,
+                     clip_region: &ClipRegion,
                      container: PrimitiveContainer) -> PrimitiveIndex {
         let prim_index = self.prim_store.add_primitive(rect,
-                                                       clip_rect,
-                                                       clip,
+                                                       clip_region,
                                                        container);
 
         match self.cmds.last_mut().unwrap() {
@@ -1432,7 +1668,6 @@ impl FrameBuilder {
             xf_rect: None,
             composite_kind: CompositeKind::new(composition_operations),
             local_clip_rect: clip_rect,
-            prims_to_prepare: Vec::new(),
             tile_range: None,
         };
         self.layer_store.push(sc);
@@ -1453,8 +1688,7 @@ impl FrameBuilder {
 
     pub fn add_solid_rectangle(&mut self,
                                rect: &Rect<f32>,
-                               clip_rect: &Rect<f32>,
-                               clip: Option<Clip>,
+                               clip_region: &ClipRegion,
                                color: &ColorF,
                                flags: PrimitiveFlags) {
         if color.a == 0.0 {
@@ -1466,8 +1700,7 @@ impl FrameBuilder {
         };
 
         let prim_index = self.add_primitive(rect,
-                                            clip_rect,
-                                            clip,
+                                            clip_region,
                                             PrimitiveContainer::Rectangle(prim));
 
         match flags {
@@ -1502,8 +1735,7 @@ impl FrameBuilder {
 
     pub fn add_border(&mut self,
                       rect: Rect<f32>,
-                      clip_rect: &Rect<f32>,
-                      clip: Option<Clip>,
+                      clip_region: &ClipRegion,
                       border: &BorderDisplayItem) {
         let radius = &border.radius;
         let left = &border.left;
@@ -1567,15 +1799,13 @@ impl FrameBuilder {
         };
 
         self.add_primitive(&rect,
-                           clip_rect,
-                           clip,
+                           clip_region,
                            PrimitiveContainer::Border(prim_cpu, prim_gpu));
     }
 
     pub fn add_gradient(&mut self,
                         rect: Rect<f32>,
-                        clip_rect: &Rect<f32>,
-                        clip: Option<Clip>,
+                        clip_region: &ClipRegion,
                         start_point: Point2D<f32>,
                         end_point: Point2D<f32>,
                         stops: ItemRange) {
@@ -1594,6 +1824,7 @@ impl FrameBuilder {
             stops_range: stops,
             kind: kind,
             reverse_stops: reverse_stops,
+            cache_dirty: true,
         };
 
         // To get reftests exactly matching with reverse start/end
@@ -1613,15 +1844,13 @@ impl FrameBuilder {
         };
 
         self.add_primitive(&rect,
-                           clip_rect,
-                           clip,
+                           clip_region,
                            PrimitiveContainer::Gradient(gradient_cpu, gradient_gpu));
     }
 
     pub fn add_text(&mut self,
                     rect: Rect<f32>,
-                    clip_rect: &Rect<f32>,
-                    clip: Option<Clip>,
+                    clip_region: &ClipRegion,
                     font_key: FontKey,
                     size: Au,
                     blur_radius: Au,
@@ -1635,10 +1864,28 @@ impl FrameBuilder {
             return
         }
 
-        let text_run_count = (glyph_range.length + 7) / 8;
+        let (render_mode, glyphs_per_run) = if blur_radius == Au(0) {
+            // TODO(gw): Use a proper algorithm to select
+            // whether this item should be rendered with
+            // subpixel AA!
+            let render_mode = if self.config.enable_subpixel_aa {
+                FontRenderMode::Subpixel
+            } else {
+                FontRenderMode::Alpha
+            };
+
+            (render_mode, 8)
+        } else {
+            // TODO(gw): Support breaking up text shadow when
+            // the size of the text run exceeds the dimensions
+            // of the render target texture.
+            (FontRenderMode::Alpha, glyph_range.length)
+        };
+
+        let text_run_count = (glyph_range.length + glyphs_per_run - 1) / glyphs_per_run;
         for run_index in 0..text_run_count {
-            let start = run_index * 8;
-            let end = cmp::min(start + 8, glyph_range.length);
+            let start = run_index * glyphs_per_run;
+            let end = cmp::min(start + glyphs_per_run, glyph_range.length);
             let sub_range = ItemRange {
                 start: glyph_range.start + start,
                 length: end - start,
@@ -1649,6 +1896,11 @@ impl FrameBuilder {
                 font_size: size,
                 blur_radius: blur_radius,
                 glyph_range: sub_range,
+                cache_dirty: true,
+                glyph_indices: Vec::new(),
+                color_texture_id: TextureId::invalid(),
+                color: *color,
+                render_mode: render_mode,
             };
 
             let prim_gpu = TextRunPrimitiveGpu {
@@ -1656,16 +1908,14 @@ impl FrameBuilder {
             };
 
             self.add_primitive(&rect,
-                               clip_rect,
-                               clip.clone(),
+                               clip_region,
                                PrimitiveContainer::TextRun(prim_cpu, prim_gpu));
         }
     }
 
     pub fn add_box_shadow(&mut self,
                           box_bounds: &Rect<f32>,
-                          clip_rect: &Rect<f32>,
-                          clip: Option<Clip>,
+                          clip_region: &ClipRegion,
                           box_offset: &Point2D<f32>,
                           color: &ColorF,
                           blur_radius: f32,
@@ -1679,8 +1929,7 @@ impl FrameBuilder {
         // Fast path.
         if blur_radius == 0.0 && spread_radius == 0.0 && clip_mode == BoxShadowClipMode::None {
             self.add_solid_rectangle(&box_bounds,
-                                     clip_rect,
-                                     None,
+                                     clip_region,
                                      color,
                                      PrimitiveFlags::None);
             return;
@@ -1708,8 +1957,7 @@ impl FrameBuilder {
         if edge_size == 0.0 {
             for rect in &instance_rects {
                 self.add_solid_rectangle(rect,
-                                         clip_rect,
-                                         clip.clone(),
+                                         clip_region,
                                          color,
                                          PrimitiveFlags::None)
             }
@@ -1725,31 +1973,35 @@ impl FrameBuilder {
             };
 
             self.add_primitive(&prim_rect,
-                               clip_rect,
-                               clip,
+                               clip_region,
                                PrimitiveContainer::BoxShadow(prim_gpu, instance_rects));
         }
     }
 
     pub fn add_webgl_rectangle(&mut self,
                                rect: Rect<f32>,
-                               clip_rect: &Rect<f32>,
-                               clip: Option<Clip>,
+                               clip_region: &ClipRegion,
                                context_id: WebGLContextId) {
         let prim_cpu = ImagePrimitiveCpu {
             kind: ImagePrimitiveKind::WebGL(context_id),
+            color_texture_id: TextureId::invalid(),
+        };
+
+        let prim_gpu = ImagePrimitiveGpu {
+            uv0: Point2D::zero(),
+            uv1: Point2D::zero(),
+            stretch_size: rect.size,
+            tile_spacing: Size2D::zero(),
         };
 
         self.add_primitive(&rect,
-                           clip_rect,
-                           clip,
-                           PrimitiveContainer::Image(prim_cpu));
+                           clip_region,
+                           PrimitiveContainer::Image(prim_cpu, prim_gpu));
     }
 
     pub fn add_image(&mut self,
                      rect: Rect<f32>,
-                     clip_rect: &Rect<f32>,
-                     clip: Option<Clip>,
+                     clip_region: &ClipRegion,
                      stretch_size: &Size2D<f32>,
                      tile_spacing: &Size2D<f32>,
                      image_key: ImageKey,
@@ -1757,31 +2009,41 @@ impl FrameBuilder {
         let prim_cpu = ImagePrimitiveCpu {
             kind: ImagePrimitiveKind::Image(image_key,
                                             image_rendering,
-                                            stretch_size.clone(),
-                                            tile_spacing.clone()),
+                                            *tile_spacing),
+            color_texture_id: TextureId::invalid(),
+        };
+
+        let prim_gpu = ImagePrimitiveGpu {
+            uv0: Point2D::zero(),
+            uv1: Point2D::zero(),
+            stretch_size: *stretch_size,
+            tile_spacing: *tile_spacing,
         };
 
         self.add_primitive(&rect,
-                           clip_rect,
-                           clip,
-                           PrimitiveContainer::Image(prim_cpu));
+                           clip_region,
+                           PrimitiveContainer::Image(prim_cpu, prim_gpu));
     }
 
     /// Compute the contribution (bounding rectangles, and resources) of layers and their
     /// primitives in screen space.
     fn cull_layers(&mut self,
                    screen_rect: &DeviceRect,
-                   layer_map: &HashMap<ScrollLayerId, Layer, BuildHasherDefault<FnvHasher>>,
-                   pipeline_auxiliary_lists: &HashMap<PipelineId, AuxiliaryLists, BuildHasherDefault<FnvHasher>>,
-                   resource_list: &mut ResourceList,
+                   layer_map: &LayerMap,
+                   auxiliary_lists_map: &AuxiliaryListsMap,
                    x_tile_count: i32,
                    y_tile_count: i32,
+                   resource_cache: &mut ResourceCache,
                    profile_counters: &mut FrameProfileCounters) {
         // Build layer screen rects.
         // TODO(gw): This can be done earlier once update_layer_transforms() is fixed.
 
         // TODO(gw): Remove this stack once the layers refactor is done!
         let mut layer_stack: Vec<StackingContextIndex> = Vec::new();
+        let dummy_mask_cache_item = {
+            let opaque_mask_id = self.dummy_resources.opaque_mask_image_id;
+            resource_cache.get_image_by_cache_id(opaque_mask_id).clone()
+        };
 
         for cmd in &self.cmds {
             match cmd {
@@ -1853,8 +2115,8 @@ impl FrameBuilder {
                     }
 
                     let packed_layer = &self.packed_layers[sc_index.0];
-                    let auxiliary_lists = pipeline_auxiliary_lists.get(&layer.pipeline_id)
-                                                                  .expect("No auxiliary lists?!");
+                    let auxiliary_lists = auxiliary_lists_map.get(&layer.pipeline_id)
+                                                             .expect("No auxiliary lists?");
 
                     for i in 0..prim_count {
                         let prim_index = PrimitiveIndex(prim_index.0 + i);
@@ -1865,10 +2127,16 @@ impl FrameBuilder {
                                                                self.device_pixel_ratio) {
                             profile_counters.visible_primitives.inc();
 
-                            if self.prim_store.build_resource_list(prim_index,
-                                                                   resource_list,
-                                                                   auxiliary_lists) {
-                                layer.prims_to_prepare.push(prim_index)
+                            if self.prim_store.prepare_prim_for_render(prim_index,
+                                                                       resource_cache,
+                                                                       self.device_pixel_ratio,
+                                                                       &dummy_mask_cache_item,
+                                                                       auxiliary_lists) {
+                                self.prim_store.build_bounding_rect(prim_index,
+                                                                    screen_rect,
+                                                                    &packed_layer.transform,
+                                                                    &packed_layer.local_clip_rect,
+                                                                    self.device_pixel_ratio);
                             }
                         }
                     }
@@ -1999,39 +2267,8 @@ impl FrameBuilder {
         }
     }
 
-    fn prepare_primitives(&mut self,
-                          screen_rect: &DeviceRect,
-                          resource_cache: &ResourceCache,
-                          frame_id: FrameId,
-                          pipeline_auxiliary_lists: &HashMap<PipelineId, AuxiliaryLists, BuildHasherDefault<FnvHasher>>) {
-        for (layer, packed_layer) in self.layer_store
-                                         .iter_mut()
-                                         .zip(self.packed_layers.iter()) {
-            if !layer.is_visible() {
-                continue;
-            }
-
-            let auxiliary_lists = pipeline_auxiliary_lists.get(&layer.pipeline_id)
-                                                              .expect("No auxiliary lists?!");
-
-            for prim_index in layer.prims_to_prepare.drain(..) {
-                if self.prim_store.prepare_prim_for_render(prim_index,
-                                                           resource_cache,
-                                                           frame_id,
-                                                           self.device_pixel_ratio,
-                                                           auxiliary_lists) {
-                    self.prim_store.build_bounding_rect(prim_index,
-                                                        screen_rect,
-                                                        &packed_layer.transform,
-                                                        &packed_layer.local_clip_rect,
-                                                        self.device_pixel_ratio);
-                }
-            }
-        }
-    }
-
     fn update_scroll_bars(&mut self,
-                          layer_map: &HashMap<ScrollLayerId, Layer, BuildHasherDefault<FnvHasher>>) {
+                          layer_map: &LayerMap) {
         let distance_from_edge = 8.0;
 
         for scrollbar_prim in &self.scrollbar_prims {
@@ -2066,12 +2303,13 @@ impl FrameBuilder {
             geom.local_rect.origin.y = util::lerp(min_y, max_y, f);
             geom.local_clip_rect = geom.local_rect;
 
-            if scrollbar_prim.border_radius == 0.0 {
-                self.prim_store.set_complex_clip(scrollbar_prim.prim_index, None);
+            let clip_source = if scrollbar_prim.border_radius == 0.0 {
+                PrimitiveClipSource::NoClip
             } else {
-                let clip = ClipInfo::uniform(geom.local_rect, scrollbar_prim.border_radius);
-                self.prim_store.set_complex_clip(scrollbar_prim.prim_index, Some(clip));
-            }
+                PrimitiveClipSource::Complex(geom.local_rect,
+                                             scrollbar_prim.border_radius)
+            };
+            self.prim_store.set_clip_source(scrollbar_prim.prim_index, clip_source);
             *self.prim_store.gpu_geometry.get_mut(GpuStoreAddress(scrollbar_prim.prim_index.0 as i32)) = geom;
         }
     }
@@ -2079,16 +2317,18 @@ impl FrameBuilder {
     pub fn build(&mut self,
                  resource_cache: &mut ResourceCache,
                  frame_id: FrameId,
-                 pipeline_auxiliary_lists: &HashMap<PipelineId, AuxiliaryLists, BuildHasherDefault<FnvHasher>>,
-                 layer_map: &HashMap<ScrollLayerId, Layer, BuildHasherDefault<FnvHasher>>) -> Frame {
+                 layer_map: &LayerMap,
+                 auxiliary_lists_map: &AuxiliaryListsMap) -> Frame {
+
         let mut profile_counters = FrameProfileCounters::new();
         profile_counters.total_primitives.set(self.prim_store.prim_count());
+
+        resource_cache.begin_frame(frame_id);
 
         let screen_rect = DeviceRect::new(DevicePoint::zero(),
                                           DeviceSize::from_lengths(device_pixel(self.screen_rect.size.width as f32, self.device_pixel_ratio),
                                                                    device_pixel(self.screen_rect.size.height as f32, self.device_pixel_ratio)));
 
-        let mut resource_list = ResourceList::new();
         let mut debug_rects = Vec::new();
 
         let (x_tile_count, y_tile_count, mut screen_tiles) = self.create_screen_tiles();
@@ -2097,76 +2337,80 @@ impl FrameBuilder {
 
         self.cull_layers(&screen_rect,
                          layer_map,
-                         pipeline_auxiliary_lists,
-                         &mut resource_list,
+                         auxiliary_lists_map,
                          x_tile_count,
                          y_tile_count,
+                         resource_cache,
                          &mut profile_counters);
 
-        resource_cache.add_resource_list(&resource_list, frame_id);
-        resource_cache.raster_pending_glyphs(frame_id);
-
-        self.prepare_primitives(&screen_rect,
-                                resource_cache,
-                                frame_id,
-                                pipeline_auxiliary_lists);
-
-        let ctx = RenderTargetContext {
-            layer_store: &self.layer_store,
-            prim_store: &self.prim_store,
-
-            // This doesn't need to be atomic right now (all the screen tiles are
-            // compiled on a single thread). However, in the future each of the
-            // compile steps below will be run on a worker thread, which will
-            // require an atomic int here anyway.
-            render_task_id_counter: AtomicUsize::new(0),
-        };
-
-        if !self.layer_store.is_empty() {
-            self.assign_prims_to_screen_tiles(&mut screen_tiles, x_tile_count);
-        }
-
         let mut clear_tiles = Vec::new();
-
-        // Build list of passes, target allocs that each tile needs.
         let mut compiled_screen_tiles = Vec::new();
         let mut max_passes_needed = 0;
-        for screen_tile in screen_tiles {
-            let rect = screen_tile.rect;        // TODO(gw): Remove clone here
-            match screen_tile.compile(&ctx) {
-                Some(compiled_screen_tile) => {
-                    max_passes_needed = cmp::max(max_passes_needed,
-                                                 compiled_screen_tile.required_pass_count);
-                    if self.debug {
-                        let (label, color) = match &compiled_screen_tile.info {
-                            &CompiledScreenTileInfo::SimpleAlpha(prim_count) => {
-                                (format!("{}", prim_count), ColorF::new(1.0, 0.0, 1.0, 1.0))
-                            }
-                            &CompiledScreenTileInfo::ComplexAlpha(cmd_count, prim_count) => {
-                                (format!("{}|{}", cmd_count, prim_count), ColorF::new(1.0, 0.0, 0.0, 1.0))
-                            }
-                        };
-                        debug_rects.push(DebugRect {
-                            label: label,
-                            color: color,
+
+        let mut render_tasks = {
+            let ctx = CompileTileContext {
+                layer_store: &self.layer_store,
+                prim_store: &self.prim_store,
+
+                // This doesn't need to be atomic right now (all the screen tiles are
+                // compiled on a single thread). However, in the future each of the
+                // compile steps below will be run on a worker thread, which will
+                // require an atomic int here anyway.
+                render_task_id_counter: AtomicUsize::new(0),
+            };
+
+            if !self.layer_store.is_empty() {
+                self.assign_prims_to_screen_tiles(&mut screen_tiles, x_tile_count);
+            }
+
+            // Build list of passes, target allocs that each tile needs.
+            for screen_tile in screen_tiles {
+                let rect = screen_tile.rect;
+                match screen_tile.compile(&ctx) {
+                    Some(compiled_screen_tile) => {
+                        max_passes_needed = cmp::max(max_passes_needed,
+                                                     compiled_screen_tile.required_pass_count);
+                        if self.debug {
+                            let (label, color) = match &compiled_screen_tile.info {
+                                &CompiledScreenTileInfo::SimpleAlpha(prim_count) => {
+                                    (format!("{}", prim_count), ColorF::new(1.0, 0.0, 1.0, 1.0))
+                                }
+                                &CompiledScreenTileInfo::ComplexAlpha(cmd_count, prim_count) => {
+                                    (format!("{}|{}", cmd_count, prim_count), ColorF::new(1.0, 0.0, 0.0, 1.0))
+                                }
+                            };
+                            debug_rects.push(DebugRect {
+                                label: label,
+                                color: color,
+                                rect: rect,
+                            });
+                        }
+                        compiled_screen_tiles.push(compiled_screen_tile);
+                    }
+                    None => {
+                        clear_tiles.push(ClearTile {
                             rect: rect,
                         });
                     }
-                    compiled_screen_tiles.push(compiled_screen_tile);
-                }
-                None => {
-                    clear_tiles.push(ClearTile {
-                        rect: rect,
-                    });
                 }
             }
-        }
+
+            let static_render_task_count = ctx.render_task_id_counter.load(Ordering::SeqCst);
+            RenderTaskCollection::new(static_render_task_count)
+        };
+
+        resource_cache.block_until_all_resources_added();
+
+        self.prim_store.resolve_primitives(resource_cache);
 
         let mut passes = Vec::new();
-        let static_render_task_count = ctx.render_task_id_counter.load(Ordering::SeqCst);
-        let mut render_tasks = RenderTaskCollection::new(static_render_task_count);
 
         if !compiled_screen_tiles.is_empty() {
+            let ctx = RenderTargetContext {
+                layer_store: &self.layer_store,
+                prim_store: &self.prim_store,
+            };
+
             // Do the allocations now, assigning each tile's tasks to a render
             // pass and target as required.
             for index in 0..max_passes_needed {
@@ -2186,6 +2430,8 @@ impl FrameBuilder {
             }
         }
 
+        resource_cache.end_frame();
+
         Frame {
             viewport_size: self.screen_rect.size,
             debug_rects: debug_rects,
@@ -2202,34 +2448,5 @@ impl FrameBuilder {
             gpu_data128: self.prim_store.gpu_data128.build(),
             gpu_geometry: self.prim_store.gpu_geometry.build(),
         }
-    }
-
-}
-
-//Test for one clip region contains another
-pub trait InsideTest<T> {
-    fn might_contain(&self, clip: &T) -> bool;
-}
-
-impl InsideTest<ComplexClipRegion> for ComplexClipRegion {
-    // Returns true if clip is inside self, can return false negative
-    fn might_contain(&self, clip: &ComplexClipRegion) -> bool {
-        let delta_left = clip.rect.origin.x - self.rect.origin.x;
-        let delta_top = clip.rect.origin.y - self.rect.origin.y;
-        let delta_right = self.rect.max_x() - clip.rect.max_x();
-        let delta_bottom = self.rect.max_y() - clip.rect.max_y();
-
-        delta_left >= 0f32 &&
-        delta_top >= 0f32 &&
-        delta_right >= 0f32 &&
-        delta_bottom >= 0f32 &&
-        clip.radii.top_left.width >= self.radii.top_left.width - delta_left &&
-        clip.radii.top_left.height >= self.radii.top_left.height - delta_top &&
-        clip.radii.top_right.width >= self.radii.top_right.width - delta_right &&
-        clip.radii.top_right.height >= self.radii.top_right.height - delta_top &&
-        clip.radii.bottom_left.width >= self.radii.bottom_left.width - delta_left &&
-        clip.radii.bottom_left.height >= self.radii.bottom_left.height - delta_bottom &&
-        clip.radii.bottom_right.width >= self.radii.bottom_right.width - delta_right &&
-        clip.radii.bottom_right.height >= self.radii.bottom_right.height - delta_bottom
     }
 }

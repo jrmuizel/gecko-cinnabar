@@ -46,9 +46,11 @@
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate bitflags;
 
-mod batch;
 mod batch_builder;
+mod debug_colors;
 mod debug_font_data;
 mod debug_render;
 mod device;
@@ -63,7 +65,6 @@ mod profiler;
 mod record;
 mod render_backend;
 mod resource_cache;
-mod resource_list;
 mod scene;
 mod spring;
 mod texture_cache;

@@ -199,8 +199,6 @@ impl WebRenderFrameBuilder {
                             stacking_context: &mut webrender_traits::StackingContext)
                             -> DisplayListId {
         let id = api.next_display_list_id();
-        stacking_context.has_stacking_contexts = stacking_context.has_stacking_contexts ||
-                                                 display_list.descriptor().has_stacking_contexts;
         stacking_context.display_lists.push(id);
         self.display_lists.push((id, display_list));
         id
@@ -254,6 +252,7 @@ pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState
         device_pixel_ratio: 1.0,
         resource_path: PathBuf::from(res_path),
         enable_aa: false,
+        enable_subpixel_aa: false,
         enable_msaa: false,
         enable_profiler: true,
         enable_recording: false,
@@ -394,9 +393,13 @@ pub extern fn wr_composite(state: &mut WrState) {
 }
 
 #[no_mangle]
-pub extern fn wr_add_image(state:&mut WrState, width: u32, height: u32, format: ImageFormat, bytes: * const u8, size: usize) -> ImageKey {
+pub extern fn wr_add_image(state:&mut WrState, width: u32, height: u32, stride: u32, format: ImageFormat, bytes: * const u8, size: usize) -> ImageKey {
     let bytes = unsafe { slice::from_raw_parts(bytes, size).to_owned() };
-    state.api.add_image(width, height, format, bytes)
+    let stride_option = match stride {
+        0 => None,
+        _ => Some(stride),
+    };
+    state.api.add_image(width, height, stride_option, format, bytes)
 }
 
 #[no_mangle]

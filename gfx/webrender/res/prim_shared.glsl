@@ -254,7 +254,8 @@ struct PrimitiveInstance {
     int render_task_index;
     int layer_index;
     int clip_address;
-    ivec3 user_data;
+    int sub_index;
+    ivec2 user_data;
 };
 
 PrimitiveInstance fetch_instance(int index) {
@@ -270,15 +271,37 @@ PrimitiveInstance fetch_instance(int index) {
     pi.render_task_index = data0.z;
     pi.layer_index = data0.w;
     pi.clip_address = data1.x;
-    pi.user_data = data1.yzw;
+    pi.sub_index = data1.y;
+    pi.user_data = data1.zw;
 
     return pi;
+}
+
+struct BlurCommand {
+    int task_id;
+    int src_task_id;
+    int dir;
+};
+
+BlurCommand fetch_blur(int index) {
+    BlurCommand blur;
+
+    int offset = index * 1;
+
+    ivec4 data0 = int_data[offset + 0];
+
+    blur.task_id = data0.x;
+    blur.src_task_id = data0.y;
+    blur.dir = data0.z;
+
+    return blur;
 }
 
 struct CachePrimitiveInstance {
     int global_prim_index;
     int specific_prim_index;
     int render_task_index;
+    int sub_index;
 };
 
 CachePrimitiveInstance fetch_cache_instance(int index) {
@@ -291,6 +314,7 @@ CachePrimitiveInstance fetch_cache_instance(int index) {
     cpi.global_prim_index = data0.x;
     cpi.specific_prim_index = data0.y;
     cpi.render_task_index = data0.z;
+    cpi.sub_index = data0.w;
 
     return cpi;
 }
@@ -302,7 +326,10 @@ struct Primitive {
     vec4 local_clip_rect;
     int prim_index;
     int clip_index;
-    ivec3 user_data;
+    // when sending multiple primitives of the same type (e.g. border segments)
+    // this index allows the vertex shader to recognize the difference
+    int sub_index;
+    ivec2 user_data;
 };
 
 Primitive load_primitive(int index) {
@@ -318,8 +345,9 @@ Primitive load_primitive(int index) {
     prim.local_clip_rect = pg.local_clip_rect;
 
     prim.prim_index = pi.specific_prim_index;
-    prim.user_data = pi.user_data;
     prim.clip_index = pi.clip_address;
+    prim.sub_index = pi.sub_index;
+    prim.user_data = pi.user_data;
 
     return prim;
 }
@@ -341,13 +369,13 @@ ClipRect fetch_clip_rect(int index) {
     return rect;
 }
 
-struct ImageMaskInfo {
+struct ImageMaskData {
     vec4 uv_rect;
     vec4 local_rect;
 };
 
-ImageMaskInfo fetch_mask_info(int index) {
-    ImageMaskInfo info;
+ImageMaskData fetch_mask_data(int index) {
+    ImageMaskData info;
 
     ivec2 uv = get_fetch_uv_2(index);
 
@@ -373,24 +401,24 @@ ClipCorner fetch_clip_corner(int index) {
     return corner;
 }
 
-struct ClipInfo {
+struct ClipData {
     ClipRect rect;
     ClipCorner top_left;
     ClipCorner top_right;
     ClipCorner bottom_left;
     ClipCorner bottom_right;
-    ImageMaskInfo mask_info;
+    ImageMaskData mask_data;
 };
 
-ClipInfo fetch_clip(int index) {
-    ClipInfo clip;
+ClipData fetch_clip(int index) {
+    ClipData clip;
 
     clip.rect = fetch_clip_rect(index + 0);
     clip.top_left = fetch_clip_corner(index + 1);
     clip.top_right = fetch_clip_corner(index + 2);
     clip.bottom_left = fetch_clip_corner(index + 3);
     clip.bottom_right = fetch_clip_corner(index + 4);
-    clip.mask_info = fetch_mask_info(index + 5);
+    clip.mask_data = fetch_mask_data(index + 5);
 
     return clip;
 }
@@ -588,7 +616,6 @@ struct Image {
     vec4 st_rect;                        // Location of the image texture in the texture atlas.
     vec4 stretch_size_and_tile_spacing;  // Size of the actual image and amount of space between
                                          //     tiled instances of this image.
-    bool has_pixel_coords;
 };
 
 Image fetch_image(int index) {
@@ -598,9 +625,6 @@ Image fetch_image(int index) {
 
     image.st_rect = texelFetchOffset(sData32, uv, 0, ivec2(0, 0));
     image.stretch_size_and_tile_spacing = texelFetchOffset(sData32, uv, 0, ivec2(1, 0));
-
-    image.has_pixel_coords = image.st_rect.z < 0.0;
-    image.st_rect.z = abs(image.st_rect.z);
 
     return image;
 }

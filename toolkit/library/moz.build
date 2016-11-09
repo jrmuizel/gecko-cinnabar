@@ -401,10 +401,10 @@ if CONFIG['MOZ_ENABLE_WEBRENDER']:
         ]
 
     if CONFIG['OS_ARCH'] == 'WINNT':
-        #OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/webrender/target/debug webrender"]
-        OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/webrender/target/release webrender"]
+        #OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/target/debug webrender"]
+        OS_LIBS += ["/LIBPATH:" + TOPSRCDIR + "/gfx/target/release webrender"]
     else:
-        OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/webrender/target/release -lwebrender"]
+        OS_LIBS += ["-L" + TOPSRCDIR + "/gfx/target/release -lwebrender"]
 
 # This library needs to be last to make XPCOM module registration work.
 

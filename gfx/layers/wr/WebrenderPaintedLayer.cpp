@@ -51,8 +51,8 @@ WebRenderPaintedLayer::RenderLayer(wrstate* aWRState)
       int32_t stride;
       SurfaceFormat format;
       target->LockBits(&data, &size, &stride, &format);
-      key = wr_add_image(aWRState, size.width, size.height, RGBA8, data, size.height * stride);
-
+      key = wr_add_image(aWRState, size.width, size.height, stride,
+                         RGBA8, data, size.height * stride);
       target->ReleaseBits(data);
   }
 

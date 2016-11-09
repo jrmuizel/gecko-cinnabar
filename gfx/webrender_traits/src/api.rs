@@ -91,11 +91,12 @@ impl RenderApi {
     pub fn add_image(&self,
                      width: u32,
                      height: u32,
+                     stride: Option<u32>,
                      format: ImageFormat,
                      bytes: Vec<u8>) -> ImageKey {
         let new_id = self.next_unique_id();
         let key = ImageKey::new(new_id.0, new_id.1);
-        let msg = ApiMsg::AddImage(key, width, height, format, bytes);
+        let msg = ApiMsg::AddImage(key, width, height, stride, format, bytes);
         self.api_sender.send(msg).unwrap();
         key
     }
@@ -237,6 +238,11 @@ impl RenderApi {
         let msg = ApiMsg::RequestWebGLContext(*size, attributes, tx);
         self.api_sender.send(msg).unwrap();
         rx.recv().unwrap()
+    }
+
+    pub fn resize_webgl_context(&self, context_id: WebGLContextId, size: &Size2D<i32>) {
+        let msg = ApiMsg::ResizeWebGLContext(context_id, *size);
+        self.api_sender.send(msg).unwrap();
     }
 
     pub fn send_webgl_command(&self, context_id: WebGLContextId, command: WebGLCommand) {

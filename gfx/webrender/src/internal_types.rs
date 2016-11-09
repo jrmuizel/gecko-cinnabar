@@ -18,7 +18,6 @@ use std::hash::BuildHasherDefault;
 use std::i32;
 use std::path::PathBuf;
 use std::sync::Arc;
-use texture_cache::BorderType;
 use tiling;
 use webrender_traits::{Epoch, ColorF, PipelineId};
 use webrender_traits::{ImageFormat, MixBlendMode, NativeFontHandle, DisplayItem};
@@ -126,6 +125,17 @@ impl GLContextWrapper {
             }
         }
     }
+
+    pub fn resize(&mut self, size: &Size2D<i32>) -> Result<(), &'static str> {
+        match *self {
+            GLContextWrapper::Native(ref mut ctx) => {
+                ctx.resize(*size)
+            }
+            GLContextWrapper::OSMesa(ref mut ctx) => {
+                ctx.resize(*size)
+            }
+        }
+    }
 }
 
 pub type DeviceRect = TypedRect<i32, DevicePixel>;
@@ -140,7 +150,6 @@ pub fn device_pixel(value: f32, device_pixel_ratio: f32) -> DeviceLength {
     DeviceLength::new((value * device_pixel_ratio).round() as i32)
 }
 
-const UV_FLOAT_TO_FIXED: f32 = 65535.0;
 const COLOR_FLOAT_TO_FIXED: f32 = 255.0;
 pub const ANGLE_FLOAT_TO_FIXED: f32 = 65535.0;
 
@@ -209,18 +218,6 @@ impl PackedColor {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct WorkVertex {
-    pub x: f32,
-    pub y: f32,
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-    pub a: f32,
-    pub u: f32,
-    pub v: f32,
-}
-
-#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct PackedVertexForQuad {
     pub x: f32,
@@ -257,15 +254,6 @@ pub struct PackedVertexForQuad {
 #[repr(C)]
 pub struct PackedVertex {
     pub pos: [f32; 2],
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(C)]
-pub struct FontVertex {
-    pub x: f32,
-    pub y: f32,
-    pub s: f32,
-    pub t: f32,
 }
 
 #[derive(Debug)]
@@ -315,8 +303,7 @@ pub enum RenderTargetMode {
 #[derive(Debug)]
 pub enum TextureUpdateDetails {
     Raw,
-    Blit(Vec<u8>),
-    Blur(Vec<u8>, Size2D<u32>, Au, TextureImage, TextureImage, BorderType),
+    Blit(Vec<u8>, Option<u32>),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -330,6 +317,7 @@ pub enum TextureUpdateOp {
     Create(u32, u32, ImageFormat, TextureFilter, RenderTargetMode, Option<Vec<u8>>),
     Update(u32, u32, u32, u32, TextureUpdateDetails),
     Grow(u32, u32, ImageFormat, TextureFilter, RenderTargetMode),
+    Remove
 }
 
 pub struct TextureUpdate {
@@ -425,118 +413,12 @@ impl FreeListItem for DrawList {
     }
 }
 
-#[derive(Clone, Copy, Debug, Ord, PartialOrd, PartialEq, Eq)]
-pub struct DrawListItemIndex(pub u32);
-
-#[derive(Clone, Copy, Debug)]
-pub struct RectPolygon<Varyings> {
-    pub pos: Rect<f32>,
-    pub varyings: Varyings,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct RectColors {
-    pub top_left: ColorF,
-    pub top_right: ColorF,
-    pub bottom_right: ColorF,
-    pub bottom_left: ColorF,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct RectUv<T, U = UnknownUnit> {
     pub top_left: TypedPoint2D<T, U>,
     pub top_right: TypedPoint2D<T, U>,
     pub bottom_left: TypedPoint2D<T, U>,
     pub bottom_right: TypedPoint2D<T, U>,
-}
-
-#[derive(Clone, Debug)]
-pub struct PolygonPosColorUv {
-    pub vertices: Vec<WorkVertex>,
-}
-
-#[derive(PartialEq, Eq, Hash)]
-pub struct Glyph {
-    pub size: Au,
-    pub blur_radius: Au,
-    pub index: u32,
-}
-
-impl Glyph {
-    #[inline]
-    pub fn new(size: Au, blur_radius: Au, index: u32) -> Glyph {
-        Glyph {
-            size: size,
-            blur_radius: blur_radius,
-            index: index,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-#[repr(C)]
-pub struct PackedVertexForTextureCacheUpdate {
-    pub x: f32,
-    pub y: f32,
-    pub color: PackedColor,
-    pub u: u16,
-    pub v: u16,
-    pub border_radii_outer_rx: f32,
-    pub border_radii_outer_ry: f32,
-    pub border_radii_inner_rx: f32,
-    pub border_radii_inner_ry: f32,
-    pub border_position_x: f32,
-    pub border_position_y: f32,
-    pub border_position_arc_center_x: f32,
-    pub border_position_arc_center_y: f32,
-    pub dest_texture_size_x: f32,
-    pub dest_texture_size_y: f32,
-    pub source_texture_size_x: f32,
-    pub source_texture_size_y: f32,
-    pub blur_radius: f32,
-    pub misc0: u8,
-    pub misc1: u8,
-    pub misc2: u8,
-    pub misc3: u8,
-}
-
-impl PackedVertexForTextureCacheUpdate {
-    pub fn new(position: &Point2D<f32>,
-               color: &ColorF,
-               uv: &Point2D<f32>,
-               border_radii_outer: &Point2D<f32>,
-               border_radii_inner: &Point2D<f32>,
-               border_position: &Point2D<f32>,
-               border_position_arc_center: &Point2D<f32>,
-               dest_texture_size: &Size2D<f32>,
-               source_texture_size: &Size2D<f32>,
-               blur_radius: f32)
-               -> PackedVertexForTextureCacheUpdate {
-        PackedVertexForTextureCacheUpdate {
-            x: position.x,
-            y: position.y,
-            color: PackedColor::from_color(color),
-            u: (uv.x * UV_FLOAT_TO_FIXED).round() as u16,
-            v: (uv.y * UV_FLOAT_TO_FIXED).round() as u16,
-            border_radii_outer_rx: border_radii_outer.x,
-            border_radii_outer_ry: border_radii_outer.y,
-            border_radii_inner_rx: border_radii_inner.x,
-            border_radii_inner_ry: border_radii_inner.y,
-            border_position_x: border_position.x,
-            border_position_y: border_position.y,
-            border_position_arc_center_x: border_position_arc_center.x,
-            border_position_arc_center_y: border_position_arc_center.y,
-            dest_texture_size_x: dest_texture_size.width,
-            dest_texture_size_y: dest_texture_size.height,
-            source_texture_size_x: source_texture_size.width,
-            source_texture_size_y: source_texture_size.height,
-            blur_radius: blur_radius,
-            misc0: 0,
-            misc1: 0,
-            misc2: 0,
-            misc3: 0,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

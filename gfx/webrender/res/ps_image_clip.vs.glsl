@@ -23,18 +23,13 @@ void main(void) {
     vLocalPos = vi.local_clamped_pos;
 #endif
 
-    ClipInfo clip = fetch_clip(prim.clip_index);
+    ClipData clip = fetch_clip(prim.clip_index);
     write_clip(clip);
 
     // vUv will contain how many times this image has wrapped around the image size.
-    vec2 st0 = image.st_rect.xy;
-    vec2 st1 = image.st_rect.zw;
-
-    if (image.has_pixel_coords) {
-        vec2 texture_size = vec2(textureSize(sDiffuse, 0));
-        st0 /= texture_size;
-        st1 /= texture_size;
-    }
+    vec2 texture_size = vec2(textureSize(sDiffuse, 0));
+    vec2 st0 = image.st_rect.xy / texture_size;
+    vec2 st1 = image.st_rect.zw / texture_size;
 
     vTextureSize = st1 - st0;
     vTextureOffset = st0;

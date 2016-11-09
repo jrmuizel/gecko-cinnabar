@@ -27,7 +27,7 @@ pub enum ApiMsg {
     /// Gets the glyph dimensions
     GetGlyphDimensions(Vec<GlyphKey>, IpcSender<Vec<Option<GlyphDimensions>>>),
     /// Adds an image from the resource cache.
-    AddImage(ImageKey, u32, u32, ImageFormat, Vec<u8>),
+    AddImage(ImageKey, u32, u32, Option<u32>, ImageFormat, Vec<u8>),
     /// Updates the the resource cache with the new image data.
     UpdateImage(ImageKey, u32, u32, ImageFormat, Vec<u8>),
     /// Drops an image from the resource cache.
@@ -57,10 +57,11 @@ pub enum ApiMsg {
     TranslatePointToLayerSpace(Point2D<f32>, IpcSender<(Point2D<f32>, PipelineId)>),
     GetScrollLayerState(IpcSender<Vec<ScrollLayerState>>),
     RequestWebGLContext(Size2D<i32>, GLContextAttributes, IpcSender<Result<(WebGLContextId, GLLimits), String>>),
+    ResizeWebGLContext(WebGLContextId, Size2D<i32>),
     WebGLCommand(WebGLContextId, WebGLCommand),
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Copy, Clone, Deserialize, Serialize, Debug)]
 pub struct GlyphDimensions {
     pub left: i32,
     pub top: i32,
@@ -158,7 +159,6 @@ pub struct BuiltDisplayList {
 #[derive(Copy, Clone, Deserialize, Serialize)]
 pub struct BuiltDisplayListDescriptor {
     pub mode: DisplayListMode,
-    pub has_stacking_contexts: bool,
 
     /// The size in bytes of the display list items in this display list.
     display_list_items_size: usize,
@@ -173,6 +173,7 @@ pub struct ColorF {
     pub b: f32,
     pub a: f32,
 }
+known_heap_size!(0, ColorF);
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ImageMask {
@@ -186,6 +187,12 @@ pub struct ClipRegion {
     pub main: Rect<f32>,
     pub complex: ItemRange,
     pub image_mask: Option<ImageMask>,
+}
+
+impl ClipRegion {
+    pub fn is_complex(&self) -> bool {
+        self.complex.length !=0 || self.image_mask.is_some()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -242,20 +249,27 @@ pub enum FilterOp {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct FontKey(u32, u32);
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Serialize, Deserialize)]
+pub enum FontRenderMode {
+    Mono,
+    Alpha,
+    Subpixel,
+}
+
 #[derive(Clone, Hash, PartialEq, Eq, Debug, Deserialize, Serialize)]
 pub struct GlyphKey {
     pub font_key: FontKey,
     pub size: Au,
-    pub blur_radius: Au,
     pub index: u32,
 }
 
 impl GlyphKey {
-    pub fn new(font_key: FontKey, size: Au, blur_radius: Au, index: u32) -> GlyphKey {
+    pub fn new(font_key: FontKey,
+               size: Au,
+               index: u32) -> GlyphKey {
         GlyphKey {
             font_key: font_key,
             size: size,
-            blur_radius: blur_radius,
             index: index,
         }
     }
@@ -287,6 +301,7 @@ pub struct GradientStop {
     pub offset: f32,
     pub color: ColorF,
 }
+known_heap_size!(0, GradientStop);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct IdNamespace(pub u32);
@@ -457,7 +472,6 @@ pub struct StackingContext {
     pub establishes_3d_context: bool,
     pub mix_blend_mode: MixBlendMode,
     pub filters: ItemRange,
-    pub has_stacking_contexts: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]

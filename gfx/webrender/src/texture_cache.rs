@@ -2,14 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use app_units::Au;
 use device::{MAX_TEXTURE_SIZE, TextureId, TextureFilter};
 use euclid::{Point2D, Rect, Size2D};
 use fnv::FnvHasher;
-use frame::FrameId;
 use freelist::{FreeList, FreeListItem, FreeListItemId};
 use internal_types::{TextureUpdate, TextureUpdateOp, TextureUpdateDetails};
-use internal_types::{RenderTargetMode, TextureImage, TextureUpdateList};
+use internal_types::{RenderTargetMode, TextureUpdateList};
 use internal_types::{RectUv, DevicePixel, DevicePoint};
 use std::cmp::{self, Ordering};
 use std::collections::HashMap;
@@ -54,12 +52,6 @@ const COALESCING_TIMEOUT_CHECKING_INTERVAL: usize = 256;
 
 pub type TextureCacheItemId = FreeListItemId;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum BorderType {
-    _NoBorder,
-    SinglePixel,
-}
-
 #[inline]
 fn copy_pixels(src: &[u8],
                target: &mut Vec<u8>,
@@ -67,8 +59,14 @@ fn copy_pixels(src: &[u8],
                y: u32,
                count: u32,
                width: u32,
+               stride: Option<u32>,
                bpp: u32) {
-    let pixel_index = (y * width + x) * bpp;
+    let row_length = match stride {
+      Some(value) => value / bpp,
+      None => width,
+    };
+
+    let pixel_index = (y * row_length + x) * bpp;
     for byte in src.iter().skip(pixel_index as usize).take((count * bpp) as usize) {
         target.push(*byte);
     }
@@ -101,10 +99,6 @@ impl TexturePage {
         };
         page.clear();
         page
-    }
-
-    pub fn texture_id(&self) -> TextureId {
-        self.texture_id
     }
 
     fn find_index_of_best_rect_in_bin(&self, bin: FreeListBin, requested_dimensions: &Size2D<u32>)
@@ -348,14 +342,6 @@ impl TexturePage {
     }
 }
 
-// TODO(gw): This is used to store data specific to glyphs.
-//           Perhaps find a better place to store it.
-#[derive(Debug, Clone)]
-pub struct TextureCacheItemUserData {
-    pub x0: i32,
-    pub y0: i32,
-}
-
 /// A binning free list. Binning is important to avoid sifting through lots of small strips when
 /// allocating many texture items.
 struct FreeRectList {
@@ -440,9 +426,6 @@ pub struct TextureCacheItem {
     // Identifies the texture and array slice
     pub texture_id: TextureId,
 
-    // Custom data - unused by texture cache itself
-    pub user_data: TextureCacheItemUserData,
-
     // The texture coordinates for this item
     pub pixel_rect: RectUv<i32, DevicePixel>,
 
@@ -456,8 +439,6 @@ pub struct TextureCacheItem {
     // bilinear filtering / texture bleeding purposes.
     pub allocated_rect: Rect<u32>,
     pub requested_rect: Rect<u32>,
-
-    pub is_opaque: bool,
 }
 
 // Structure squat the width/height fields to maintain the free list information :)
@@ -488,11 +469,9 @@ impl FreeListItem for TextureCacheItem {
 
 impl TextureCacheItem {
     fn new(texture_id: TextureId,
-           user_x0: i32, user_y0: i32,
            allocated_rect: Rect<u32>,
            requested_rect: Rect<u32>,
-           texture_size: &Size2D<u32>,
-           is_opaque: bool)
+           texture_size: &Size2D<u32>)
            -> TextureCacheItem {
         TextureCacheItem {
             texture_id: texture_id,
@@ -507,45 +486,8 @@ impl TextureCacheItem {
                 bottom_right: DevicePoint::new((requested_rect.origin.x + requested_rect.size.width) as i32,
                                                (requested_rect.origin.y + requested_rect.size.height) as i32)
             },
-            user_data: TextureCacheItemUserData {
-                x0: user_x0,
-                y0: user_y0,
-            },
             allocated_rect: allocated_rect,
             requested_rect: requested_rect,
-            is_opaque: is_opaque,
-        }
-    }
-
-    pub fn uv_rect(&self) -> RectUv<f32> {
-        let (width, height) = (self.texture_size.width as f32, self.texture_size.height as f32);
-        RectUv {
-            top_left: Point2D::new(self.pixel_rect.top_left.x as f32 / width,
-                                   self.pixel_rect.top_left.y as f32 / height),
-            top_right: Point2D::new(self.pixel_rect.top_right.x as f32 / width,
-                                    self.pixel_rect.top_right.y as f32 / height),
-            bottom_left: Point2D::new(self.pixel_rect.bottom_left.x as f32 / width,
-                                      self.pixel_rect.bottom_left.y as f32 / height),
-            bottom_right: Point2D::new(self.pixel_rect.bottom_right.x as f32 / width,
-                                       self.pixel_rect.bottom_right.y as f32 / height),
-        }
-    }
-
-    pub fn aligned_uv_rect(&self) -> Rect<f32> {
-        let uv = self.uv_rect();
-        Rect::new(Point2D::new(uv.top_left.x, uv.top_left.y),
-                  Size2D::new(uv.bottom_right.x - uv.top_left.x,
-                              uv.bottom_right.y - uv.top_left.y))
-    }
-
-    fn to_image(&self) -> TextureImage {
-        let texture_size = self.texture_size;
-        TextureImage {
-            texture_id: self.texture_id,
-            texel_uv: self.aligned_uv_rect(),
-            pixel_uv:
-                Point2D::new((self.uv_rect().top_left.x * texture_size.width as f32) as u32,
-                             (self.uv_rect().top_left.y * texture_size.height as f32) as u32),
         }
     }
 }
@@ -556,7 +498,6 @@ struct TextureCacheArena {
     pages_rgba8: Vec<TexturePage>,
     alternate_pages_a8: Vec<TexturePage>,
     alternate_pages_rgba8: Vec<TexturePage>,
-    //render_target_pages: Vec<TexturePage>,
 }
 
 impl TextureCacheArena {
@@ -587,12 +528,6 @@ impl TextureCacheArena {
 pub struct TextureCache {
     free_texture_ids: Vec<TextureId>,
     free_texture_levels: HashMap<ImageFormat, Vec<FreeTextureLevel>, BuildHasherDefault<FnvHasher>>,
-    alternate_free_texture_levels: HashMap<ImageFormat,
-                                           Vec<FreeTextureLevel>,
-                                           BuildHasherDefault<FnvHasher>>,
-    //render_target_free_texture_levels: HashMap<ImageFormat,
-    //                                           Vec<FreeTextureLevel>,
-    //                                           BuildHasherDefault<FnvHasher>>,
     items: FreeList<TextureCacheItem>,
     arena: TextureCacheArena,
     pending_updates: TextureUpdateList,
@@ -615,7 +550,6 @@ impl TextureCache {
         TextureCache {
             free_texture_ids: free_texture_ids,
             free_texture_levels: HashMap::with_hasher(Default::default()),
-            alternate_free_texture_levels: HashMap::with_hasher(Default::default()),
             items: FreeList::new(),
             pending_updates: TextureUpdateList::new(),
             arena: TextureCacheArena::new(),
@@ -631,10 +565,6 @@ impl TextureCache {
     //           how the raster_jobs code works.
     pub fn new_item_id(&mut self) -> TextureCacheItemId {
         let new_item = TextureCacheItem {
-            user_data: TextureCacheItemUserData {
-                x0: 0,
-                y0: 0,
-            },
             pixel_rect: RectUv {
                 top_left: DevicePoint::zero(),
                 top_right: DevicePoint::zero(),
@@ -645,22 +575,16 @@ impl TextureCache {
             requested_rect: Rect::zero(),
             texture_size: Size2D::zero(),
             texture_id: TextureId::invalid(),
-            is_opaque: false,
         };
         self.items.insert(new_item)
     }
 
     pub fn allocate(&mut self,
                     image_id: TextureCacheItemId,
-                    user_x0: i32,
-                    user_y0: i32,
                     requested_width: u32,
                     requested_height: u32,
                     format: ImageFormat,
-                    kind: TextureCacheItemKind,
-                    border_type: BorderType,
-                    filter: TextureFilter,
-                    is_opaque: bool)
+                    filter: TextureFilter)
                     -> AllocationResult {
         let requested_size = Size2D::new(requested_width, requested_height);
 
@@ -676,11 +600,9 @@ impl TextureCache {
                                  .expect("TODO: Handle running out of texture ids!");
             let cache_item = TextureCacheItem::new(
                 texture_id,
-                user_x0, user_y0,
                 Rect::new(Point2D::zero(), requested_size),
                 Rect::new(Point2D::zero(), requested_size),
-                &requested_size,
-                is_opaque);
+                &requested_size);
             *self.items.get_mut(image_id) = cache_item;
 
             return AllocationResult {
@@ -689,31 +611,15 @@ impl TextureCache {
             }
         }
 
-        let (page_list, mode) = match (format, kind) {
-            (ImageFormat::A8, TextureCacheItemKind::Standard) => {
-                (&mut self.arena.pages_a8, RenderTargetMode::SimpleRenderTarget)
-            }
-            (ImageFormat::A8, TextureCacheItemKind::Alternate) => {
-                (&mut self.arena.alternate_pages_a8, RenderTargetMode::SimpleRenderTarget)
-            }
-            (ImageFormat::RGBA8, TextureCacheItemKind::Standard) => {
-                (&mut self.arena.pages_rgba8, RenderTargetMode::SimpleRenderTarget)
-            }
-            (ImageFormat::RGBA8, TextureCacheItemKind::Alternate) => {
-                (&mut self.arena.alternate_pages_rgba8, RenderTargetMode::SimpleRenderTarget)
-            }
-            (ImageFormat::RGB8, TextureCacheItemKind::Standard) => {
-                (&mut self.arena.pages_rgb8, RenderTargetMode::SimpleRenderTarget)
-            }
-            (ImageFormat::Invalid, TextureCacheItemKind::Standard) |
-            (ImageFormat::RGBAF32, TextureCacheItemKind::Standard) |
-            (_, TextureCacheItemKind::Alternate) => unreachable!(),
+        let mode = RenderTargetMode::SimpleRenderTarget;
+        let page_list = match format {
+            ImageFormat::A8 => &mut self.arena.pages_a8,
+            ImageFormat::RGBA8 => &mut self.arena.pages_rgba8,
+            ImageFormat::RGB8 => &mut self.arena.pages_rgb8,
+            ImageFormat::Invalid | ImageFormat::RGBAF32 => unreachable!(),
         };
 
-        let border_size = match border_type {
-            BorderType::_NoBorder => 0,
-            BorderType::SinglePixel => 1,
-        };
+        let border_size = 1;
         let allocation_size = Size2D::new(requested_width + border_size * 2,
                                           requested_height + border_size * 2);
 
@@ -737,11 +643,9 @@ impl TextureCache {
                                                requested_size);
 
                 let cache_item = TextureCacheItem::new(page.texture_id,
-                                                       user_x0, user_y0,
                                                        allocated_rect,
                                                        requested_rect,
-                                                       &Size2D::new(page.texture_size, page.texture_size),
-                                                       is_opaque);
+                                                       &Size2D::new(page.texture_size, page.texture_size));
                 *self.items.get_mut(image_id) = cache_item;
 
                 return AllocationResult {
@@ -772,15 +676,7 @@ impl TextureCache {
 
             // We need a new page.
             let texture_size = initial_texture_size();
-            let free_texture_levels_entry = match kind {
-                TextureCacheItemKind::Standard => self.free_texture_levels.entry(format),
-                TextureCacheItemKind::Alternate => {
-                    self.alternate_free_texture_levels.entry(format)
-                }
-                //TextureCacheItemKind::RenderTarget => {
-                //    self.render_target_free_texture_levels.entry(format)
-                //}
-            };
+            let free_texture_levels_entry = self.free_texture_levels.entry(format);
             let mut free_texture_levels = match free_texture_levels_entry {
                 Entry::Vacant(entry) => entry.insert(Vec::new()),
                 Entry::Occupied(entry) => entry.into_mut(),
@@ -811,10 +707,18 @@ impl TextureCache {
         })
     }
 
+    pub fn add_raw_remove(&mut self, id: TextureId) {
+        self.pending_updates.push(TextureUpdate {
+            id: id,
+            op: TextureUpdateOp::Remove
+        });
+    }
+
     pub fn update(&mut self,
                   image_id: TextureCacheItemId,
                   width: u32,
                   height: u32,
+                  stride: Option<u32>,
                   _format: ImageFormat,
                   bytes: Vec<u8>) {
         let existing_item = self.items.get(image_id);
@@ -827,7 +731,7 @@ impl TextureCache {
                                          existing_item.requested_rect.origin.y,
                                          width,
                                          height,
-                                         TextureUpdateDetails::Blit(bytes));
+                                         TextureUpdateDetails::Blit(bytes, stride));
 
         let update_op = TextureUpdate {
             id: existing_item.texture_id,
@@ -839,173 +743,102 @@ impl TextureCache {
 
     pub fn insert(&mut self,
                   image_id: TextureCacheItemId,
-                  x0: i32,
-                  y0: i32,
                   width: u32,
                   height: u32,
+                  stride: Option<u32>,
                   format: ImageFormat,
                   filter: TextureFilter,
-                  insert_op: TextureInsertOp,
-                  border_type: BorderType) {
-
-        let is_opaque = match (&insert_op, format) {
-            (&TextureInsertOp::Blit(ref bytes), ImageFormat::RGBA8) => {
-                let mut is_opaque = true;
-                for i in 0..(bytes.len() / 4) {
-                    if bytes[i * 4 + 3] != 255 {
-                        is_opaque = false;
-                        break;
-                    }
-                }
-                is_opaque
-            }
-            (&TextureInsertOp::Blit(..), ImageFormat::RGB8) => true,
-            (&TextureInsertOp::Blit(..), ImageFormat::A8) => false,
-            (&TextureInsertOp::Blit(..), ImageFormat::Invalid) |
-            (&TextureInsertOp::Blit(..), ImageFormat::RGBAF32) => unreachable!(),
-            (&TextureInsertOp::Blur(..), _) => false,
-        };
-
+                  bytes: Vec<u8>) {
         let result = self.allocate(image_id,
-                                   x0,
-                                   y0,
                                    width,
                                    height,
                                    format,
-                                   TextureCacheItemKind::Standard,
-                                   border_type,
-                                   filter,
-                                   is_opaque);
+                                   filter);
 
-        let op = match (result.kind, insert_op) {
-            (AllocationKind::TexturePage, TextureInsertOp::Blit(bytes)) => {
+        let op = match result.kind {
+            AllocationKind::TexturePage => {
+                let bpp = match format {
+                    ImageFormat::A8 => 1,
+                    ImageFormat::RGB8 => 3,
+                    ImageFormat::RGBA8 => 4,
+                    ImageFormat::Invalid | ImageFormat::RGBAF32 => unreachable!(),
+                };
 
-                match border_type {
-                    BorderType::_NoBorder => {}
-                    BorderType::SinglePixel => {
-                        let bpp = match format {
-                            ImageFormat::A8 => 1,
-                            ImageFormat::RGB8 => 3,
-                            ImageFormat::RGBA8 => 4,
-                            ImageFormat::Invalid | ImageFormat::RGBAF32 => unreachable!(),
-                        };
+                let mut top_row_bytes = Vec::new();
+                let mut bottom_row_bytes = Vec::new();
+                let mut left_column_bytes = Vec::new();
+                let mut right_column_bytes = Vec::new();
 
-                        let mut top_row_bytes = Vec::new();
-                        let mut bottom_row_bytes = Vec::new();
-                        let mut left_column_bytes = Vec::new();
-                        let mut right_column_bytes = Vec::new();
+                copy_pixels(&bytes, &mut top_row_bytes, 0, 0, 1, width, stride, bpp);
+                copy_pixels(&bytes, &mut top_row_bytes, 0, 0, width, width, stride, bpp);
+                copy_pixels(&bytes, &mut top_row_bytes, width-1, 0, 1, width, stride, bpp);
 
-                        copy_pixels(&bytes, &mut top_row_bytes, 0, 0, 1, width, bpp);
-                        copy_pixels(&bytes, &mut top_row_bytes, 0, 0, width, width, bpp);
-                        copy_pixels(&bytes, &mut top_row_bytes, width-1, 0, 1, width, bpp);
+                copy_pixels(&bytes, &mut bottom_row_bytes, 0, height-1, 1, width, stride, bpp);
+                copy_pixels(&bytes, &mut bottom_row_bytes, 0, height-1, width, width, stride, bpp);
+                copy_pixels(&bytes, &mut bottom_row_bytes, width-1, height-1, 1, width, stride, bpp);
 
-                        copy_pixels(&bytes, &mut bottom_row_bytes, 0, height-1, 1, width, bpp);
-                        copy_pixels(&bytes, &mut bottom_row_bytes, 0, height-1, width, width, bpp);
-                        copy_pixels(&bytes, &mut bottom_row_bytes, width-1, height-1, 1, width, bpp);
-
-                        for y in 0..height {
-                            copy_pixels(&bytes, &mut left_column_bytes, 0, y, 1, width, bpp);
-                            copy_pixels(&bytes, &mut right_column_bytes, width-1, y, 1, width, bpp);
-                        }
-
-                        let border_update_op_top = TextureUpdate {
-                            id: result.item.texture_id,
-                            op: TextureUpdateOp::Update(result.item.allocated_rect.origin.x,
-                                                        result.item.allocated_rect.origin.y,
-                                                        result.item.allocated_rect.size.width,
-                                                        1,
-                                                        TextureUpdateDetails::Blit(top_row_bytes))
-                        };
-
-                        let border_update_op_bottom = TextureUpdate {
-                            id: result.item.texture_id,
-                            op: TextureUpdateOp::Update(
-                                result.item.allocated_rect.origin.x,
-                                result.item.allocated_rect.origin.y +
-                                    result.item.requested_rect.size.height + 1,
-                                result.item.allocated_rect.size.width,
-                                1,
-                                TextureUpdateDetails::Blit(bottom_row_bytes))
-                        };
-
-                        let border_update_op_left = TextureUpdate {
-                            id: result.item.texture_id,
-                            op: TextureUpdateOp::Update(
-                                result.item.allocated_rect.origin.x,
-                                result.item.requested_rect.origin.y,
-                                1,
-                                result.item.requested_rect.size.height,
-                                TextureUpdateDetails::Blit(left_column_bytes))
-                        };
-
-                        let border_update_op_right = TextureUpdate {
-                            id: result.item.texture_id,
-                            op: TextureUpdateOp::Update(result.item.allocated_rect.origin.x + result.item.requested_rect.size.width + 1,
-                                                        result.item.requested_rect.origin.y,
-                                                        1,
-                                                        result.item.requested_rect.size.height,
-                                                        TextureUpdateDetails::Blit(right_column_bytes))
-                        };
-
-                        self.pending_updates.push(border_update_op_top);
-                        self.pending_updates.push(border_update_op_bottom);
-                        self.pending_updates.push(border_update_op_left);
-                        self.pending_updates.push(border_update_op_right);
-                    }
+                for y in 0..height {
+                    copy_pixels(&bytes, &mut left_column_bytes, 0, y, 1, width, stride, bpp);
+                    copy_pixels(&bytes, &mut right_column_bytes, width-1, y, 1, width, stride, bpp);
                 }
+
+                let border_update_op_top = TextureUpdate {
+                    id: result.item.texture_id,
+                    op: TextureUpdateOp::Update(result.item.allocated_rect.origin.x,
+                                                result.item.allocated_rect.origin.y,
+                                                result.item.allocated_rect.size.width,
+                                                1,
+                                                TextureUpdateDetails::Blit(top_row_bytes, None))
+                };
+
+                let border_update_op_bottom = TextureUpdate {
+                    id: result.item.texture_id,
+                    op: TextureUpdateOp::Update(
+                        result.item.allocated_rect.origin.x,
+                        result.item.allocated_rect.origin.y +
+                            result.item.requested_rect.size.height + 1,
+                        result.item.allocated_rect.size.width,
+                        1,
+                        TextureUpdateDetails::Blit(bottom_row_bytes, None))
+                };
+
+                let border_update_op_left = TextureUpdate {
+                    id: result.item.texture_id,
+                    op: TextureUpdateOp::Update(
+                        result.item.allocated_rect.origin.x,
+                        result.item.requested_rect.origin.y,
+                        1,
+                        result.item.requested_rect.size.height,
+                        TextureUpdateDetails::Blit(left_column_bytes, None))
+                };
+
+                let border_update_op_right = TextureUpdate {
+                    id: result.item.texture_id,
+                    op: TextureUpdateOp::Update(result.item.allocated_rect.origin.x + result.item.requested_rect.size.width + 1,
+                                                result.item.requested_rect.origin.y,
+                                                1,
+                                                result.item.requested_rect.size.height,
+                                                TextureUpdateDetails::Blit(right_column_bytes, None))
+                };
+
+                self.pending_updates.push(border_update_op_top);
+                self.pending_updates.push(border_update_op_bottom);
+                self.pending_updates.push(border_update_op_left);
+                self.pending_updates.push(border_update_op_right);
 
                 TextureUpdateOp::Update(result.item.requested_rect.origin.x,
                                         result.item.requested_rect.origin.y,
                                         width,
                                         height,
-                                        TextureUpdateDetails::Blit(bytes))
+                                        TextureUpdateDetails::Blit(bytes,stride))
             }
-            (AllocationKind::TexturePage,
-             TextureInsertOp::Blur(bytes, glyph_size, blur_radius)) => {
-                let unblurred_glyph_image_id = self.new_item_id();
-                let horizontal_blur_image_id = self.new_item_id();
-                // TODO(pcwalton): Destroy these!
-                self.allocate(unblurred_glyph_image_id,
-                              0, 0,
-                              glyph_size.width, glyph_size.height,
-                              ImageFormat::RGBA8,
-                              TextureCacheItemKind::Standard,
-                              BorderType::SinglePixel,
-                              TextureFilter::Linear,
-                              false);
-                self.allocate(horizontal_blur_image_id,
-                              0, 0,
-                              width, height,
-                              ImageFormat::RGBA8,
-                              TextureCacheItemKind::Alternate,
-                              BorderType::SinglePixel,
-                              TextureFilter::Linear,
-                              false);
-                let unblurred_glyph_item = self.get(unblurred_glyph_image_id);
-                let horizontal_blur_item = self.get(horizontal_blur_image_id);
-                TextureUpdateOp::Update(
-                    result.item.requested_rect.origin.x,
-                    result.item.requested_rect.origin.y,
-                    width,
-                    height,
-                    TextureUpdateDetails::Blur(bytes,
-                                               glyph_size,
-                                               blur_radius,
-                                               unblurred_glyph_item.to_image(),
-                                               horizontal_blur_item.to_image(),
-                                               BorderType::SinglePixel))
-            }
-            (AllocationKind::Standalone, TextureInsertOp::Blit(bytes)) => {
+            AllocationKind::Standalone => {
                 TextureUpdateOp::Create(width,
                                         height,
                                         format,
                                         filter,
                                         RenderTargetMode::None,
                                         Some(bytes))
-            }
-            (AllocationKind::Standalone, TextureInsertOp::Blur(_, _, _)) => {
-                println!("ERROR: Can't blur with a standalone texture yet!");
-                return
             }
         };
 
@@ -1052,11 +885,6 @@ fn texture_grow_op(texture_size: u32,
                           format,
                           TextureFilter::Linear,
                           mode)
-}
-
-pub enum TextureInsertOp {
-    Blit(Vec<u8>),
-    Blur(Vec<u8>, Size2D<u32>, Au),
 }
 
 trait FitsInside {
@@ -1112,20 +940,3 @@ fn max_texture_size() -> u32 {
         max_hardware_texture_size
     }
 }
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum TextureCacheItemKind {
-    Standard,
-    Alternate,
-    //RenderTarget,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CachedRenderTarget {
-    texture_id: TextureId,
-    width: u32,
-    height: u32,
-    format: ImageFormat,
-    frame_id: FrameId,
-}
-

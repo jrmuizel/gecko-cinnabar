@@ -9,17 +9,16 @@
 //!
 //! [renderer]: struct.Renderer.html
 
-use batch::RasterBatch;
+use debug_colors;
 use debug_render::DebugRenderer;
-use device::{Device, ProgramId, TextureId, UniformLocation, VertexFormat, GpuProfiler};
+use device::{Device, ProgramId, TextureId, VertexFormat, GpuProfiler};
 use device::{TextureFilter, VAOId, VertexUsageHint, FileWatcherHandler, TextureTarget};
-use euclid::{Matrix4D, Point2D, Rect, Size2D};
+use euclid::{Matrix4D, Size2D};
 use fnv::FnvHasher;
 use internal_types::{RendererFrame, ResultMsg, TextureUpdateOp};
 use internal_types::{TextureUpdateDetails, TextureUpdateList, PackedVertex, RenderTargetMode};
 use internal_types::{ORTHO_NEAR_PLANE, ORTHO_FAR_PLANE, DevicePoint};
-use internal_types::{PackedVertexForTextureCacheUpdate};
-use internal_types::{AxisDirection, TextureSampler, GLContextHandleWrapper};
+use internal_types::{TextureSampler, GLContextHandleWrapper};
 use ipc_channel::ipc;
 use profiler::{Profiler, BackendProfileCounters};
 use profiler::{GpuProfileTag, RendererProfileTimers, RendererProfileCounters};
@@ -34,7 +33,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
-use texture_cache::{BorderType, TextureCache, TextureInsertOp};
+use texture_cache::TextureCache;
 use tiling::{self, Frame, FrameBuilderConfig, PrimitiveBatchData};
 use tiling::{RenderTarget, ClearTile};
 use time::precise_time_ns;
@@ -42,56 +41,36 @@ use util::TransformedRectKind;
 use webrender_traits::{ColorF, Epoch, PipelineId, RenderNotifier, RenderDispatcher};
 use webrender_traits::{ImageFormat, RenderApiSender, RendererKind};
 
-pub const BLUR_INFLATION_FACTOR: u32 = 3;
-pub const MAX_RASTER_OP_SIZE: u32 = 2048;
 pub const MAX_VERTEX_TEXTURE_WIDTH: usize = 1024;
 
 const UBO_BIND_DATA: u32 = 1;
 
-// Black
-const GPU_TAG_CACHE_BOX_SHADOW: GpuProfileTag = GpuProfileTag { label: "C_BoxShadow", color: ColorF { r: 0.0, g: 0.0, b: 0.0, a: 1.0 } };
-
-// White
-const GPU_TAG_INIT: GpuProfileTag = GpuProfileTag { label: "Init", color: ColorF { r: 1.0, g: 1.0, b: 1.0, a: 1.0 } };
-
-// Grey
-const GPU_TAG_SETUP_TARGET: GpuProfileTag = GpuProfileTag { label: "Target", color: ColorF { r: 0.5, g: 0.5, b: 0.5, a: 1.0 } };
-
-// Black
-const GPU_TAG_CLEAR_TILES: GpuProfileTag = GpuProfileTag { label: "Clear Tiles", color: ColorF { r: 0.0, g: 0.0, b: 0.0, a: 1.0 } };
-
-// Red / dark red
-const GPU_TAG_PRIM_RECT: GpuProfileTag = GpuProfileTag { label: "Rect", color: ColorF { r: 1.0, g: 0.0, b: 0.0, a: 1.0 } };
-const GPU_TAG_PRIM_RECT_CLIP: GpuProfileTag = GpuProfileTag { label: "RectClip", color: ColorF { r: 0.7, g: 0.0, b: 0.0, a: 1.0 } };
-
-// Green / dark green
-const GPU_TAG_PRIM_IMAGE: GpuProfileTag = GpuProfileTag { label: "Image", color: ColorF { r: 0.0, g: 1.0, b: 0.0, a: 1.0 } };
-const GPU_TAG_PRIM_IMAGE_CLIP: GpuProfileTag = GpuProfileTag { label: "ImageClip", color: ColorF { r: 0.0, g: 0.7, b: 0.0, a: 1.0 } };
-
-// Light blue
-const GPU_TAG_PRIM_BLEND: GpuProfileTag = GpuProfileTag { label: "Blend", color: ColorF { r: 0.8, g: 1.0, b: 1.0, a: 1.0 } };
-
-// Magenta
-const GPU_TAG_PRIM_COMPOSITE: GpuProfileTag = GpuProfileTag { label: "Composite", color: ColorF { r: 1.0, g: 0.0, b: 1.0, a: 1.0 } };
-
-// Blue
-const GPU_TAG_PRIM_TEXT_RUN: GpuProfileTag = GpuProfileTag { label: "TextRun", color: ColorF { r: 0.0, g: 0.0, b: 1.0, a: 1.0 } };
-
-// Yellow / dark yellow
-const GPU_TAG_PRIM_GRADIENT: GpuProfileTag = GpuProfileTag { label: "Gradient", color: ColorF { r: 1.0, g: 1.0, b: 0.0, a: 1.0 } };
-const GPU_TAG_PRIM_GRADIENT_CLIP: GpuProfileTag = GpuProfileTag { label: "GradientClip", color: ColorF { r: 1.0, g: 1.0, b: 0.0, a: 1.0 } };
-const GPU_TAG_PRIM_ANGLE_GRADIENT: GpuProfileTag = GpuProfileTag { label: "AngleGradient", color: ColorF { r: 0.7, g: 0.7, b: 0.0, a: 1.0 } };
-
-// Cyan
-const GPU_TAG_PRIM_BOX_SHADOW: GpuProfileTag = GpuProfileTag { label: "BoxShadow", color: ColorF { r: 0.0, g: 1.0, b: 1.0, a: 1.0 } };
-
-// Orange
-const GPU_TAG_PRIM_BORDER: GpuProfileTag = GpuProfileTag { label: "Border", color: ColorF { r: 1.0, g: 0.5, b: 0.0, a: 1.0 } };
+const GPU_TAG_CACHE_BOX_SHADOW: GpuProfileTag = GpuProfileTag { label: "C_BoxShadow", color: debug_colors::BLACK };
+const GPU_TAG_CACHE_TEXT_RUN: GpuProfileTag = GpuProfileTag { label: "C_TextRun", color: debug_colors::MISTYROSE };
+const GPU_TAG_INIT: GpuProfileTag = GpuProfileTag { label: "Init", color: debug_colors::WHITE };
+const GPU_TAG_SETUP_TARGET: GpuProfileTag = GpuProfileTag { label: "Target", color: debug_colors::SLATEGREY };
+const GPU_TAG_CLEAR_TILES: GpuProfileTag = GpuProfileTag { label: "Clear Tiles", color: debug_colors::BROWN };
+const GPU_TAG_PRIM_RECT: GpuProfileTag = GpuProfileTag { label: "Rect", color: debug_colors::RED };
+const GPU_TAG_PRIM_RECT_CLIP: GpuProfileTag = GpuProfileTag { label: "RectClip", color: debug_colors::DARKRED };
+const GPU_TAG_PRIM_IMAGE: GpuProfileTag = GpuProfileTag { label: "Image", color: debug_colors::GREEN };
+const GPU_TAG_PRIM_IMAGE_CLIP: GpuProfileTag = GpuProfileTag { label: "ImageClip", color: debug_colors::DARKGREEN };
+const GPU_TAG_PRIM_BLEND: GpuProfileTag = GpuProfileTag { label: "Blend", color: debug_colors::LIGHTBLUE };
+const GPU_TAG_PRIM_COMPOSITE: GpuProfileTag = GpuProfileTag { label: "Composite", color: debug_colors::MAGENTA };
+const GPU_TAG_PRIM_TEXT_RUN: GpuProfileTag = GpuProfileTag { label: "TextRun", color: debug_colors::BLUE };
+const GPU_TAG_PRIM_GRADIENT: GpuProfileTag = GpuProfileTag { label: "Gradient", color: debug_colors::YELLOW };
+const GPU_TAG_PRIM_GRADIENT_CLIP: GpuProfileTag = GpuProfileTag { label: "GradientClip", color: debug_colors::YELLOWGREEN };
+const GPU_TAG_PRIM_ANGLE_GRADIENT: GpuProfileTag = GpuProfileTag { label: "AngleGradient", color: debug_colors::POWDERBLUE };
+const GPU_TAG_PRIM_BOX_SHADOW: GpuProfileTag = GpuProfileTag { label: "BoxShadow", color: debug_colors::CYAN };
+const GPU_TAG_PRIM_BORDER: GpuProfileTag = GpuProfileTag { label: "Border", color: debug_colors::ORANGE };
+const GPU_TAG_PRIM_CACHE_IMAGE: GpuProfileTag = GpuProfileTag { label: "CacheImage", color: debug_colors::SILVER };
+const GPU_TAG_BLUR: GpuProfileTag = GpuProfileTag { label: "Blur", color: debug_colors::VIOLET };
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum BlendMode {
     None,
     Alpha,
+    // Use the color of the text itself as a constant color blend factor.
+    Subpixel(ColorF),
 }
 
 struct VertexDataTexture {
@@ -140,7 +119,8 @@ impl VertexDataTexture {
     }
 }
 
-const TRANSFORM_FEATURE: &'static [&'static str] = &["TRANSFORM"];
+const TRANSFORM_FEATURE: &'static str = "TRANSFORM";
+const SUBPIXEL_AA_FEATURE: &'static str = "SUBPIXEL_AA";
 
 enum ShaderKind {
     Primitive,
@@ -153,14 +133,14 @@ struct LazilyCompiledShader {
     name: &'static str,
     kind: ShaderKind,
     max_ubo_vectors: usize,
-    features: &'static [&'static str],
+    features: Vec<&'static str>,
 }
 
 impl LazilyCompiledShader {
     fn new(kind: ShaderKind,
            name: &'static str,
            max_ubo_vectors: usize,
-           features: &'static [&'static str],
+           features: &[&'static str],
            device: &mut Device,
            precache: bool) -> LazilyCompiledShader {
         let mut shader = LazilyCompiledShader {
@@ -168,7 +148,7 @@ impl LazilyCompiledShader {
             name: name,
             kind: kind,
             max_ubo_vectors: max_ubo_vectors,
-            features: features,
+            features: features.to_vec(),
         };
 
         if precache {
@@ -190,7 +170,7 @@ impl LazilyCompiledShader {
                     create_prim_shader(self.name,
                                        device,
                                        self.max_ubo_vectors,
-                                       self.features)
+                                       &self.features)
                 }
             };
             self.id = Some(id);
@@ -235,18 +215,22 @@ impl PrimitiveShader {
            max_ubo_vectors: usize,
            max_prim_items: usize,
            device: &mut Device,
+           features: &[&'static str],
            precache: bool) -> PrimitiveShader {
         let simple = LazilyCompiledShader::new(ShaderKind::Primitive,
                                                name,
                                                max_ubo_vectors,
-                                               &[],
+                                               features,
                                                device,
                                                precache);
+
+        let mut transform_features = features.to_vec();
+        transform_features.push(TRANSFORM_FEATURE);
 
         let transform = LazilyCompiledShader::new(ShaderKind::Primitive,
                                                   name,
                                                   max_ubo_vectors,
-                                                  TRANSFORM_FEATURE,
+                                                  &transform_features,
                                                   device,
                                                   precache);
 
@@ -325,16 +309,24 @@ pub struct Renderer {
     pending_shader_updates: Vec<PathBuf>,
     current_frame: Option<RendererFrame>,
     device_pixel_ratio: f32,
-    raster_batches: Vec<RasterBatch>,
-    raster_op_vao: Option<VAOId>,
 
-    blur_program_id: ProgramId,
-    u_direction: UniformLocation,
-
+    // These are "cache shaders". These shaders are used to
+    // draw intermediate results to cache targets. The results
+    // of these shaders are then used by the primitive shaders.
     cs_box_shadow: LazilyCompiledShader,
+    cs_text_run: LazilyCompiledShader,
+    cs_blur: LazilyCompiledShader,
 
+    // The are "primitive shaders". These shaders draw and blend
+    // final results on screen. They are aware of tile boundaries.
+    // Most draw directly to the framebuffer, but some use inputs
+    // from the cache shaders to draw. Specifically, the box
+    // shadow primitive shader stretches the box shadow cache
+    // output, and the cache_image shader blits the results of
+    // a cache shader (e.g. blur) to the screen.
     ps_rectangle: PrimitiveShader,
     ps_text_run: PrimitiveShader,
+    ps_text_run_subpixel: PrimitiveShader,
     ps_image: PrimitiveShader,
     ps_border: PrimitiveShader,
     ps_gradient: PrimitiveShader,
@@ -343,6 +335,7 @@ pub struct Renderer {
     ps_box_shadow: PrimitiveShader,
     ps_rectangle_clip: PrimitiveShader,
     ps_image_clip: PrimitiveShader,
+    ps_cache_image: PrimitiveShader,
 
     ps_blend: LazilyCompiledShader,
     ps_composite: LazilyCompiledShader,
@@ -353,6 +346,7 @@ pub struct Renderer {
     max_prim_blends: usize,
     max_prim_composites: usize,
     max_cache_instances: usize,
+    max_blurs: usize,
 
     notifier: Arc<Mutex<Option<Box<RenderNotifier>>>>,
 
@@ -363,9 +357,6 @@ pub struct Renderer {
     profiler: Profiler,
     last_time: u64,
 
-    max_raster_op_size: u32,
-    raster_op_target_a8: TextureId,
-    raster_op_target_rgba8: TextureId,
     render_targets: Vec<TextureId>,
 
     gpu_profile: GpuProfiler<GpuProfileTag>,
@@ -421,9 +412,6 @@ impl Renderer {
                                      Box::new(file_watch_handler));
         device.begin_frame();
 
-        let blur_program_id = device.create_program("blur", "shared_other");
-        let max_raster_op_size = MAX_RASTER_OP_SIZE * options.device_pixel_ratio as u32;
-
         let max_ubo_size = device.get_capabilities().max_ubo_size;
         let max_ubo_vectors = max_ubo_size / 16;
 
@@ -431,6 +419,7 @@ impl Renderer {
         let max_cache_instances = get_ubo_max_len::<tiling::CachePrimitiveInstance>(max_ubo_size);
         let max_prim_blends = get_ubo_max_len::<tiling::PackedBlendPrimitive>(max_ubo_size);
         let max_prim_composites = get_ubo_max_len::<tiling::PackedCompositePrimitive>(max_ubo_size);
+        let max_blurs = get_ubo_max_len::<tiling::BlurCommand>(max_ubo_size);
 
         let cs_box_shadow = LazilyCompiledShader::new(ShaderKind::Cache,
                                                       "cs_box_shadow",
@@ -438,59 +427,93 @@ impl Renderer {
                                                       &[],
                                                       &mut device,
                                                       options.precache_shaders);
+        let cs_text_run = LazilyCompiledShader::new(ShaderKind::Cache,
+                                                    "cs_text_run",
+                                                    max_cache_instances,
+                                                    &[],
+                                                    &mut device,
+                                                    options.precache_shaders);
+        let cs_blur = LazilyCompiledShader::new(ShaderKind::Cache,
+                                                "cs_blur",
+                                                 max_blurs,
+                                                 &[],
+                                                 &mut device,
+                                                 options.precache_shaders);
 
         let ps_rectangle = PrimitiveShader::new("ps_rectangle",
                                                 max_ubo_vectors,
                                                 max_prim_instances,
                                                 &mut device,
+                                                &[],
                                                 options.precache_shaders);
         let ps_text_run = PrimitiveShader::new("ps_text_run",
                                                max_ubo_vectors,
                                                max_prim_instances,
                                                &mut device,
+                                               &[],
                                                options.precache_shaders);
+        let ps_text_run_subpixel = PrimitiveShader::new("ps_text_run",
+                                                        max_ubo_vectors,
+                                                        max_prim_instances,
+                                                        &mut device,
+                                                        &[ SUBPIXEL_AA_FEATURE ],
+                                                        options.precache_shaders);
         let ps_image = PrimitiveShader::new("ps_image",
                                             max_ubo_vectors,
                                             max_prim_instances,
                                             &mut device,
+                                            &[],
                                             options.precache_shaders);
         let ps_border = PrimitiveShader::new("ps_border",
                                              max_ubo_vectors,
                                              max_prim_instances,
                                              &mut device,
+                                             &[],
                                              options.precache_shaders);
         let ps_rectangle_clip = PrimitiveShader::new("ps_rectangle_clip",
                                                      max_ubo_vectors,
                                                      max_prim_instances,
                                                      &mut device,
+                                                     &[],
                                                      options.precache_shaders);
         let ps_image_clip = PrimitiveShader::new("ps_image_clip",
                                                  max_ubo_vectors,
                                                  max_prim_instances,
                                                  &mut device,
+                                                 &[],
                                                  options.precache_shaders);
 
         let ps_box_shadow = PrimitiveShader::new("ps_box_shadow",
                                                  max_ubo_vectors,
                                                  max_prim_instances,
                                                  &mut device,
+                                                 &[],
                                                  options.precache_shaders);
 
         let ps_gradient = PrimitiveShader::new("ps_gradient",
                                                max_ubo_vectors,
                                                max_prim_instances,
                                                &mut device,
+                                               &[],
                                                options.precache_shaders);
         let ps_gradient_clip = PrimitiveShader::new("ps_gradient_clip",
                                                     max_ubo_vectors,
                                                     max_prim_instances,
                                                     &mut device,
+                                                    &[],
                                                     options.precache_shaders);
         let ps_angle_gradient = PrimitiveShader::new("ps_angle_gradient",
                                                      max_ubo_vectors,
                                                      max_prim_instances,
                                                      &mut device,
+                                                     &[],
                                                      options.precache_shaders);
+        let ps_cache_image = PrimitiveShader::new("ps_cache_image",
+                                                  max_ubo_vectors,
+                                                  max_prim_instances,
+                                                  &mut device,
+                                                  &[],
+                                                  options.precache_shaders);
 
         let ps_blend = LazilyCompiledShader::new(ShaderKind::Primitive,
                                                  "ps_blend",
@@ -529,25 +552,21 @@ impl Renderer {
         // TODO: Ensure that the white texture can never get evicted when the cache supports LRU eviction!
         let white_image_id = texture_cache.new_item_id();
         texture_cache.insert(white_image_id,
-                             0,
-                             0,
                              2,
                              2,
+                             None,
                              ImageFormat::RGBA8,
                              TextureFilter::Linear,
-                             TextureInsertOp::Blit(white_pixels),
-                             BorderType::SinglePixel);
+                             white_pixels);
 
         let dummy_mask_image_id = texture_cache.new_item_id();
         texture_cache.insert(dummy_mask_image_id,
-                             0,
-                             0,
                              2,
                              2,
+                             None,
                              ImageFormat::A8,
                              TextureFilter::Linear,
-                             TextureInsertOp::Blit(mask_pixels),
-                             BorderType::SinglePixel);
+                             mask_pixels);
 
         let dummy_resources = DummyResources {
             white_image_id: white_image_id,
@@ -555,24 +574,6 @@ impl Renderer {
         };
 
         let debug_renderer = DebugRenderer::new(&mut device);
-
-        let raster_op_target_a8 = device.create_texture_ids(1, TextureTarget::Default)[0];
-        device.init_texture(raster_op_target_a8,
-                            max_raster_op_size,
-                            max_raster_op_size,
-                            ImageFormat::A8,
-                            TextureFilter::Nearest,
-                            RenderTargetMode::SimpleRenderTarget,
-                            None);
-
-        let raster_op_target_rgba8 = device.create_texture_ids(1, TextureTarget::Default)[0];
-        device.init_texture(raster_op_target_rgba8,
-                            max_raster_op_size,
-                            max_raster_op_size,
-                            ImageFormat::RGBA8,
-                            TextureFilter::Nearest,
-                            RenderTargetMode::SimpleRenderTarget,
-                            None);
 
         let layer_texture = VertexDataTexture::new(&mut device);
         let render_task_texture = VertexDataTexture::new(&mut device);
@@ -623,7 +624,8 @@ impl Renderer {
             RendererKind::OSMesa => GLContextHandleWrapper::current_osmesa_handle(),
         };
 
-        let config = FrameBuilderConfig::new(options.enable_scrollbars);
+        let config = FrameBuilderConfig::new(options.enable_scrollbars,
+                                             options.enable_subpixel_aa);
 
         let debug = options.debug;
         let (device_pixel_ratio, enable_aa) = (options.device_pixel_ratio, options.enable_aa);
@@ -647,20 +649,20 @@ impl Renderer {
             backend.run();
         });
 
-        let mut renderer = Renderer {
+        let renderer = Renderer {
             result_rx: result_rx,
             device: device,
             current_frame: None,
-            raster_batches: Vec::new(),
-            raster_op_vao: None,
             pending_texture_updates: Vec::new(),
             pending_shader_updates: Vec::new(),
             device_pixel_ratio: options.device_pixel_ratio,
-            blur_program_id: blur_program_id,
             tile_clear_shader: tile_clear_shader,
             cs_box_shadow: cs_box_shadow,
+            cs_text_run: cs_text_run,
+            cs_blur: cs_blur,
             ps_rectangle: ps_rectangle,
             ps_text_run: ps_text_run,
+            ps_text_run_subpixel: ps_text_run_subpixel,
             ps_image: ps_image,
             ps_border: ps_border,
             ps_rectangle_clip: ps_rectangle_clip,
@@ -669,13 +671,14 @@ impl Renderer {
             ps_gradient: ps_gradient,
             ps_gradient_clip: ps_gradient_clip,
             ps_angle_gradient: ps_angle_gradient,
+            ps_cache_image: ps_cache_image,
             ps_blend: ps_blend,
             ps_composite: ps_composite,
             max_clear_tiles: max_clear_tiles,
             max_prim_blends: max_prim_blends,
             max_prim_composites: max_prim_composites,
             max_cache_instances: max_cache_instances,
-            u_direction: UniformLocation::invalid(),
+            max_blurs: max_blurs,
             notifier: notifier,
             debug: debug_renderer,
             backend_profile_counters: BackendProfileCounters::new(),
@@ -683,10 +686,7 @@ impl Renderer {
             profiler: Profiler::new(),
             enable_profiler: options.enable_profiler,
             last_time: 0,
-            raster_op_target_a8: raster_op_target_a8,
-            raster_op_target_rgba8: raster_op_target_rgba8,
             render_targets: Vec::new(),
-            max_raster_op_size: max_raster_op_size,
             gpu_profile: GpuProfiler::new(),
             quad_vao_id: quad_vao_id,
             layer_texture: layer_texture,
@@ -700,14 +700,8 @@ impl Renderer {
             main_thread_dispatcher: main_thread_dispatcher,
         };
 
-        renderer.update_uniform_locations();
-
         let sender = RenderApiSender::new(api_tx, payload_tx);
         (renderer, sender)
-    }
-
-    fn update_uniform_locations(&mut self) {
-        self.u_direction = self.device.get_uniform_location(self.blur_program_id, "uDirection");
     }
 
     /// Sets the new RenderNotifier.
@@ -886,386 +880,20 @@ impl Renderer {
                             TextureUpdateDetails::Raw => {
                                 self.device.update_raw_texture(update.id, x, y, width, height);
                             }
-                            TextureUpdateDetails::Blit(bytes) => {
+                            TextureUpdateDetails::Blit(bytes, stride) => {
                                 self.device.update_texture(
                                     update.id,
                                     x,
                                     y,
-                                    width, height,
+                                    width, height, stride,
                                     bytes.as_slice());
-                            }
-                            TextureUpdateDetails::Blur(bytes,
-                                                       glyph_size,
-                                                       radius,
-                                                       unblurred_glyph_texture_image,
-                                                       horizontal_blur_texture_image,
-                                                       border_type) => {
-                                let radius =
-                                    f32::ceil(radius.to_f32_px() * self.device_pixel_ratio) as u32;
-                                self.device.update_texture(
-                                    unblurred_glyph_texture_image.texture_id,
-                                    unblurred_glyph_texture_image.pixel_uv.x,
-                                    unblurred_glyph_texture_image.pixel_uv.y,
-                                    glyph_size.width,
-                                    glyph_size.height,
-                                    bytes.as_slice());
-
-                                let blur_program_id = self.blur_program_id;
-
-                                let white = ColorF::new(1.0, 1.0, 1.0, 1.0);
-                                let (width, height) = (width as f32, height as f32);
-
-                                let zero_point = Point2D::new(0.0, 0.0);
-                                let dest_texture_size = Size2D::new(width as f32, height as f32);
-                                let source_texture_size = Size2D::new(glyph_size.width as f32,
-                                                                      glyph_size.height as f32);
-                                let blur_radius = radius as f32;
-
-                                self.add_rect_to_raster_batch(horizontal_blur_texture_image.texture_id,
-                                                              unblurred_glyph_texture_image.texture_id,
-                                                              blur_program_id,
-                                                              Some(AxisDirection::Horizontal),
-                                                              &Rect::new(horizontal_blur_texture_image.pixel_uv,
-                                                                         Size2D::new(width as u32, height as u32)),
-                                                              border_type,
-                                                              |texture_rect| {
-                                    [
-                                        PackedVertexForTextureCacheUpdate::new(
-                                            &texture_rect.origin,
-                                            &white,
-                                            &Point2D::new(0.0, 0.0),
-                                            &zero_point,
-                                            &zero_point,
-                                            &unblurred_glyph_texture_image.texel_uv.origin,
-                                            &unblurred_glyph_texture_image.texel_uv.bottom_right(),
-                                            &dest_texture_size,
-                                            &source_texture_size,
-                                            blur_radius),
-                                        PackedVertexForTextureCacheUpdate::new(
-                                            &texture_rect.top_right(),
-                                            &white,
-                                            &Point2D::new(1.0, 0.0),
-                                            &zero_point,
-                                            &zero_point,
-                                            &unblurred_glyph_texture_image.texel_uv.origin,
-                                            &unblurred_glyph_texture_image.texel_uv.bottom_right(),
-                                            &dest_texture_size,
-                                            &source_texture_size,
-                                            blur_radius),
-                                        PackedVertexForTextureCacheUpdate::new(
-                                            &texture_rect.bottom_left(),
-                                            &white,
-                                            &Point2D::new(0.0, 1.0),
-                                            &zero_point,
-                                            &zero_point,
-                                            &unblurred_glyph_texture_image.texel_uv.origin,
-                                            &unblurred_glyph_texture_image.texel_uv.bottom_right(),
-                                            &dest_texture_size,
-                                            &source_texture_size,
-                                            blur_radius),
-                                        PackedVertexForTextureCacheUpdate::new(
-                                            &texture_rect.bottom_right(),
-                                            &white,
-                                            &Point2D::new(1.0, 1.0),
-                                            &zero_point,
-                                            &zero_point,
-                                            &unblurred_glyph_texture_image.texel_uv.origin,
-                                            &unblurred_glyph_texture_image.texel_uv.bottom_right(),
-                                            &dest_texture_size,
-                                            &source_texture_size,
-                                            blur_radius),
-                                    ]
-                                });
-
-                                let source_texture_size = Size2D::new(width as f32, height as f32);
-
-                                self.add_rect_to_raster_batch(update.id,
-                                                              horizontal_blur_texture_image.texture_id,
-                                                              blur_program_id,
-                                                              Some(AxisDirection::Vertical),
-                                                              &Rect::new(Point2D::new(x as u32, y as u32),
-                                                                         Size2D::new(width as u32, height as u32)),
-                                                              border_type,
-                                                              |texture_rect| {
-                                    [
-                                        PackedVertexForTextureCacheUpdate::new(
-                                            &texture_rect.origin,
-                                            &white,
-                                            &Point2D::new(0.0, 0.0),
-                                            &zero_point,
-                                            &zero_point,
-                                            &horizontal_blur_texture_image.texel_uv.origin,
-                                            &horizontal_blur_texture_image.texel_uv.bottom_right(),
-                                            &dest_texture_size,
-                                            &source_texture_size,
-                                            blur_radius),
-                                        PackedVertexForTextureCacheUpdate::new(
-                                            &texture_rect.top_right(),
-                                            &white,
-                                            &Point2D::new(1.0, 0.0),
-                                            &zero_point,
-                                            &zero_point,
-                                            &horizontal_blur_texture_image.texel_uv.origin,
-                                            &horizontal_blur_texture_image.texel_uv.bottom_right(),
-                                            &dest_texture_size,
-                                            &source_texture_size,
-                                            blur_radius),
-                                        PackedVertexForTextureCacheUpdate::new(
-                                            &texture_rect.bottom_left(),
-                                            &white,
-                                            &Point2D::new(0.0, 1.0),
-                                            &zero_point,
-                                            &zero_point,
-                                            &horizontal_blur_texture_image.texel_uv.origin,
-                                            &horizontal_blur_texture_image.texel_uv.bottom_right(),
-                                            &dest_texture_size,
-                                            &source_texture_size,
-                                            blur_radius),
-                                        PackedVertexForTextureCacheUpdate::new(
-                                            &texture_rect.bottom_right(),
-                                            &white,
-                                            &Point2D::new(1.0, 1.0),
-                                            &zero_point,
-                                            &zero_point,
-                                            &horizontal_blur_texture_image.texel_uv.origin,
-                                            &horizontal_blur_texture_image.texel_uv.bottom_right(),
-                                            &dest_texture_size,
-                                            &source_texture_size,
-                                            blur_radius),
-                                    ]
-                                });
                             }
                         }
                     }
+                    TextureUpdateOp::Remove => {
+                        self.device.remove_raw_texture(update.id);
+                    }
                 }
-            }
-        }
-
-        self.flush_raster_batches();
-    }
-
-    fn add_rect_to_raster_batch<F>(&mut self,
-                                   dest_texture_id: TextureId,
-                                   color_texture_id: TextureId,
-                                   program_id: ProgramId,
-                                   blur_direction: Option<AxisDirection>,
-                                   dest_rect: &Rect<u32>,
-                                   border_type: BorderType,
-                                   f: F)
-                                   where F: Fn(&Rect<f32>) -> [PackedVertexForTextureCacheUpdate; 4] {
-        // FIXME(pcwalton): Use a hash table if this linear search shows up in the profile.
-        for batch in &mut self.raster_batches {
-            if batch.add_rect_if_possible(dest_texture_id,
-                                          color_texture_id,
-                                          program_id,
-                                          blur_direction,
-                                          dest_rect,
-                                          border_type,
-                                          &f) {
-                return;
-            }
-        }
-
-        let raster_op_target = if self.device.texture_has_alpha(dest_texture_id) {
-            self.raster_op_target_rgba8
-        } else {
-            self.raster_op_target_a8
-        };
-
-        let mut raster_batch = RasterBatch::new(raster_op_target,
-                                                self.max_raster_op_size,
-                                                program_id,
-                                                blur_direction,
-                                                color_texture_id,
-                                                dest_texture_id);
-
-        let added = raster_batch.add_rect_if_possible(dest_texture_id,
-                                                      color_texture_id,
-                                                      program_id,
-                                                      blur_direction,
-                                                      dest_rect,
-                                                      border_type,
-                                                      &f);
-        debug_assert!(added);
-        self.raster_batches.push(raster_batch);
-    }
-
-    fn flush_raster_batches(&mut self) {
-        let batches = mem::replace(&mut self.raster_batches, vec![]);
-        if !batches.is_empty() {
-            //println!("flushing {:?} raster batches", batches.len());
-
-            self.device.disable_depth();
-            self.device.disable_scissor();
-            // Disable MSAA here for raster ops
-            self.device.set_multisample(false);
-
-            let projection = Matrix4D::ortho(0.0,
-                                             self.max_raster_op_size as f32,
-                                             0.0,
-                                             self.max_raster_op_size as f32,
-                                             ORTHO_NEAR_PLANE,
-                                             ORTHO_FAR_PLANE);
-
-            // All horizontal blurs must complete before anything else.
-            let mut remaining_batches = vec![];
-            for batch in batches.into_iter() {
-                if batch.blur_direction != Some(AxisDirection::Horizontal) {
-                    remaining_batches.push(batch);
-                    continue
-                }
-
-                self.set_up_gl_state_for_texture_cache_update(batch.page_allocator.texture_id(),
-                                                              batch.color_texture_id,
-                                                              batch.program_id,
-                                                              batch.blur_direction,
-                                                              &projection);
-                self.perform_gl_texture_cache_update(batch);
-            }
-
-            // Flush the remaining batches.
-            for batch in remaining_batches.into_iter() {
-                self.set_up_gl_state_for_texture_cache_update(batch.page_allocator.texture_id(),
-                                                              batch.color_texture_id,
-                                                              batch.program_id,
-                                                              batch.blur_direction,
-                                                              &projection);
-                self.perform_gl_texture_cache_update(batch);
-            }
-        }
-    }
-
-    fn set_up_gl_state_for_texture_cache_update(&mut self,
-                                                target_texture_id: TextureId,
-                                                color_texture_id: TextureId,
-                                                program_id: ProgramId,
-                                                blur_direction: Option<AxisDirection>,
-                                                projection: &Matrix4D<f32>) {
-
-        self.device.set_blend(!self.device.texture_has_alpha(target_texture_id));
-        self.device.set_blend_mode_premultiplied_alpha();
-
-        let dimensions = [self.max_raster_op_size, self.max_raster_op_size];
-        self.device.bind_render_target(Some((target_texture_id, 0)), Some(dimensions));
-
-        self.device.bind_program(program_id, &projection);
-
-        self.device.bind_texture(TextureSampler::Color, color_texture_id);
-        self.device.bind_texture(TextureSampler::Mask, TextureId::invalid());
-
-        match blur_direction {
-            Some(AxisDirection::Horizontal) => {
-                self.device.set_uniform_2f(self.u_direction, 1.0, 0.0)
-            }
-            Some(AxisDirection::Vertical) => {
-                self.device.set_uniform_2f(self.u_direction, 0.0, 1.0)
-            }
-            None => {}
-        }
-    }
-
-    fn perform_gl_texture_cache_update(&mut self, batch: RasterBatch) {
-        let vao_id = match self.raster_op_vao {
-            Some(ref mut vao_id) => *vao_id,
-            None => {
-                let vao_id = self.device.create_vao(VertexFormat::RasterOp, None);
-                self.raster_op_vao = Some(vao_id);
-                vao_id
-            }
-        };
-        self.device.bind_vao(vao_id);
-
-        self.device.update_vao_indices(vao_id, &batch.indices[..], VertexUsageHint::Dynamic);
-        self.device.update_vao_main_vertices(vao_id,
-                                             &batch.vertices[..],
-                                             VertexUsageHint::Dynamic);
-
-        self.profile_counters.vertices.add(batch.indices.len());
-        self.profile_counters.draw_calls.inc();
-
-        //println!("drawing triangles due to GL texture cache update");
-        self.device.draw_triangles_u16(0, batch.indices.len() as i32);
-
-        for blit_job in batch.blit_jobs {
-            self.device.read_framebuffer_rect(blit_job.dest_texture_id,
-                                              blit_job.dest_origin.x as i32,
-                                              blit_job.dest_origin.y as i32,
-                                              blit_job.src_origin.x as i32,
-                                              blit_job.src_origin.y as i32,
-                                              blit_job.size.width as i32,
-                                              blit_job.size.height as i32);
-
-            match blit_job.border_type {
-                BorderType::SinglePixel => {
-                    // Single pixel corners
-                    self.device.read_framebuffer_rect(blit_job.dest_texture_id,
-                                                      blit_job.dest_origin.x as i32 - 1,
-                                                      blit_job.dest_origin.y as i32 - 1,
-                                                      blit_job.src_origin.x as i32,
-                                                      blit_job.src_origin.y as i32,
-                                                      1,
-                                                      1);
-
-                    self.device.read_framebuffer_rect(blit_job.dest_texture_id,
-                                                      (blit_job.dest_origin.x + blit_job.size.width) as i32,
-                                                      blit_job.dest_origin.y as i32 - 1,
-                                                      (blit_job.src_origin.x + blit_job.size.width) as i32 - 1,
-                                                      blit_job.src_origin.y as i32,
-                                                      1,
-                                                      1);
-
-                    self.device.read_framebuffer_rect(blit_job.dest_texture_id,
-                                                      blit_job.dest_origin.x as i32 - 1,
-                                                      (blit_job.dest_origin.y + blit_job.size.height) as i32,
-                                                      blit_job.src_origin.x as i32,
-                                                      (blit_job.src_origin.y + blit_job.size.height) as i32 - 1,
-                                                      1,
-                                                      1);
-
-                    self.device.read_framebuffer_rect(blit_job.dest_texture_id,
-                                                      (blit_job.dest_origin.x + blit_job.size.width) as i32,
-                                                      (blit_job.dest_origin.y + blit_job.size.height) as i32,
-                                                      (blit_job.src_origin.x + blit_job.size.width) as i32 - 1,
-                                                      (blit_job.src_origin.y + blit_job.size.height) as i32 - 1,
-                                                      1,
-                                                      1);
-
-                    // Horizontal edges
-                    self.device.read_framebuffer_rect(blit_job.dest_texture_id,
-                                                      blit_job.dest_origin.x as i32,
-                                                      blit_job.dest_origin.y as i32 - 1,
-                                                      blit_job.src_origin.x as i32,
-                                                      blit_job.src_origin.y as i32,
-                                                      blit_job.size.width as i32,
-                                                      1);
-
-                    self.device.read_framebuffer_rect(blit_job.dest_texture_id,
-                                                      blit_job.dest_origin.x as i32,
-                                                      (blit_job.dest_origin.y + blit_job.size.height) as i32,
-                                                      blit_job.src_origin.x as i32,
-                                                      (blit_job.src_origin.y + blit_job.size.height) as i32 - 1,
-                                                      blit_job.size.width as i32,
-                                                      1);
-
-                    // Vertical edges
-                    self.device.read_framebuffer_rect(blit_job.dest_texture_id,
-                                                      blit_job.dest_origin.x as i32 - 1,
-                                                      blit_job.dest_origin.y as i32,
-                                                      blit_job.src_origin.x as i32,
-                                                      blit_job.src_origin.y as i32,
-                                                      1,
-                                                      blit_job.size.height as i32);
-
-                    self.device.read_framebuffer_rect(blit_job.dest_texture_id,
-                                                      (blit_job.dest_origin.x + blit_job.size.width) as i32,
-                                                      blit_job.dest_origin.y as i32,
-                                                      (blit_job.src_origin.x + blit_job.size.width) as i32 - 1,
-                                                      blit_job.src_origin.y as i32,
-                                                      1,
-                                                      blit_job.size.height as i32);
-
-                }
-                BorderType::_NoBorder => {}
             }
         }
     }
@@ -1380,7 +1008,43 @@ impl Renderer {
             self.device.clear_color(color);
         }
 
-        // Draw any cache primitives for this target.
+        // Draw any blurs for this target.
+        // Blurs are rendered as a standard 2-pass
+        // separable implementation.
+        // TODO(gw): In the future, consider having
+        //           fast path blur shaders for common
+        //           blur radii with fixed weights.
+        if !target.vertical_blurs.is_empty() {
+            self.device.set_blend(false);
+
+            self.gpu_profile.add_marker(GPU_TAG_BLUR);
+            let shader = self.cs_blur.get(&mut self.device);
+            let max_blurs = self.max_blurs;
+            self.draw_ubo_batch(&target.vertical_blurs,
+                                shader,
+                                1,
+                                TextureId::invalid(),
+                                TextureId::invalid(),
+                                max_blurs,
+                                &projection);
+        }
+
+        if !target.horizontal_blurs.is_empty() {
+            self.device.set_blend(false);
+
+            self.gpu_profile.add_marker(GPU_TAG_BLUR);
+            let shader = self.cs_blur.get(&mut self.device);
+            let max_blurs = self.max_blurs;
+            self.draw_ubo_batch(&target.horizontal_blurs,
+                                shader,
+                                1,
+                                TextureId::invalid(),
+                                TextureId::invalid(),
+                                max_blurs,
+                                &projection);
+        }
+
+        // Draw any box-shadow caches for this target.
         if !target.box_shadow_cache_prims.is_empty() {
             self.device.set_blend(false);
 
@@ -1396,6 +1060,28 @@ impl Renderer {
                                 &projection);
         }
 
+        // Draw any textrun caches for this target. For now, this
+        // is only used to cache text runs that are to be blurred
+        // for text-shadow support. In the future it may be worth
+        // considering using this for (some) other text runs, since
+        // it removes the overhead of submitting many small glyphs
+        // to multiple tiles in the normal text run case.
+        if !target.text_run_cache_prims.is_empty() {
+            self.device.set_blend(true);
+            self.device.set_blend_mode_alpha();
+
+            self.gpu_profile.add_marker(GPU_TAG_CACHE_TEXT_RUN);
+            let shader = self.cs_text_run.get(&mut self.device);
+            let max_cache_instances = self.max_cache_instances;
+            self.draw_ubo_batch(&target.text_run_cache_prims,
+                                shader,
+                                1,
+                                target.text_run_color_texture_id,
+                                TextureId::invalid(),
+                                max_cache_instances,
+                                &projection);
+        }
+
         let mut prev_blend_mode = BlendMode::None;
 
         for batch in &target.alpha_batcher.batches {
@@ -1406,15 +1092,31 @@ impl Renderer {
 
             if batch.key.blend_mode != prev_blend_mode {
                 match batch.key.blend_mode {
-                    // TODO(gw): More blend modes to come with subpixel aa work.
                     BlendMode::None | BlendMode::Alpha => {
                         self.device.set_blend(batch.key.blend_mode == BlendMode::Alpha);
+                        self.device.set_blend_mode_alpha();
+                    }
+                    BlendMode::Subpixel(color) => {
+                        self.device.set_blend(true);
+                        self.device.set_blend_mode_subpixel(color);
                     }
                 }
                 prev_blend_mode = batch.key.blend_mode;
             }
 
             match &batch.data {
+                &PrimitiveBatchData::CacheImage(ref ubo_data) => {
+                    self.gpu_profile.add_marker(GPU_TAG_PRIM_CACHE_IMAGE);
+                    let (shader, max_prim_items) = self.ps_cache_image.get(&mut self.device,
+                                                                           transform_kind);
+                    self.draw_ubo_batch(ubo_data,
+                                        shader,
+                                        1,
+                                        color_texture_id,
+                                        mask_texture_id,
+                                        max_prim_items,
+                                        &projection);
+                }
                 &PrimitiveBatchData::Blend(ref ubo_data) => {
                     self.gpu_profile.add_marker(GPU_TAG_PRIM_BLEND);
                     let shader = self.ps_blend.get(&mut self.device);
@@ -1503,7 +1205,10 @@ impl Renderer {
                 }
                 &PrimitiveBatchData::TextRun(ref ubo_data) => {
                     self.gpu_profile.add_marker(GPU_TAG_PRIM_TEXT_RUN);
-                    let (shader, max_prim_items) = self.ps_text_run.get(&mut self.device, transform_kind);
+                    let (shader, max_prim_items) = match batch.key.blend_mode {
+                        BlendMode::Subpixel(..) => self.ps_text_run_subpixel.get(&mut self.device, transform_kind),
+                        BlendMode::Alpha | BlendMode::None => self.ps_text_run.get(&mut self.device, transform_kind),
+                    };
                     self.draw_ubo_batch(ubo_data,
                                         shader,
                                         1,
@@ -1666,6 +1371,10 @@ impl Renderer {
         &mut self.debug
     }
 
+    pub fn get_profiler_enabled(&mut self) -> bool {
+        self.enable_profiler
+    }
+
     pub fn set_profiler_enabled(&mut self, enabled: bool) {
         self.enable_profiler = enabled;
     }
@@ -1683,4 +1392,5 @@ pub struct RendererOptions {
     pub enable_scrollbars: bool,
     pub precache_shaders: bool,
     pub renderer_kind: RendererKind,
+    pub enable_subpixel_aa: bool,
 }

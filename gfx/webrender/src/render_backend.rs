@@ -17,7 +17,6 @@ use std::sync::mpsc::Sender;
 use texture_cache::TextureCache;
 use webrender_traits::{ApiMsg, AuxiliaryLists, BuiltDisplayList, IdNamespace};
 use webrender_traits::{RenderNotifier, RenderDispatcher, WebGLCommand, WebGLContextId};
-use batch::new_id;
 use device::TextureId;
 use record;
 use tiling::FrameBuilderConfig;
@@ -47,7 +46,9 @@ pub struct RenderBackend {
     webgl_contexts: HashMap<WebGLContextId, GLContextWrapper>,
     current_bound_webgl_context_id: Option<WebGLContextId>,
     enable_recording: bool,
-    main_thread_dispatcher: Arc<Mutex<Option<Box<RenderDispatcher>>>>
+    main_thread_dispatcher: Arc<Mutex<Option<Box<RenderDispatcher>>>>,
+
+    next_webgl_id: usize,
 }
 
 impl RenderBackend {
@@ -86,7 +87,8 @@ impl RenderBackend {
             webgl_contexts: HashMap::new(),
             current_bound_webgl_context_id: None,
             enable_recording:enable_recording,
-            main_thread_dispatcher: main_thread_dispatcher
+            main_thread_dispatcher: main_thread_dispatcher,
+            next_webgl_id: 0,
         }
     }
 
@@ -116,20 +118,17 @@ impl RenderBackend {
                         ApiMsg::GetGlyphDimensions(glyph_keys, tx) => {
                             let mut glyph_dimensions = Vec::with_capacity(glyph_keys.len());
                             for glyph_key in &glyph_keys {
-                                // Get the next frame id, so it'll remain in the texture cache.
-                                // This assumes that the glyph will be used in the next frame.
-                                let frame_id = self.frame.next_frame_id();
-                                let glyph_dim = self.resource_cache
-                                                    .get_glyph_dimensions(&glyph_key, frame_id);
+                                let glyph_dim = self.resource_cache.get_glyph_dimensions(glyph_key);
                                 glyph_dimensions.push(glyph_dim);
                             };
                             tx.send(glyph_dimensions).unwrap();
                         }
-                        ApiMsg::AddImage(id, width, height, format, bytes) => {
+                        ApiMsg::AddImage(id, width, height, stride, format, bytes) => {
                             profile_counters.image_templates.inc(bytes.len());
                             self.resource_cache.add_image_template(id,
                                                                    width,
                                                                    height,
+                                                                   stride,
                                                                    format,
                                                                    bytes);
                         }
@@ -300,7 +299,8 @@ impl RenderBackend {
 
                                 match result {
                                     Ok(ctx) => {
-                                        let id = WebGLContextId(new_id());
+                                        let id = WebGLContextId(self.next_webgl_id);
+                                        self.next_webgl_id += 1;
 
                                         let (real_size, texture_id, limits) = ctx.get_info();
 
@@ -317,6 +317,21 @@ impl RenderBackend {
                                 }
                             } else {
                                 tx.send(Err("Not implemented yet".to_owned())).unwrap();
+                            }
+                        }
+                        ApiMsg::ResizeWebGLContext(context_id, size) => {
+                            let ctx = self.webgl_contexts.get_mut(&context_id).unwrap();
+                            ctx.make_current();
+                            match ctx.resize(&size) {
+                                Ok(_) => {
+                                    // Update webgl texture size. Texture id may change too.
+                                    let (real_size, texture_id, _) = ctx.get_info();
+                                    self.resource_cache
+                                        .update_webgl_texture(context_id, TextureId::new(texture_id), real_size);
+                                },
+                                Err(msg) => {
+                                    error!("Error resizing WebGLContext: {}", msg);
+                                }
                             }
                         }
                         ApiMsg::WebGLCommand(context_id, command) => {
@@ -412,6 +427,7 @@ impl RenderBackend {
 
     fn render(&mut self) -> RendererFrame {
         let frame = self.frame.build(&mut self.resource_cache,
+                                     &self.scene.pipeline_auxiliary_lists,
                                      self.device_pixel_ratio);
 
         let pending_update = self.resource_cache.pending_updates();

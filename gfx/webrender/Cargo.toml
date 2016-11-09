@@ -4,6 +4,7 @@ version = "0.8.0"
 authors = ["Glenn Watson <gw@intuitionlibrary.com>"]
 license = "MPL-2.0"
 repository = "https://github.com/servo/webrender"
+workspace = ".."
 
 [features]
 default = ["webrender_traits/codegen"]
@@ -17,14 +18,15 @@ byteorder = "0.5"
 euclid = "0.10"
 fnv="1.0"
 gleam = "0.2"
-ipc-channel = "0.5"
+ipc-channel = "0.6"
 lazy_static = "0.2"
 log = "0.3"
 num-traits = "0.1.32"
 offscreen_gl_context = {version = "0.4", features = ["serde_serialization", "osmesa"]}
-rayon = "0.4.0"
+rayon = "0.5"
 time = "0.1"
 webrender_traits = {path = "../webrender_traits", default-features = false}
+bitflags = "0.7"
 
 [target.'cfg(any(target_os = "android", target_os = "windows", all(unix, not(target_os = "macos"))))'.dependencies]
 freetype = {git = "https://github.com/servo/rust-freetype"}
