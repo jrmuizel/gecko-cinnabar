@@ -582,7 +582,11 @@ PuppetWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
                               LayerManagerPersistence aPersistence)
 {
   if (!mLayerManager) {
+#ifdef MOZ_ENABLE_WEBRENDER
     mLayerManager = new WebRenderLayerManager(this);
+#else
+    mLayerManager = new ClientLayerManager(this);
+#endif
   }
   ShadowLayerForwarder* lf = mLayerManager->AsShadowForwarder();
   if (lf && !lf->HasShadowManager() && aShadowManager) {
@@ -594,7 +598,11 @@ PuppetWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
 LayerManager*
 PuppetWidget::RecreateLayerManager(PLayerTransactionChild* aShadowManager)
 {
+#ifdef MOZ_ENABLE_WEBRENDER
   mLayerManager = new WebRenderLayerManager(this);
+#else
+  mLayerManager = new ClientLayerManager(this);
+#endif
   if (ShadowLayerForwarder* lf = mLayerManager->AsShadowForwarder()) {
     lf->SetShadowManager(aShadowManager);
   }

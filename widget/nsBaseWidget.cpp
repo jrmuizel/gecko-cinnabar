@@ -58,6 +58,7 @@
 #include "mozilla/layers/ChromeProcessController.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
+#include "mozilla/layers/WebrenderLayerManager.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/gfx/GPUProcessManager.h"
@@ -75,9 +76,6 @@
 #include "gfxConfig.h"
 #include "mozilla/layers/CompositorSession.h"
 #include "VRManagerChild.h"
-#ifdef MOZ_ENABLE_WEBRENDER
-#include "mozilla/layers/WebrenderLayerManager.h"
-#endif
 
 #ifdef DEBUG
 #include "nsIObserver.h"
@@ -1301,7 +1299,11 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
 
   CreateCompositorVsyncDispatcher();
 
+#ifdef MOZ_ENABLE_WEBRENDER
   RefPtr<LayerManager> lm = new WebRenderLayerManager(this);
+#else
+  RefPtr<LayerManager> lm = new ClientLayerManager(this);
+#endif
 
   bool useAPZ = UseAPZ();
 
