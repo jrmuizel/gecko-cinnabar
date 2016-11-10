@@ -1688,7 +1688,8 @@ public:
       return mDrawTarget;
     }
 
-    if (mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC) {
+    if (mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC ||
+        mLayerManager->GetBackendType() == LayersBackend::LAYERS_WR) {
       mDrawTarget = mLayerManager->CreateOptimalMaskDrawTarget(mSize);
       return mDrawTarget;
     }
@@ -1735,7 +1736,8 @@ public:
 private:
   already_AddRefed<Image> CreateImage()
   {
-    if (mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC &&
+    if ((mLayerManager->GetBackendType() == LayersBackend::LAYERS_BASIC ||
+         mLayerManager->GetBackendType() == LayersBackend::LAYERS_WR) &&
         mDrawTarget) {
       RefPtr<SourceSurface> surface = mDrawTarget->Snapshot();
       RefPtr<SourceSurfaceImage> image = new SourceSurfaceImage(mSize, surface);

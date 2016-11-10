@@ -414,14 +414,17 @@ pub extern fn wr_delete_image(state:&mut WrState, key: ImageKey) {
 }
 
 #[no_mangle]
-pub extern fn wr_dp_push_rect(state:&mut WrState, rect: WrRect, clip: WrRect, r: f32, g: f32, b: f32, a: f32) {
+pub extern fn wr_dp_push_rect(state:&mut WrState, rect: WrRect, clip: WrRect, mask: *const WrImageMask, r: f32, g: f32, b: f32, a: f32) {
     if state.dl_builder.len() == 0 {
       return;
     }
+    // convert from the C type to the Rust type
+    let mask = unsafe { mask.as_ref().map(|&WrImageMask{image, ref rect,repeat}| ImageMask{image: image, rect: rect.to_rect(), repeat: repeat}) };
+
     //let (width, height) = state.size;
     let clip_region = webrender_traits::ClipRegion::new(&clip.to_rect(),
                                                         Vec::new(),
-                                                        None,
+                                                        mask,
                                                         &mut state.frame_builder.auxiliary_lists_builder);
     state.dl_builder.last_mut().unwrap().push_rect(rect.to_rect(),
                                clip_region,
