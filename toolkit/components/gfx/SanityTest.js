@@ -248,6 +248,10 @@ SanityTest.prototype = {
     var buildId = Services.appinfo.platformBuildID;
     var gfxinfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfo);
 
+    // FIX THIS AFTER WR AND CANVAS CAN SNAPSHOT CORRECTLY
+    return false;
+
+/*
     if (Preferences.get(RUNNING_PREF, false)) {
       Preferences.set(DISABLE_VIDEO_PREF, true);
       reportResult(TEST_CRASHED);
@@ -286,6 +290,7 @@ SanityTest.prototype = {
     Preferences.set(RUNNING_PREF, true);
     Services.prefs.savePrefFile(null);
     return true;
+    */
   },
 
   observe: function(subject, topic, data) {
