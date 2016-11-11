@@ -208,17 +208,14 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   mAnimationReadyTime = TimeStamp::Now();
 
   LayoutDeviceIntSize size = mWidget->GetClientSize();
-  printf("WR Beginning size %i %i\n", size.width, size.height);
   bool success = false;
   WRBridge()->SendDPBegin(size.width, size.height, &success);
   if (!success) {
-    printf("WR failure\n");
     return;
   }
 
   WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer();
 
-  printf("WR Ending\n");
   WRBridge()->SendDPEnd();
 }
 
