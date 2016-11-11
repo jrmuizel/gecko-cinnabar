@@ -51,7 +51,7 @@ wr_init_window(uint64_t root_pipeline_id)
 WR_FUNC;
 
 WR_INLINE wrstate*
-wr_create(uint32_t width, uint32_t height, uint64_t layers_id)
+wr_create(wrwindowstate* wrWindow, uint32_t width, uint32_t height, uint64_t layers_id)
 WR_FUNC;
 
 WR_INLINE void
@@ -84,7 +84,7 @@ wr_pop_dl_builder(wrwindowstate* wrWindow, wrstate *wrState, WRRect bounds,
 WR_FUNC;
 
 WR_INLINE void
-wr_dp_begin(wrstate* wrState, uint32_t width, uint32_t height)
+wr_dp_begin(wrwindowstate* wrWindow, wrstate* wrState, uint32_t width, uint32_t height)
 WR_FUNC;
 
 WR_INLINE void
@@ -92,7 +92,7 @@ wr_dp_end(wrwindowstate* wrWindow, wrstate* wrState)
 WR_FUNC;
 
 WR_INLINE void
-wr_composite(wrwindowstate* wrWindow, wrstate* wrState)
+wr_composite(wrwindowstate* wrWindow)
 WR_FUNC;
 
 WR_INLINE void

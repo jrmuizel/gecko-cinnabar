@@ -40,8 +40,9 @@ WebRenderBridgeParent::RecvCreate(const uint32_t& aWidth,
   if (mWRState) {
     return true;
   }
+  MOZ_ASSERT(mWRWindowState);
   mGLContext->MakeCurrent();
-  mWRState = wr_create(aWidth, aHeight, mPipelineId);
+  mWRState = wr_create(mWRWindowState, aWidth, aHeight, mPipelineId);
   return true;
 }
 
@@ -125,7 +126,7 @@ WebRenderBridgeParent::RecvDPBegin(const uint32_t& aWidth,
     }
   }
   mGLContext->MakeCurrent();
-  wr_dp_begin(mWRState, aWidth, aHeight);
+  wr_dp_begin(mWRWindowState, mWRState, aWidth, aHeight);
   *aOutSuccess = true;
   return true;
 }

@@ -224,6 +224,8 @@ pub struct WrWindowState {
     renderer: Renderer,
     api: webrender_traits::RenderApi,
     _gl_library: GlLibrary,
+    root_pipeline_id: PipelineId,
+    size: Size2D<u32>,
 }
 
 pub struct WrState {
@@ -277,13 +279,15 @@ pub extern fn wr_init_window(root_pipeline_id: u64) -> *mut WrWindowState {
     let state = Box::new(WrWindowState {
         renderer: renderer,
         api: api,
-        _gl_library: library
+        _gl_library: library,
+        root_pipeline_id: pipeline_id,
+        size: Size2D::new(0, 0),
     });
     Box::into_raw(state)
 }
 
 #[no_mangle]
-pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState {
+pub extern fn wr_create(window: &mut WrWindowState, width: u32, height: u32, layers_id: u64) -> *mut WrState {
     let pipeline_id = PipelineId((layers_id >> 32) as u32, layers_id as u32);
 
     let builder = WebRenderFrameBuilder::new(pipeline_id);
@@ -296,16 +300,23 @@ pub extern fn wr_create(width: u32, height: u32, layers_id: u64) -> *mut WrState
         dl_builder: Vec::new(),
     });
 
+    if pipeline_id == window.root_pipeline_id {
+        window.size = Size2D::new(width, height);
+    }
+
     Box::into_raw(state)
 }
 
 #[no_mangle]
-pub extern fn wr_dp_begin(state:&mut WrState, width: u32, height: u32) {
+pub extern fn wr_dp_begin(window: &mut WrWindowState, state: &mut WrState, width: u32, height: u32) {
     state.size = (width, height);
     state.dl_builder.clear();
     state.z_index = 0;
     state.dl_builder.push(webrender_traits::DisplayListBuilder::new());
 
+    if state.pipeline_id == window.root_pipeline_id {
+        window.size = Size2D::new(width, height);
+    }
 }
 
 #[no_mangle]
@@ -350,7 +361,7 @@ pub extern fn wr_pop_dl_builder(window: &mut WrWindowState, state: &mut WrState,
 }
 
 #[no_mangle]
-pub extern fn wr_dp_end(window: &mut WrWindowState, state:&mut WrState) {
+pub extern fn wr_dp_end(window: &mut WrWindowState, state: &mut WrState) {
     let epoch = Epoch(0);
     let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
     let pipeline_id = state.pipeline_id;
@@ -391,16 +402,15 @@ pub extern fn wr_dp_end(window: &mut WrWindowState, state:&mut WrState) {
     gl::clear(gl::COLOR_BUFFER_BIT);
     window.renderer.update();
 
-    window.renderer.render(Size2D::new(width, height));
+    window.renderer.render(window.size);
 }
 
 #[no_mangle]
-pub extern fn wr_composite(window: &mut WrWindowState, state: &mut WrState) {
+pub extern fn wr_composite(window: &mut WrWindowState) {
     window.api.generate_frame();
 
     window.renderer.update();
-    let (width, height) = state.size;
-    window.renderer.render(Size2D::new(width, height));
+    window.renderer.render(window.size);
 }
 
 #[no_mangle]
