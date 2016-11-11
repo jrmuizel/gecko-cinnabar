@@ -22,7 +22,6 @@ WebRenderPaintedLayer::RenderLayer()
   LayerIntRect bounds = visibleRegion.GetBounds();
   LayerIntSize size = bounds.Size();
   if (size.IsEmpty()) {
-      printf("Empty region\n");
       return;
   }
 
