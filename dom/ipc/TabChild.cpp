@@ -2595,9 +2595,6 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
         mPuppetWidget->GetLayerManager(
             nullptr, mTextureFactoryIdentifier.mParentBackend)
                 ->AsShadowForwarder();
-    // As long as we are creating a ClientLayerManager for the puppet widget,
-    // lf must be non-null here.
-    MOZ_ASSERT(lf);
 
     LayerManager* lm = mPuppetWidget->GetLayerManager();
     if (lm->AsWebRenderLayerManager()) {
