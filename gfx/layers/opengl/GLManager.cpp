@@ -57,27 +57,6 @@ private:
   RefPtr<CompositorOGL> mImpl;
 };
 
-class GLManagerGLContext : public GLManager
-{
-public:
-  explicit GLManagerGLContext(GLContext* aGLContext)
-    : mGLContext(aGLContext)
-  {}
-
-  virtual GLContext* gl() const override { return mGLContext; }
-
-  virtual void ActivateProgram(ShaderProgramOGL *aProg) override {}
-  virtual ShaderProgramOGL* GetProgram(GLenum aTarget, gfx::SurfaceFormat aFormat) override { return nullptr; }
-  virtual const gfx::Matrix4x4& GetProjMatrix() const override { return mMatrix; }
-  virtual void BindAndDrawQuad(ShaderProgramOGL *aProg,
-                               const gfx::Rect& aLayerRect,
-                               const gfx::Rect& aTextureRect) override {}
-
-private:
-  RefPtr<GLContext> mGLContext;
-  gfx::Matrix4x4 mMatrix;
-};
-
 /* static */ GLManager*
 GLManager::CreateGLManager(LayerManagerComposite* aManager)
 {
