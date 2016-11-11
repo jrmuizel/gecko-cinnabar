@@ -17,7 +17,6 @@ class GLContext;
 namespace layers {
 
 class LayerManagerComposite;
-class WebRenderLayerManager;
 
 /**
  * Minimal interface to allow widgets to draw using OpenGL. Abstracts
