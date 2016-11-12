@@ -24,7 +24,7 @@ class WebRenderBridgeChild final : public PWebRenderBridgeChild
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WebRenderBridgeChild)
 
 public:
-  WebRenderBridgeChild(const uint64_t& aPipelineId);
+  explicit WebRenderBridgeChild(const uint64_t& aPipelineId);
 protected:
   ~WebRenderBridgeChild() {}
 };
