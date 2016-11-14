@@ -115,7 +115,18 @@ wr_set_async_scroll(wrwindowstate* wrWindow, wrstate* wrState,
                     uint64_t scroll_id, float x, float y)
 WR_FUNC;
 
-#undef WR_FUNC
+// The pointer returned by wr_readback_buffer must be freed by rust, not C.
+// After using the data, it is the responsibility of the caller to free the memory
+// by giving the pointer, out_length, out_capacity to wr_free_buffer.
+WR_INLINE const uint8_t*
+wr_readback_buffer(uint32_t width, uint32_t height, uint32_t* out_length, uint32_t* out_capacity)
+WR_FUNC;
 
+WR_INLINE void
+wr_free_buffer(const uint8_t* pointer, uint32_t length, uint32_t capacity)
+
+WR_FUNC;
+
+#undef WR_FUNC
 }
 #endif
