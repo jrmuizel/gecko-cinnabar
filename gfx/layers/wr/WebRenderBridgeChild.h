@@ -25,8 +25,20 @@ class WebRenderBridgeChild final : public PWebRenderBridgeChild
 
 public:
   explicit WebRenderBridgeChild(const uint64_t& aPipelineId);
+
+  void PushDLBuilder();
+  void PopDLBuilder(const WRRect& aBounds, const WRRect& aOverflow, const Matrix4x4& aMatrix, uint64_t aScrollId);
+  void DPPushRect(const WRRect& aBounds, const WRRect& aClip, float r, float g, float b, float a);
+  void DPPushImage(const WRRect& aBounds, const WRRect& aClip, const MaybeImageMask& aMask, const WRImageKey& aKey);
+  void DPPushIframe(const WRRect& aBounds, const WRRect& aClip, uint64_t aLayersId);
+
+  bool DPBegin(uint32_t aWidth, uint32_t aHeight);
+  void DPEnd();
 protected:
   ~WebRenderBridgeChild() {}
+
+  nsTArray<WebRenderCommand> mCommands;
+  bool mIsInTransaction;
 };
 
 } // namespace layers

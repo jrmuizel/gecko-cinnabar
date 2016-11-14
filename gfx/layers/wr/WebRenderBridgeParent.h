@@ -51,25 +51,10 @@ public:
                        const WRImageFormat& aFormat,
                        const ByteBuffer& aBuffer) override;
   bool RecvDeleteImage(const WRImageKey& aImageKey) override;
-  bool RecvPushDLBuilder() override;
-  bool RecvPopDLBuilder(const WRRect& aBounds,
-                        const WRRect& aOverflow,
-                        const gfx::Matrix4x4& aMatrix,
-                        const uint64_t& aScrollId) override;
   bool RecvDPBegin(const uint32_t& aWidth,
                    const uint32_t& aHeight,
                    bool* aOutSuccess) override;
-  bool RecvDPEnd() override;
-  bool RecvDPPushRect(const WRRect& aBounds,
-                      const WRRect& aClip,
-                      const float& r, const float& g, const float& b, const float& a) override;
-  bool RecvDPPushImage(const WRRect& aBounds,
-                       const WRRect& aClip,
-                       const Maybe<WRImageMask>& aMask,
-                       const WRImageKey& aKey) override;
-  bool RecvDPPushIframe(const WRRect& aBounds,
-                        const WRRect& aClip,
-                        const uint64_t& aLayersId) override;
+  bool RecvDPEnd(InfallibleTArray<WebRenderCommand>&& commands) override;
 
   void ActorDestroy(ActorDestroyReason aWhy) override {}
 
