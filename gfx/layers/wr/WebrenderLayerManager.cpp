@@ -18,7 +18,6 @@
 #include "WebrenderContainerLayer.h"
 #include "WebrenderImageLayer.h"
 #include "WebrenderPaintedLayer.h"
-#include "webrender.h"
 
 namespace mozilla {
 

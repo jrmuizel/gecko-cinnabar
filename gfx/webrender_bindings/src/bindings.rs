@@ -1,16 +1,14 @@
 use std::path::PathBuf;
-use webrender_traits::{PipelineId, AuxiliaryListsBuilder, StackingContextId, DisplayListId};
-use renderer::{Renderer, RendererOptions};
-extern crate webrender_traits;
-
-use euclid::{Size2D, Point2D, Rect, Matrix4D};
-use gleam::gl;
 use std::ffi::CStr;
+use std::{mem, slice};
+use gleam::gl;
+use euclid::{Size2D, Point2D, Rect, Matrix4D};
+use webrender_traits::{PipelineId, AuxiliaryListsBuilder, StackingContextId, DisplayListId};
 use webrender_traits::{ServoScrollRootId};
 use webrender_traits::{Epoch, ColorF};
 use webrender_traits::{ImageFormat, ImageKey, ImageMask, ImageRendering, RendererKind};
-use std::mem;
-use std::slice;
+use webrender::renderer::{Renderer, RendererOptions};
+extern crate webrender_traits;
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -239,7 +237,7 @@ pub struct WrState {
 #[no_mangle]
 pub extern fn wr_init_window(root_pipeline_id: u64) -> *mut WrWindowState {
     // hack to find the directory for the shaders
-    let res_path = concat!(env!("CARGO_MANIFEST_DIR"),"/res");
+    let res_path = concat!(env!("CARGO_MANIFEST_DIR"),"/../webrender/res");
 
     let library = GlLibrary::new();
     gl::load_with(|symbol| library.query(symbol));
@@ -503,7 +501,6 @@ pub extern fn wr_dp_push_image(state:&mut WrState, bounds: WrRect, clip : WrRect
     if state.dl_builder.len() == 0 {
       return;
     }
-    //let (width, height) = state.size;
     let bounds = bounds.to_rect();
     let clip = clip.to_rect();
 

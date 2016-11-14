@@ -9,9 +9,9 @@ include "mozilla/GfxMessageUtils.h";
 
 include protocol PCompositorBridge;
 
-using WRImageFormat from "webrender.h";
-using WRImageKey from "webrender.h";
-using WRRect from "webrender.h";
+using WRImageFormat from "bindings.h";
+using WRImageKey from "bindings.h";
+using WRRect from "bindings.h";
 using MaybeImageMask from "mozilla/layers/WebRenderTypes.h";
 using mozilla::gfx::ByteBuffer from "mozilla/layers/WebRenderTypes.h";
 using mozilla::gfx::Matrix4x4 from "mozilla/gfx/Matrix.h";
