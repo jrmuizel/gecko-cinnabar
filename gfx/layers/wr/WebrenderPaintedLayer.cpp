@@ -26,7 +26,7 @@ WebRenderPaintedLayer::RenderLayer()
   }
 
   WRScrollFrameStackingContextGenerator scrollFrames(this);
-  WRBridge()->SendPushDLBuilder();
+  WRBridge()->PushDLBuilder();
 
   RefPtr<DrawTarget> target = gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, size.ToUnknownSize(), SurfaceFormat::B8G8R8A8);
   target->SetTransform(Matrix().PreTranslate(-bounds.x, -bounds.y));
@@ -67,13 +67,13 @@ WebRenderPaintedLayer::RenderLayer()
       clip = rect;
   }
   if (gfxPrefs::LayersDump()) printf_stderr("PaintedLayer %p using rect:%s clip:%s\n", this, Stringify(rect).c_str(), Stringify(clip).c_str());
-  WRBridge()->SendDPPushImage(toWrRect(rect), toWrRect(clip), Nothing(), key);
+  WRBridge()->DPPushImage(toWrRect(rect), toWrRect(clip), Nothing(), key);
   Manager()->AddImageKeyForDiscard(key);
 
   Rect relBounds = TransformedVisibleBoundsRelativeToParent();
   Matrix4x4 transform;// = GetTransform();
   if (gfxPrefs::LayersDump()) printf_stderr("PaintedLayer %p using %s as bounds/overflow, %s for transform\n", this, Stringify(relBounds).c_str(), Stringify(transform).c_str());
-  WRBridge()->SendPopDLBuilder(toWrRect(relBounds), toWrRect(relBounds), transform, FrameMetrics::NULL_SCROLL_ID);
+  WRBridge()->PopDLBuilder(toWrRect(relBounds), toWrRect(relBounds), transform, FrameMetrics::NULL_SCROLL_ID);
 }
 
 } // namespace layers
