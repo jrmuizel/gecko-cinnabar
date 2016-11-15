@@ -127,6 +127,24 @@ private:
   nsIWidget* MOZ_NON_OWNING_REF mWidget;
   std::vector<WRImageKey> mImageKeys;
 
+  // When we're doing a transaction in order to draw to a non-default
+  // target, the layers transaction is only performed in order to send
+  // a PLayers:Update.  We save the original non-default target to
+  // mShadowTarget, and then perform the transaction using
+  // mDummyTarget as the render target.  After the transaction ends,
+  // we send a message to our remote side to capture the actual pixels
+  // being drawn to the default target, and then copy those pixels
+  // back to mShadowTarget.
+  RefPtr<gfxContext> mShadowTarget;
+
+  /**
+   * Take a snapshot of the parent context, and copy
+   * it into mShadowTarget.
+   */
+  void MakeSnapshotIfRequired(nsTArray<uint8_t>& aSnapshot,
+                              int& aLength,
+                              LayoutDeviceIntSize aSize);
+
   /* PaintedLayer callbacks; valid at the end of a transaciton,
    * while rendering */
   DrawPaintedLayerCallback mPaintedLayerCallback;

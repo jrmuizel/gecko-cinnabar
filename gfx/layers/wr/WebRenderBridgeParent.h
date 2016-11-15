@@ -60,6 +60,10 @@ public:
                    const uint32_t& aHeight,
                    bool* aOutSuccess) override;
   bool RecvDPEnd() override;
+  bool RecvDPMakeSnapshot(const uint32_t& aWidth,
+                          const uint32_t& aHeight,
+                          InfallibleTArray<uint8_t>* aOutImageSnapshot,
+                          int* aOutLength) override;
   bool RecvDPPushRect(const WRRect& aBounds,
                       const WRRect& aClip,
                       const float& r, const float& g, const float& b, const float& a) override;

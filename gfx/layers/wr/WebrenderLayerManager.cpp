@@ -134,6 +134,7 @@ WRScrollFrameStackingContextGenerator::~WRScrollFrameStackingContextGenerator()
 
 WebRenderLayerManager::WebRenderLayerManager(nsIWidget* aWidget)
   : mWidget(aWidget)
+  , mShadowTarget(nullptr)
 {
 }
 
@@ -175,6 +176,7 @@ WebRenderLayerManager::GetMaxTextureSize() const
 bool
 WebRenderLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
 {
+  mShadowTarget = aTarget;
   return BeginTransaction();
 }
 
@@ -216,7 +218,48 @@ WebRenderLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
 
   WebRenderLayer::ToWebRenderLayer(mRoot)->RenderLayer();
 
-  WRBridge()->SendDPEnd();
+  if (!mShadowTarget) {
+    WRBridge()->SendDPEnd();
+  } else {
+    int length;
+    nsTArray<uint8_t> data;
+    WRBridge()->SendDPMakeSnapshot(size.width, size.height, &data, &length);
+    MakeSnapshotIfRequired(data, length, size);
+  }
+}
+
+void
+WebRenderLayerManager::MakeSnapshotIfRequired(nsTArray<uint8_t>& aSnapshot, int& aLength, LayoutDeviceIntSize aSize)
+{
+  if (!mShadowTarget) {
+    return;
+  }
+
+  // TODO: fixup for proper surface format.
+  RefPtr<DataSourceSurface> surf = Factory::CreateWrappingDataSourceSurface(aSnapshot.Elements(),
+                                                                            aSize.width * 4,
+                                                                            IntSize(aSize.width, aSize.height),
+                                                                            SurfaceFormat::B8G8R8A8);
+
+/*
+  static int count = 0;
+  char buff[400];
+  snprintf(buff, 400, "output%d.png", count++);
+  printf_stderr("Writing to :%s\n", buff);
+  gfxUtils::WriteAsPNG(surf, buff);
+  */
+
+  IntRect bounds = ToOutsideIntRect(mShadowTarget->GetClipExtents());
+  Rect dst(bounds.x, bounds.y, bounds.width, bounds.height);
+  Rect src(0, 0, bounds.width, bounds.height);
+
+  // The data we get from webrender is upside down. So flip and translate up so the image is rightside up.
+  SurfacePattern pattern(surf, ExtendMode::CLAMP, Matrix::Scaling(1.0, -1.0).PostTranslate(0.0, bounds.height));
+  DrawTarget* dt = mShadowTarget->GetDrawTarget();
+  MOZ_RELEASE_ASSERT(dt);
+  dt->FillRect(dst, pattern);
+
+  mShadowTarget = nullptr;
 }
 
 void

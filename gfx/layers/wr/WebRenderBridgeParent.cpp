@@ -151,6 +151,37 @@ WebRenderBridgeParent::RecvDPEnd()
 }
 
 bool
+WebRenderBridgeParent::RecvDPMakeSnapshot(const uint32_t& aWidth,
+                                          const uint32_t& aHeight,
+                                          InfallibleTArray<uint8_t>* aOutImageSnapshot,
+                                          int* aOutLength)
+{
+  MOZ_ASSERT(mWRState);
+  mGLContext->MakeCurrent();
+  wr_sync_paint(mWRWindowState, mWRState);
+
+  uint32_t length = 0;
+  uint32_t capacity = 0;
+  const uint8_t* webrenderSnapshot = wr_readback_buffer(aWidth, aHeight, &length, &capacity);
+
+  aOutImageSnapshot->ReplaceElementsAt(0, aOutImageSnapshot->Length(), webrenderSnapshot, length);
+
+  wr_free_buffer(webrenderSnapshot, length, capacity);
+
+  mGLContext->SwapBuffers();
+  if (mWidget) {
+    mozilla::widget::WidgetRenderingContext widgetContext;
+#if defined(XP_MACOSX)
+    widgetContext.mGL = mGLContext;
+#endif
+    mWidget->PostRender(&widgetContext);
+  }
+
+  DeleteOldImages();
+  return true;
+}
+
+bool
 WebRenderBridgeParent::RecvDPPushRect(const WRRect& aBounds,
                                       const WRRect& aClip,
                                       const float& r, const float& g,

@@ -12,6 +12,7 @@ use webrender_traits::{ImageFormat, ImageKey, ImageMask, ImageRendering, Rendere
 use std::mem;
 use std::slice;
 use std::os::raw::c_uchar;
+use std::sync::{Arc, Mutex, Condvar};
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -207,10 +208,15 @@ impl WebRenderFrameBuilder {
 }
 
 struct Notifier {
+    render_thread_notifier: Arc<(Mutex<bool>, Condvar)>,
 }
 
 impl webrender_traits::RenderNotifier for Notifier {
     fn new_frame_ready(&mut self) {
+        let &(ref lock, ref cvar) = &*self.render_thread_notifier;
+        let mut finished = lock.lock().unwrap();
+        *finished = true;
+        cvar.notify_one();
     }
     fn new_scroll_frame_ready(&mut self, _: bool) {
     }
@@ -221,12 +227,27 @@ impl webrender_traits::RenderNotifier for Notifier {
     }
 }
 
+struct FlushNotifier {
+    render_thread_notifier: Arc<(Mutex<bool>, Condvar)>,
+}
+
+impl webrender_traits::FlushNotifier for FlushNotifier {
+    fn  all_messages_flushed(&mut self) {
+        let &(ref lock, ref cvar) = &*self.render_thread_notifier;
+        let mut finished = lock.lock().unwrap();
+        *finished = true;
+        cvar.notify_one();
+    }
+}
+
 pub struct WrWindowState {
     renderer: Renderer,
     api: webrender_traits::RenderApi,
     _gl_library: GlLibrary,
     root_pipeline_id: PipelineId,
     size: Size2D<u32>,
+    paint_notifier: Arc<(Mutex<bool>, Condvar)>,
+    flush_notifier: Arc<(Mutex<bool>, Condvar)>,
 }
 
 pub struct WrState {
@@ -260,7 +281,7 @@ pub extern fn wr_init_window(root_pipeline_id: u64) -> *mut WrWindowState {
         enable_aa: false,
         enable_subpixel_aa: false,
         enable_msaa: false,
-        enable_profiler: true,
+        enable_profiler: false,
         enable_recording: false,
         enable_scrollbars: false,
         precache_shaders: false,
@@ -271,8 +292,17 @@ pub extern fn wr_init_window(root_pipeline_id: u64) -> *mut WrWindowState {
     let (renderer, sender) = Renderer::new(opts);
     let api = sender.create_api();
 
-    let notifier = Box::new(Notifier{});
+    let flush_notification_lock = Arc::new((Mutex::new(false), Condvar::new()));
+    let paint_notification_lock = Arc::new((Mutex::new(false), Condvar::new()));
+
+    let paint_notifier_clone = paint_notification_lock.clone();
+    let flush_notifier_clone = flush_notification_lock.clone();
+
+    let notifier = Box::new(Notifier{render_thread_notifier: paint_notification_lock});
     renderer.set_render_notifier(notifier);
+
+    let flush_notifier = Box::new(FlushNotifier{render_thread_notifier: flush_notification_lock});
+    renderer.set_flush_notifier(flush_notifier);
 
     let pipeline_id = PipelineId((root_pipeline_id >> 32) as u32, root_pipeline_id as u32);
     api.set_root_pipeline(pipeline_id);
@@ -283,6 +313,8 @@ pub extern fn wr_init_window(root_pipeline_id: u64) -> *mut WrWindowState {
         _gl_library: library,
         root_pipeline_id: pipeline_id,
         size: Size2D::new(0, 0),
+        paint_notifier: paint_notifier_clone,
+        flush_notifier: flush_notifier_clone,
     });
     Box::into_raw(state)
 }
@@ -399,6 +431,81 @@ pub extern fn wr_dp_end(window: &mut WrWindowState, state: &mut WrState) {
                                   fb.display_lists,
                                   fb.auxiliary_lists_builder
                                                .finalize());
+
+    gl::clear(gl::COLOR_BUFFER_BIT);
+    window.renderer.update();
+
+    window.renderer.render(window.size);
+}
+
+fn wr_reset_paint_notifier(state:&mut WrWindowState) {
+    let &(ref lock, ref cvar) = &*state.paint_notifier;
+    let mut finished = lock.lock().unwrap();
+    // For the next sync one
+    *finished = false;
+}
+
+fn wr_wait_for_notification(notifier: &Arc<(Mutex<bool>, Condvar)>) {
+    let &(ref lock, ref cvar) = &**notifier;
+    let mut finished = lock.lock().unwrap();
+    while !*finished {
+        finished = cvar.wait(finished).unwrap();
+    }
+    // For the next sync one
+    *finished = false;
+}
+
+// This is the same as wr_dp_end just with some locking.
+#[no_mangle]
+pub extern fn wr_sync_paint(window: &mut WrWindowState, state: &mut WrState) {
+    // Since this is interleaved with other WR paints, we need to ensure
+    // all scheduled paints have already completed so that this paint
+    // will finished by the time this function exits.
+    window.api.flush();
+    wr_wait_for_notification(&window.flush_notifier);
+
+    let epoch = Epoch(0);
+    let root_background_color = ColorF::new(0.3, 0.0, 0.0, 1.0);
+    let pipeline_id = state.pipeline_id;
+    let (width, height) = state.size;
+    let bounds = Rect::new(Point2D::new(0.0, 0.0), Size2D::new(width as f32, height as f32));
+
+    let mut sc =
+        webrender_traits::StackingContext::new(Some(webrender_traits::ScrollLayerId::new(
+                                                    pipeline_id, 0, ServoScrollRootId(0))),
+                                               webrender_traits::ScrollPolicy::Scrollable,
+                                               bounds,
+                                               bounds,
+                                               0,
+                                               &Matrix4D::identity(),
+                                               &Matrix4D::identity(),
+                                               true,
+                                               webrender_traits::MixBlendMode::Normal,
+                                               Vec::new(),
+                                               &mut state.frame_builder.auxiliary_lists_builder);
+
+    assert!(state.dl_builder.len() == 1);
+    let dl = state.dl_builder.pop().unwrap();
+    state.frame_builder.add_display_list(&mut window.api, dl.finalize(), &mut sc);
+    let sc_id = state.frame_builder.add_stacking_context(&mut window.api, pipeline_id, sc);
+
+    let fb = mem::replace(&mut state.frame_builder, WebRenderFrameBuilder::new(pipeline_id));
+
+    // The paint notifier has been setting the condition variable that says painting is finished.
+    // Reset that to false since it isn't used unless we're doing a sync paint.
+    wr_reset_paint_notifier(window);
+    window.api.set_root_stacking_context(sc_id,
+                                  root_background_color,
+                                  epoch,
+                                  pipeline_id,
+                                  Size2D::new(width as f32, height as f32),
+                                  fb.stacking_contexts,
+                                  fb.display_lists,
+                                  fb.auxiliary_lists_builder
+                                               .finalize());
+
+    // Finally ensure that the render thread has finished updating before painting.
+    wr_wait_for_notification(&window.paint_notifier);
 
     gl::clear(gl::COLOR_BUFFER_BIT);
     window.renderer.update();

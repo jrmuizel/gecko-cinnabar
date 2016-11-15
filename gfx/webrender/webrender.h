@@ -92,6 +92,10 @@ wr_dp_end(wrwindowstate* wrWindow, wrstate* wrState)
 WR_FUNC;
 
 WR_INLINE void
+wr_sync_paint(wrwindowstate* wrWindow, wrstate* wrState)
+WR_FUNC;
+
+WR_INLINE void
 wr_composite(wrwindowstate* wrWindow)
 WR_FUNC;
 

@@ -38,6 +38,8 @@ parent:
   sync DPBegin(uint32_t aWidth, uint32_t aHeight)
     returns (bool aOutSuccess);
   sync DPEnd();
+  sync DPMakeSnapshot(uint32_t aWidth, uint32_t aHeight)
+    returns (uint8_t[] aOutImageSnapshot, int aOutLength);
   sync DPPushRect(WRRect aBounds, WRRect aClip, float r, float g, float b, float a);
   sync DPPushImage(WRRect aBounds, WRRect aClip, MaybeImageMask aMask, WRImageKey aKey);
   sync DPPushIframe(WRRect aBounds, WRRect aClip, uint64_t aLayersId);
