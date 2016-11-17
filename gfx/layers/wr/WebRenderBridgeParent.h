@@ -23,6 +23,8 @@ class CompositorWidget;
 
 namespace layers {
 
+class Compositor;
+
 class WebRenderBridgeParent final : public PWebRenderBridgeParent
 {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(WebRenderBridgeParent)
@@ -31,10 +33,12 @@ public:
   WebRenderBridgeParent(const uint64_t& aPipelineId,
                         widget::CompositorWidget* aWidget,
                         gl::GLContext* aGlContext,
-                        wrwindowstate* aWrWindowState);
+                        wrwindowstate* aWrWindowState,
+                        layers::Compositor* aCompositor);
   uint64_t PipelineId() { return mPipelineId; }
   gl::GLContext* GLContext() { return mGLContext.get(); }
   wrwindowstate* WindowState() { return mWRWindowState; }
+  layers::Compositor* Compositor() { return mCompositor.get(); }
 
   bool RecvCreate(const uint32_t& aWidth,
                   const uint32_t& aHeight) override;
@@ -83,6 +87,7 @@ private:
   wrstate* mWRState;
   RefPtr<gl::GLContext> mGLContext;
   wrwindowstate* mWRWindowState;
+  RefPtr<layers::Compositor> mCompositor;
   std::vector<WRImageKey> mKeysToDelete;
 };
 

@@ -203,6 +203,7 @@ EXPORTS.mozilla.layers += [
     'TransactionIdAllocator.h',
     'wr/WebRenderBridgeChild.h',
     'wr/WebRenderBridgeParent.h',
+    'wr/WebRenderCompositorOGL.h',
     'wr/WebrenderLayerManager.h',
     'wr/WebRenderTypes.h',
 ]
@@ -378,6 +379,7 @@ UNIFIED_SOURCES += [
     'wr/WebRenderBridgeParent.cpp',
     'wr/WebrenderCanvasLayer.cpp',
     'wr/WebrenderColorLayer.cpp',
+    'wr/WebRenderCompositorOGL.cpp',
     'wr/WebrenderContainerLayer.cpp',
     'wr/WebrenderImageLayer.cpp',
     'wr/WebrenderLayerManager.cpp',
