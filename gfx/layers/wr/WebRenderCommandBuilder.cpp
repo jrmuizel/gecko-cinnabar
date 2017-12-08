@@ -569,6 +569,10 @@ void PaintBlobGroup(WebRenderCommandBuilder* aCommandBuilder,
                     wr::IpcResourceUpdateQueue& aResources,
                     nsDisplayList* aList,
                     nsDisplayItem* aRootItem) {
+  if (!aList->GetBottom()) {
+    return;
+  }
+
   Grouper g;
   g.mAppUnitsPerDevPixel = aRootItem->Frame()->PresContext()->AppUnitsPerDevPixel();
   printf("PaintBlobGroup\n");
