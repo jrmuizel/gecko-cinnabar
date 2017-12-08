@@ -621,6 +621,20 @@ DrawTargetRecording::EnsurePathStored(const Path *aPath)
 }
 
 void
+DrawTargetRecording::FlushItem(IntRect aBounds)
+{
+  mRecorder->FlushItem(aBounds);
+  // reinitialize the recorder with us a the drawtarget (flush clears this)
+  mRecorder->RecordEvent(RecordedDrawTargetCreation(this,
+                                                    mFinalDT->GetBackendType(),
+                                                    mSize,
+                                                    mFinalDT->GetFormat(),
+                                                    false, nullptr));
+  // Add the current transform to the new recording
+  mRecorder->RecordEvent(RecordedSetTransform(this, DrawTarget::GetTransform()));
+}
+
+void
 DrawTargetRecording::EnsurePatternDependenciesStored(const Pattern &aPattern)
 {
   switch (aPattern.GetType()) {

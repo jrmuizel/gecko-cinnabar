@@ -1401,6 +1401,8 @@ public:
     return mPermitSubpixelAA;
   }
 
+  virtual void FlushItem(IntRect aBounds) {}
+
   /**
    * Ensures that no snapshot is still pointing to this DrawTarget's surface data.
    *

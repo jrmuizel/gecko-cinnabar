@@ -96,16 +96,34 @@ DrawEventRecorderMemory::Flush()
 void
 DrawEventRecorderMemory::FlushItem(IntRect aRect)
 {
+  printf_stderr("FlushItem %d %d %d %d\n", aRect.x, aRect.y, aRect.XMost(), aRect.YMost());
+  MOZ_RELEASE_ASSERT(!aRect.IsEmpty());
+  // Detatching our existing resources will add some
+  // destruction events to our stream so we need to do that
+  // first.
   DetatchResources();
+
+  size_t end, extra;
+  end = mOutputStream.mLength;
   WriteElement(mIndex, mOutputStream.mLength);
+
+  // write out the fonts into the extra data section
   mSerializeCallback(mOutputStream, mUnscaledFonts);
+  extra = mOutputStream.mLength;
   WriteElement(mIndex, mOutputStream.mLength);
+
+  WriteElement(mIndex, aRect.x);
+  WriteElement(mIndex, aRect.y);
+  WriteElement(mIndex, aRect.XMost());
+  WriteElement(mIndex, aRect.YMost());
   ClearResources();
+  WriteHeader(mOutputStream);
 }
 
 void
 DrawEventRecorderMemory::Finish()
 {
+  printf("FINISH\n");
   size_t indexOffset = mOutputStream.mLength;
   // write out the index
   mOutputStream.write(mIndex.mData, mIndex.mLength);

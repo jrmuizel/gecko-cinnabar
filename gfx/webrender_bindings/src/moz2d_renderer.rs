@@ -54,6 +54,17 @@ fn convert_from_bytes<T>(slice: &[u8]) -> T {
     ret
 }
 
+use std::slice;
+
+fn convert_to_bytes<T>(x: &T) -> &[u8] {
+    unsafe {
+        let ip: *const T = x;
+        let bp: *const u8 = ip as * const _;
+        slice::from_raw_parts(bp, mem::size_of::<T>())
+    }
+}
+
+
 struct BufReader<'a>
 {
     buf: &'a[u8],
@@ -78,6 +89,163 @@ impl<'a> BufReader<'a> {
     fn read_usize(&mut self) -> usize {
         self.read()
     }
+
+    fn read_entry(&mut self) -> (usize, usize, Box2d) {
+        let end = self.read();
+        let extra_end = self.read();
+        let bounds = self.read();
+        (end, extra_end, bounds)
+    }
+}
+
+// This is used for writing new blob images.
+// In our case this is the result of merging an old one and a new one
+struct BufWriter
+{
+    buf: Vec<u8>,
+    index: Vec<u8>
+}
+
+
+impl BufWriter {
+    fn new() -> BufWriter {
+        BufWriter{ buf: Vec::new(), index: Vec::new() }
+    }
+
+    fn new_entry(&mut self, extra_size: usize, bounds: Box2d, data: &[u8]) {
+        self.buf.extend_from_slice(data);
+        self.index.extend_from_slice(convert_to_bytes(&(self.buf.len() - extra_size)));
+        self.index.extend_from_slice(convert_to_bytes(&self.buf.len()));
+        // XXX: we can agregate these writes
+        self.index.extend_from_slice(convert_to_bytes(&bounds.x1));
+        self.index.extend_from_slice(convert_to_bytes(&bounds.y1));
+        self.index.extend_from_slice(convert_to_bytes(&bounds.x2));
+        self.index.extend_from_slice(convert_to_bytes(&bounds.y2));
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        // append the index to the end of the buffer
+        // and then append the offset to the begining of the index
+        let index_begin = self.buf.len();
+        self.buf.extend_from_slice(&self.index);
+        self.buf.extend_from_slice(convert_to_bytes(&index_begin));
+        self.buf
+    }
+}
+
+
+// XXX: Do we want to allow negative values here or clamp to the image bounds?
+#[derive(Debug, Eq, PartialEq)]
+struct Box2d {
+    x1: u32,
+    y1: u32,
+    x2: u32,
+    y2: u32
+}
+
+impl Box2d {
+    fn contained_by(&self, other: &Box2d) -> bool {
+        self.x1 >= other.x1 &&
+        self.x2 <= other.x2 &&
+        self.y1 >= other.y1 &&
+        self.y2 <= other.y2
+    }
+    fn intersects(&self, other: &Box2d) -> bool {
+        self.x1 < other.x2 &&
+        self.x2 > other.x1 &&
+        self.y1 < other.y2 &&
+        self.y2 > other.y1
+    }
+    fn overlaps(&self, other: &Box2d) -> bool {
+        self.intersects(other) && !self.contained_by(other)
+    }
+}
+
+fn create_index_reader(buf: &[u8]) -> BufReader {
+    // the offset of the index is at the end of the buffer
+    let index_offset_pos = buf.len()-mem::size_of::<usize>();
+    let index_offset = to_usize(&buf[index_offset_pos..]);
+
+    BufReader::new(&buf[index_offset..index_offset_pos])
+}
+
+/* The invarients that we need for this to work properly are that
+ * - all new content is contained in the dirty_rect
+ * - all content that overlaps with the dirty_rect is included in the new index
+ *   this is needed so that we can properly synchronize our buffers
+ */
+fn merge_blob_images(old: &[u8], new: &[u8], dirty_rect: DeviceUintRect, ) -> Arc<Vec<u8>> {
+
+    let dirty_rect = Box2d{ x1: dirty_rect.min_x(), y1: dirty_rect.min_y(), x2: dirty_rect.max_x(), y2: dirty_rect.max_y() };
+
+    let mut result = BufWriter::new();
+
+    let mut index = create_index_reader(old);
+    let mut new_index = create_index_reader(new);
+
+    // loop over both new and old entries merging them
+    // both new and old must have the same number of entries that
+    // overlap but are not contained by the dirty rect
+    let mut begin = 0;
+    let mut new_begin = 0;
+    println!("dirty rect: {:?}", dirty_rect);
+    while index.pos < index.buf.len() {
+        let (extra, end, bounds) = index.read_entry();
+        println!("bounds: {} {} {:?}", extra, end, bounds);
+        if bounds.contained_by(&dirty_rect) {
+            println!("skip");
+            // skip these items as they will be replaced with items from new
+        } else if bounds.overlaps(&dirty_rect) {
+            // this is a sync point between the old and new lists
+            // find matching rect in new list.
+            while new_index.pos < new_index.buf.len() {
+                let (new_extra, new_end, new_bounds) = new_index.read_entry();
+                println!("new bounds: {} {} {:?}", new_extra, new_end, new_bounds);
+
+                if new_bounds.contained_by(&dirty_rect) {
+                    println!("new item");
+                    
+                    result.new_entry(new_end - new_extra, new_bounds, &new[new_begin..new_end]);
+                } else if new_bounds.overlaps(&dirty_rect) {
+                    println!("sync item");
+                    assert!(new_bounds == bounds, "new_bounds {:?} old_bounds {:?}", new_bounds, bounds);
+                    // XXX: in theory we don't even need to record these items
+                    //assert!(new[new_begin..new_end] == old[begin..end], "{:?} {:?}", new_begin..new_end, begin..end);
+                    result.new_entry(new_end - new_extra, new_bounds, &new[new_begin..new_end]);
+                    new_begin = new_end;
+                    break;
+                } else {
+                    panic!("new bounds outside of dirty rect {:?} {:?}", new_bounds, dirty_rect);
+                }
+                new_begin = new_end;
+            }
+        } else {
+            result.new_entry(end - extra, bounds, &old[begin..end]);
+        }
+        begin = end;
+    }
+    // include any remaining old items
+    while new_index.pos < new_index.buf.len() {
+        let (new_extra, new_end, new_bounds) = new_index.read_entry();
+        println!("new bounds: {} {} {:?}", new_extra, new_end, new_bounds);
+        if new_bounds.contained_by(&dirty_rect) {
+            result.new_entry(new_end - new_extra, new_bounds, &new[new_begin..new_end]);
+        } else {
+            panic!("only fully contained items should be left: {:?} vs {:?}", new_bounds, dirty_rect);
+        }
+        new_begin = new_end;
+    }
+
+    let k = result.finish();
+    {
+        let mut index = create_index_reader(&k);
+        while index.pos < index.buf.len() {
+            let (extra, end, bounds) = index.read_entry();
+            println!("result bounds: {} {} {:?}", extra, end, bounds);
+        }
+    }
+
+    Arc::new(k)
 }
 
 impl BlobImageRenderer for Moz2dImageRenderer {
@@ -85,9 +253,14 @@ impl BlobImageRenderer for Moz2dImageRenderer {
         self.blob_commands.insert(key, (Arc::new(data), tiling));
     }
 
-    fn update(&mut self, key: ImageKey, data: BlobImageData, _dirty_rect: Option<DeviceUintRect>) {
-        let entry = self.blob_commands.get_mut(&key).unwrap();
-        entry.0 = Arc::new(data);
+    fn update(&mut self, key: ImageKey, data: BlobImageData, dirty_rect: Option<DeviceUintRect>) {
+        match self.blob_commands.entry(key) {
+            Entry::Occupied(mut e) => {
+                let old_data = &mut e.get_mut().0;
+                *old_data = merge_blob_images(&old_data, &data, dirty_rect.unwrap());
+            }
+            _ => { panic!("missing image key"); }
+        }
     }
 
     fn delete(&mut self, key: ImageKey) {
@@ -99,7 +272,7 @@ impl BlobImageRenderer for Moz2dImageRenderer {
                request: BlobImageRequest,
                descriptor: &BlobImageDescriptor,
                _dirty_rect: Option<DeviceUintRect>) {
-        debug_assert!(!self.rendered_images.contains_key(&request));
+        debug_assert!(!self.rendered_images.contains_key(&request), "{:?}", request);
         // TODO: implement tiling.
 
         // Add None in the map of rendered images. This makes it possible to differentiate
@@ -149,14 +322,10 @@ impl BlobImageRenderer for Moz2dImageRenderer {
                 resources.get_font_data(key);
             }
         }
-        let index_offset_pos = commands.len()-mem::size_of::<usize>();
-
-        let index_offset = to_usize(&commands[index_offset_pos..]);
         {
-            let mut index = BufReader::new(&commands[index_offset..index_offset_pos]);
+            let mut index = create_index_reader(&commands);
             while index.pos < index.buf.len() {
-                let end = index.read_usize();
-                let extra_end = index.read_usize();
+                let (end, extra_end, _)  = index.read_entry();
                 process_fonts(BufReader::new(&commands[end..extra_end]), resources);
             }
         }

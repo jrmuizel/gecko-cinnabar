@@ -209,6 +209,20 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
       pos += sizeof(ret);
       return ret;
     }
+    int ReadInt() {
+      int ret;
+      MOZ_RELEASE_ASSERT(pos + sizeof(ret) <= len);
+      memcpy(&ret, buf + pos, sizeof(ret));
+      pos += sizeof(ret);
+      return ret;
+    }
+
+    void SkipBounds() {
+      MOZ_RELEASE_ASSERT(pos + sizeof(int) * 4 <= len);
+      //pos += sizeof(int) * 4;
+      printf_stderr("bounds %d %d %d %d\n", ReadInt(), ReadInt(), ReadInt(), ReadInt());
+    }
+
   };
   //XXX: Make safe
   size_t indexOffset = *(size_t*)(aBlob.end().get()-sizeof(size_t));
@@ -219,6 +233,8 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   while (reader.pos < reader.len) {
     size_t end = reader.ReadSize();
     size_t extra_end = reader.ReadSize();
+    printf_stderr("read: %lld %lld\n", end, extra_end);
+    reader.SkipBounds();
 
     gfx::InlineTranslator translator(dt);
 

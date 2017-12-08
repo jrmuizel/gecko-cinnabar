@@ -30,6 +30,7 @@ public:
   virtual ~DrawEventRecorderPrivate() { }
   virtual void Finish() { ClearResources(); }
   virtual void FlushItem(IntRect) { }
+
   void DetatchResources() {
     // The iteration is a bit awkward here because our iterator will
     // be invalidated by the removal
@@ -46,6 +47,8 @@ public:
   }
 
   void ClearResources() {
+    DetatchResources();
+
     mUnscaledFonts.clear();
     mStoredObjects.clear();
     mStoredFontData.clear();
