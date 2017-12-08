@@ -287,7 +287,7 @@ struct DIGroup {
 
     LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(mGroupBounds, aGrouper->mAppUnitsPerDevPixel);
     IntSize size = mGroupBounds.Size().ToNearestPixels(aGrouper->mAppUnitsPerDevPixel);
-    // we only care about invalidations inside our drawing area
+    // We only care about invalidations inside our drawing area.
     mInvalidRect = mInvalidRect.Intersect(IntRect(IntPoint(0, 0), size));
 
     if (mInvalidRect.IsEmpty()) {
@@ -296,14 +296,17 @@ struct DIGroup {
     }
 
     gfx::SurfaceFormat format = gfx::SurfaceFormat::B8G8R8A8;
-    RefPtr<gfx::DrawEventRecorderMemory> recorder = MakeAndAddRef<gfx::DrawEventRecorderMemory>([&] (MemStream &aStream, std::vector<RefPtr<UnscaledFont>> &aUnscaledFonts) {
-												size_t count = aUnscaledFonts.size();
-												aStream.write((const char*)&count, sizeof(count));
-												for (auto unscaled : aUnscaledFonts) {
-												  wr::FontKey key = aWrManager->WrBridge()->GetFontKeyForUnscaledFont(unscaled);
-												  aStream.write((const char*)&key, sizeof(key));
-												}
-												});
+    RefPtr<gfx::DrawEventRecorderMemory> recorder =
+      MakeAndAddRef<gfx::DrawEventRecorderMemory>(
+        [&](MemStream &aStream, std::vector<RefPtr<UnscaledFont>> &aUnscaledFonts) {
+          size_t count = aUnscaledFonts.size();
+          aStream.write((const char*)&count, sizeof(count));
+          for (auto unscaled : aUnscaledFonts) {
+            wr::FontKey key = aWrManager->WrBridge()->GetFontKeyForUnscaledFont(unscaled);
+            aStream.write((const char*)&key, sizeof(key));
+          }
+        });
+
     RefPtr<gfx::DrawTarget> dummyDt =
       gfx::Factory::CreateDrawTarget(gfx::BackendType::SKIA, gfx::IntSize(1, 1), format);
 
@@ -315,7 +318,7 @@ struct DIGroup {
 
     printf("mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
     printf("Currentitem %p %s\n", aGrouper->mNextItem, aGrouper->mNextItem->Name());
-    // Chase the invalidator and paint any invalid itema
+    // Chase the invalidator and paint any invalid items.
     while (nsDisplayItem* item = aGrouper->GetNext(this, context, recorder)) {
       IntRect bounds = ItemBounds(item);
       printf("Trying %s %d %d %d %d\n", item->Name(), bounds.x, bounds.y, bounds.width, bounds.height);
@@ -342,9 +345,10 @@ struct DIGroup {
         DisplayItemClip currentClip = item->GetClip();
 
         context->Save();
-        int aCommonClipCount = 0; // XXX: what are we doing here
-        if (currentClip.HasClip())
-          currentClip.ApplyTo(context, aGrouper->mAppUnitsPerDevPixel, aCommonClipCount);
+        int commonClipCount = 0; // Don't share any clips, always apply all clips.
+        if (currentClip.HasClip()) {
+          currentClip.ApplyTo(context, aGrouper->mAppUnitsPerDevPixel, commonClipCount);
+        }
         context->NewPath();
         printf("painting %s\n", item->Name());
         item->Paint(aGrouper->mDisplayListBuilder, context);
@@ -381,21 +385,13 @@ struct DIGroup {
       }
     }
     mInvalidRect.SetEmpty();
-    wr::LayoutRect dest;
-    dest.origin.x = bounds.x;
-    dest.origin.y = bounds.y;
-    dest.size.width = bounds.width;
-    dest.size.height = bounds.height;
+    wr::LayoutRect dest = wr::ToLayoutRect(bounds);
     printf("PushImage: %f %f %f %f\n", dest.origin.x, dest.origin.y, dest.size.width, dest.size.height);
     gfx::SamplingFilter sampleFilter = gfx::SamplingFilter::LINEAR; //nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
     bool backfaceHidden = false;
-    aBuilder.PushImage(dest,
-                         dest,
-                     !backfaceHidden,
-                     wr::ToImageRendering(sampleFilter),
-                     mKey.value());
-
-
+    aBuilder.PushImage(dest, dest, !backfaceHidden,
+                       wr::ToImageRendering(sampleFilter),
+                       mKey.value());
   }
 
 };
