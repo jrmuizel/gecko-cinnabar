@@ -233,7 +233,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   while (reader.pos < reader.len) {
     size_t end = reader.ReadSize();
     size_t extra_end = reader.ReadSize();
-    printf_stderr("read: %lld %lld\n", end, extra_end);
+    printf_stderr("read: %zu %zu\n", end, extra_end);
     reader.SkipBounds();
 
     gfx::InlineTranslator translator(dt);
