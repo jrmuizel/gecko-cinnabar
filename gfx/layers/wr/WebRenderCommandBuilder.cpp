@@ -446,21 +446,29 @@ void Grouper::PopParent(DIGroup *aGroup, nsDisplayItem *aItem, gfxContext *ctx, 
 
 
 inline nsDisplayItem*
-Grouper::GetNext(DIGroup *aGroup, gfxContext* ctx, gfx::DrawEventRecorderMemory* aRecorder) {
-  nsDisplayItem* ret = mNextItem;
-  printf("GetNext: %p\n", ret);
-  if (mNextItem == nullptr) {
-    if (mItemStack.size()) {
-      nsDisplayItem *item = mItemStack.back();
-      mItemStack.pop_back();
-      Grouper::PopParent(aGroup, item, ctx, aRecorder);
-      mNextItem = item->GetAbove();
+Grouper::GetNext(DIGroup* aGroup, gfxContext* ctx, gfx::DrawEventRecorderMemory* aRecorder) {
+  for (;;) {
+    if (mNextItem) {
+      nsDisplayItem* nextItem = mNextItem;
+      mNextItem = mNextItem->GetAbove();
+      printf("GetNext returning non-null %p\n", nextItem);
+      return nextItem;
     }
-  } else {
-    mNextItem = mNextItem->GetAbove();
+
+    // mNextItem is null, which means that the previous item was the last item
+    // in its nsDisplayList. Go up the parent stack.
+    if (mItemStack.size()) {
+      nsDisplayItem* parent = mItemStack.back();
+      mItemStack.pop_back();
+      Grouper::PopParent(aGroup, parent, ctx, aRecorder);
+      mNextItem = parent->GetAbove();
+      continue; // "Recurse."
+    }
+
+    // There's no parent, so we have arrived at the end of the group.
+    printf("GetNext returning nullptr\n");
+    return nullptr;
   }
-  printf("GetNext: %p\n", ret);
-  return ret;
 }
 
 
