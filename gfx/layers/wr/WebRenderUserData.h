@@ -29,6 +29,11 @@ class WebRenderCanvasRendererAsync;
 class WebRenderImageData;
 class WebRenderFallbackData;
 class WebRenderLayerManager;
+class WebRenderGroupData;
+class WebRenderGroupSplitData;
+
+struct GroupSplitUserData;
+struct DIGroup;
 
 class WebRenderUserData
 {
@@ -42,12 +47,16 @@ public:
   virtual WebRenderImageData* AsImageData() { return nullptr; }
   virtual WebRenderFallbackData* AsFallbackData() { return nullptr; }
   virtual WebRenderCanvasData* AsCanvasData() { return nullptr; }
+  virtual WebRenderGroupData* AsGroupData() { return nullptr; }
+  virtual WebRenderGroupSplitData* AsGroupSplitData() { return nullptr; }
 
   enum class UserDataType {
     eImage,
     eFallback,
     eAnimation,
     eCanvas,
+    eGroup,
+    eGroupSplit
   };
 
   virtual UserDataType GetType() = 0;
@@ -170,6 +179,7 @@ public:
 protected:
   UniquePtr<WebRenderCanvasRendererAsync> mCanvasRenderer;
 };
+
 
 } // namespace layers
 } // namespace mozilla

@@ -166,8 +166,8 @@ public:
     return nullptr;
   }
 
-private:
   WebRenderLayerManager* mManager;
+private:
   ScrollingLayersHelper mScrollingHelper;
 
   // These fields are used to save a copy of the display list for

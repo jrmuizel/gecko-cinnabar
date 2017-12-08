@@ -4927,7 +4927,7 @@ nsTextFrame::CharacterDataChanged(CharacterDataChangeInfo* aInfo)
   return NS_OK;
 }
 
-class nsDisplayText : public nsCharClipDisplayItem {
+class nsDisplayText final : public nsCharClipDisplayItem {
 public:
   nsDisplayText(nsDisplayListBuilder* aBuilder, nsTextFrame* aFrame,
                 const Maybe<bool>& aIsSelected);

@@ -5,7 +5,7 @@
 use api::{AddFont, BlobImageData, BlobImageResources, ResourceUpdate, ResourceUpdates};
 use api::{BlobImageDescriptor, BlobImageError, BlobImageRenderer, BlobImageRequest};
 use api::{ColorF, FontRenderMode};
-use api::{DevicePoint, DeviceUintRect, DeviceUintSize};
+use api::{DevicePoint, DeviceUintRect, DeviceUintPoint, DeviceUintSize};
 use api::{Epoch, FontInstanceKey, FontKey, FontTemplate};
 use api::{ExternalImageData, ExternalImageType};
 use api::{FontInstanceOptions, FontInstancePlatformOptions, FontVariation};
@@ -442,6 +442,11 @@ impl ResourceCache {
             ),
         };
 
+        if let Some(dirty_rect) = dirty_rect {
+            let bottom_right = dirty_rect.bottom_right();
+            assert!(bottom_right.x <= descriptor.width && bottom_right.y <= descriptor.height);
+        }
+
         let mut tiling = image.tiling;
         if tiling.is_none() && Self::should_tile(max_texture_size, &descriptor, &data) {
             tiling = Some(DEFAULT_TILE_SIZE);
@@ -802,7 +807,21 @@ impl ResourceCache {
                         .unwrap()
                         .resolve(request.into())
                     {
-                        Ok(image) => ImageData::new(image.data),
+                        Ok(image) => {
+                            let stride = image_template.descriptor.compute_stride();
+                            let img_size = DeviceUintSize::new(image_template.descriptor.width,
+                                                               image_template.descriptor.height);
+                            let rect = image_template.dirty_rect.unwrap_or(
+                                DeviceUintRect::new(DeviceUintPoint::new(0, 0),
+                                                        img_size));
+                            let size = image_template.descriptor.offset +
+                                rect.origin.y * stride +
+                                rect.size.height * stride;
+                            println!("size {:?} len {:?} offset {:?}, stride {:?} dirty_rect {:?} rect {:?} img_size {:?}", size, image.data.len(), image_template.descriptor.offset, stride, image_template.dirty_rect, rect, img_size);
+
+                            assert!(image.data.len() >= size as usize);
+                            ImageData::new(image.data)
+                        },
                         // TODO(nical): I think that we should handle these somewhat gracefully,
                         // at least in the out-of-memory scenario.
                         Err(BlobImageError::Oom) => {

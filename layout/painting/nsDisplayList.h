@@ -6181,6 +6181,7 @@ public:
       mFrame->Combines3DTransformWithAncestors();
   }
 
+  StoreList mStoredList;
 private:
   void ComputeBounds(nsDisplayListBuilder* aBuilder);
   void SetReferenceFrameToAncestor(nsDisplayListBuilder* aBuilder);
@@ -6192,7 +6193,6 @@ private:
                                                        uint32_t aFlags,
                                                        const nsRect* aBoundsOverride);
 
-  StoreList mStoredList;
   mutable Matrix4x4 mTransform;
   // Accumulated transform of ancestors on the preserves-3d chain.
   Matrix4x4 mTransformPreserves3D;
