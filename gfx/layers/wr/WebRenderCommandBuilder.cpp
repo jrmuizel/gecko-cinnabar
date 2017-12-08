@@ -196,7 +196,7 @@ struct DIGroup {
     }*/
 
     printf("pre mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
-    if (!aData->mGeometry) {
+    if (true || !aData->mGeometry) {
       // This item is being added for the first time, invalidate its entire area.
       UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
       combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
