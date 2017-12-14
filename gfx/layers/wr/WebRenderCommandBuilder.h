@@ -38,6 +38,7 @@ public:
   explicit WebRenderCommandBuilder(WebRenderLayerManager* aManager)
   : mManager(aManager)
   , mLastAsr(nullptr)
+  , mDoGrouping(false)
   {}
 
   void Destroy();
@@ -188,6 +189,10 @@ private:
 
   // Store of WebRenderCanvasData objects for use in empty transactions
   CanvasDataSet mLastCanvasDatas;
+
+  // Whether consecutive inactive display items should be grouped into one
+  // blob image.
+  bool mDoGrouping;
 };
 
 } // namespace layers

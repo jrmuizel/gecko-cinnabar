@@ -829,14 +829,29 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
     }
 
     mScrollingHelper.BeginItem(item, aSc);
-    // Note: this call to CreateWebRenderCommands can recurse back into
-    // this function if the |item| is a wrapper for a sublist.
-    if (itemType == DisplayItemType::TYPE_SVG_WRAPPER) {
-      PaintBlobGroup(this, aDisplayListBuilder, aBuilder, aResources, item->GetChildren(), item);
-    } else if (itemType != DisplayItemType::TYPE_LAYER_EVENT_REGIONS &&
-        !item->CreateWebRenderCommands(aBuilder, aResources, aSc, mManager,
-                                       aDisplayListBuilder)) {
-      PushItemAsImage(item, aBuilder, aResources, aSc, aDisplayListBuilder);
+
+    if (itemType != DisplayItemType::TYPE_LAYER_EVENT_REGIONS) {
+      AutoRestore<bool> restoreDoGrouping(mDoGrouping);
+      if (itemType == DisplayItemType::TYPE_SVG_WRAPPER) {
+        // Inside an <svg>, all display items that are not LAYER_ACTIVE wrapper
+        // display items (like animated transforms / opacity) share the same
+        // animated geometry root, so we can combine subsequent items of that
+        // type into the same image.
+        mDoGrouping = true;
+      }/* else if (itemType == DisplayItemType::TYPE_FOREIGN_OBJECT) {
+        // We do not want to apply grouping inside <foreignObject>.
+        // TODO: TYPE_FOREIGN_OBJECT does not exist yet, make it exist
+        mDoGrouping = false;
+      }*/
+
+      // Note: this call to CreateWebRenderCommands can recurse back into
+      // this function if the |item| is a wrapper for a sublist.
+      bool createdWRCommands =
+        item->CreateWebRenderCommands(aBuilder, aResources, aSc, mManager,
+                                       aDisplayListBuilder);
+      if (!createdWRCommands) {
+        PushItemAsImage(item, aBuilder, aResources, aSc, aDisplayListBuilder);
+      }
     }
 
     if (apzEnabled) {
