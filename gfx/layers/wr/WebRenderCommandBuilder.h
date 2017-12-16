@@ -85,10 +85,19 @@ public:
                        nsDisplayListBuilder* aDisplayListBuilder);
 
   void CreateWebRenderCommandsFromDisplayList(nsDisplayList* aDisplayList,
+                                              nsDisplayItem* aOuterItem,
                                               nsDisplayListBuilder* aDisplayListBuilder,
                                               const StackingContextHelper& aSc,
                                               wr::DisplayListBuilder& aBuilder,
                                               wr::IpcResourceUpdateQueue& aResources);
+
+  // aWrappingItem has to be non-null.
+  void DoGroupingForDisplayList(nsDisplayList* aDisplayList,
+                                nsDisplayItem* aWrappingItem,
+                                nsDisplayListBuilder* aDisplayListBuilder,
+                                const StackingContextHelper& aSc,
+                                wr::DisplayListBuilder& aBuilder,
+                                wr::IpcResourceUpdateQueue& aResources);
 
   already_AddRefed<WebRenderFallbackData> GenerateFallbackData(nsDisplayItem* aItem,
                                                                wr::DisplayListBuilder& aBuilder,

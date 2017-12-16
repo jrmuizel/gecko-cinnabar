@@ -6392,6 +6392,7 @@ nsDisplayWrapList::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBui
                                            nsDisplayListBuilder* aDisplayListBuilder)
 {
   aManager->CommandBuilder().CreateWebRenderCommandsFromDisplayList(GetChildren(),
+                                                                    this,
                                                                     aDisplayListBuilder,
                                                                     aSc,
                                                                     aBuilder,
@@ -6770,6 +6771,7 @@ nsDisplayOpacity::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aBuil
                            opacityForSC);
 
   aManager->CommandBuilder().CreateWebRenderCommandsFromDisplayList(&mList,
+                                                                    this,
                                                                     aDisplayListBuilder,
                                                                     sc,
                                                                     aBuilder,
@@ -10064,7 +10066,11 @@ nsDisplaySVGWrapper::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aB
                                              mozilla::layers::WebRenderLayerManager* aManager,
                                              nsDisplayListBuilder* aDisplayListBuilder)
 {
-  return false;
+  return nsDisplayWrapList::CreateWebRenderCommands(aBuilder,
+                                             aResources,
+                                             aSc,
+                                             aManager,
+                                             aDisplayListBuilder);
 }
 
 namespace mozilla {
