@@ -204,7 +204,7 @@ struct DIGroup {
     }*/
 
     printf("pre mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
-    if (true || !aData->mGeometry) {
+    if (!aData->mGeometry) {
       // This item is being added for the first time, invalidate its entire area.
       UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
       combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
@@ -301,7 +301,8 @@ struct DIGroup {
     mInvalidRect = mInvalidRect.Intersect(IntRect(IntPoint(0, 0), size));
 
     if (mInvalidRect.IsEmpty()) {
-      printf("Not painting group because it's empty\n");
+      printf("Not repainting group because it's empty\n");
+      PushImage(aBuilder, bounds);
       return;
     }
 
@@ -332,6 +333,7 @@ struct DIGroup {
     PaintItemRange(aGrouper, aStartItem, aEndItem, context, recorder);
 
     if (!mKey) {
+      context->SetMatrix(Matrix());
       dt->FillRect(gfx::Rect(0, 0, size.width, size.height), gfx::ColorPattern(gfx::Color(0., 1., 0., 0.5)));
       dt->FlushItem(IntRect(IntPoint(0, 0), size));
     }
@@ -358,6 +360,10 @@ struct DIGroup {
       }
     }
     mInvalidRect.SetEmpty();
+    PushImage(aBuilder, bounds);
+  }
+
+  void PushImage(wr::DisplayListBuilder& aBuilder, const LayoutDeviceRect& bounds) {
     wr::LayoutRect dest = wr::ToLayoutRect(bounds);
     printf("PushImage: %f %f %f %f\n", dest.origin.x, dest.origin.y, dest.size.width, dest.size.height);
     gfx::SamplingFilter sampleFilter = gfx::SamplingFilter::LINEAR; //nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
