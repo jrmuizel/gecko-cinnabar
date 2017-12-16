@@ -4948,6 +4948,8 @@ public:
                                        mozilla::layers::WebRenderLayerManager* aManager,
                                        nsDisplayListBuilder* aDisplayListBuilder) override;
 
+  float GetOpacity() { return mOpacity; }
+
 private:
   float mOpacity;
   bool mForEventsAndPluginsOnly;

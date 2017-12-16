@@ -129,8 +129,10 @@ struct Grouper {
   nsDisplayListBuilder* mDisplayListBuilder;
   ScrollingLayersHelper& mScrollingHelper;
   Matrix mTransform;
-  void PushParent(DIGroup* aGroup, nsDisplayItem* aItem, gfxContext* ctx, DrawEventRecorderMemory* aRecorder);
-  void PopParent(DIGroup* aGroup, nsDisplayItem* aItem, gfxContext* ctx, DrawEventRecorderMemory* aRecorder);
+
+  void PaintContainerItem(DIGroup* aGroup, nsDisplayItem* aItem,
+                          nsDisplayList* aChildren, gfxContext* aContext,
+                          gfx::DrawEventRecorderMemory* aRecorder);
   void ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
                        wr::DisplayListBuilder& aBuilder,
                        wr::IpcResourceUpdateQueue& aResources,
@@ -392,9 +394,7 @@ struct DIGroup {
       nsDisplayList* children = item->GetChildren();
       if (children) {
         printf("doing children in EndGroup\n");
-        aGrouper->PushParent(this, item, aContext, aRecorder);
-        PaintItemRange(aGrouper, children->GetBottom(), nullptr, aContext, aRecorder);
-        aGrouper->PopParent(this, item, aContext, aRecorder);
+        aGrouper->PaintContainerItem(this, item, children, aContext, aRecorder);
       } else {
         // XXX: what's this for? flush_item(blobData.mRect);
         // We need to set the clip here.
@@ -418,47 +418,43 @@ struct DIGroup {
   }
 };
 
-inline
-void Grouper::PushParent(DIGroup *aGroup, nsDisplayItem *aItem, gfxContext *ctx, gfx::DrawEventRecorderMemory* aRecorder) {
-    mItemStack.push_back(aItem);
-    switch (aItem->GetType()) {
-      case DisplayItemType::TYPE_TRANSFORM: {
-                                              ctx->Save();
-                                              auto transformItem = static_cast<nsDisplayTransform*>(aItem);
-                                              auto trans = transformItem->GetTransform();
-                                              Matrix m;
-                                              MOZ_RELEASE_ASSERT(trans.Is2D(&m));
-                                              ctx->Multiply(ThebesMatrix(m));
-                                              //aGroup.Pushransform();
-                                              break;
-                                            }
-      case DisplayItemType::TYPE_OPACITY: {
-                                            //aGroup.PushGroup();
-                                            ctx->GetDrawTarget()->FlushItem(aGroup->ItemBounds(aItem));
-                                            break;
-                                          }
-      default: { break; }
+void
+Grouper::PaintContainerItem(DIGroup* aGroup, nsDisplayItem* aItem,
+                            nsDisplayList* aChildren, gfxContext* aContext,
+                            gfx::DrawEventRecorderMemory* aRecorder)
+{
+  mItemStack.push_back(aItem);
+  switch (aItem->GetType()) {
+    case DisplayItemType::TYPE_TRANSFORM: {
+      aContext->Save();
+      auto transformItem = static_cast<nsDisplayTransform*>(aItem);
+      auto trans = transformItem->GetTransform();
+      Matrix m;
+      MOZ_RELEASE_ASSERT(trans.Is2D(&m));
+      aContext->Multiply(ThebesMatrix(m));
+      aGroup->PaintItemRange(this, aChildren->GetBottom(), nullptr, aContext, aRecorder);
+      aContext->Restore();
+      break;
     }
-  }
+    case DisplayItemType::TYPE_OPACITY: {
+      auto opacityItem = static_cast<nsDisplayOpacity*>(aItem);
+      float opacity = opacityItem->GetOpacity();
+      if (opacity == 0.0f) {
+        return;
+      }
 
-inline
-void Grouper::PopParent(DIGroup *aGroup, nsDisplayItem *aItem, gfxContext *ctx, gfx::DrawEventRecorderMemory* aRecorder) {
-    switch (aItem->GetType()) {
-      case DisplayItemType::TYPE_TRANSFORM: {
-                                              ctx->Restore();
-                                              //aGroup.PopTransform();
-                                              break;
-                                            }
-      case DisplayItemType::TYPE_OPACITY: {
-                                            //aGroup.PopGroup();
-                                            ctx->GetDrawTarget()->FlushItem(aGroup->ItemBounds(aItem));
-                                            break;
-                                          }
-
-      default: { break; }
+      aContext->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacityItem->GetOpacity());
+      aContext->GetDrawTarget()->FlushItem(aGroup->ItemBounds(aItem));
+      aGroup->PaintItemRange(this, aChildren->GetBottom(), nullptr, aContext, aRecorder);
+      aContext->PopGroupAndBlend();
+      aContext->GetDrawTarget()->FlushItem(aGroup->ItemBounds(aItem));
+      break;
     }
+    default:
+      aGroup->PaintItemRange(this, aChildren->GetBottom(), nullptr, aContext, aRecorder);
+      break;
   }
-
+}
 
 // how do we drop mDisplayItems? A: It will be stored in a WebRenderUserData
 //SVGItem() {
