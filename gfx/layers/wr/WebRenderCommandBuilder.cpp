@@ -120,9 +120,14 @@ void RemoveFrameFromBlobGroup(nsTArray<BlobItemData*>* aArray) {
 
 struct DIGroup;
 struct Grouper {
+  Grouper(ScrollingLayersHelper& aScrollingHelper)
+   : mScrollingHelper(aScrollingHelper)
+  {}
+
   int32_t mAppUnitsPerDevPixel;
   std::vector<nsDisplayItem*> mItemStack;
   nsDisplayListBuilder* mDisplayListBuilder;
+  ScrollingLayersHelper& mScrollingHelper;
   Matrix mTransform;
   void PushParent(DIGroup* aGroup, nsDisplayItem* aItem, gfxContext* ctx, DrawEventRecorderMemory* aRecorder);
   void PopParent(DIGroup* aGroup, nsDisplayItem* aItem, gfxContext* ctx, DrawEventRecorderMemory* aRecorder);
@@ -131,6 +136,11 @@ struct Grouper {
                        wr::IpcResourceUpdateQueue& aResources,
                        DIGroup* aGroup, nsDisplayList* aList,
                        const StackingContextHelper& aSc);
+  void ConstructGroupsInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
+                                       wr::DisplayListBuilder& aBuilder,
+                                       wr::IpcResourceUpdateQueue& aResources,
+                                       DIGroup* aGroup, nsDisplayList* aList,
+                                       const StackingContextHelper& aSc);
 };
 
 // layers free 
@@ -318,42 +328,8 @@ struct DIGroup {
 
     printf("mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
     // Chase the invalidator and paint any invalid items.
-    for (nsDisplayItem* item = aStartItem; item != aEndItem; item = item->GetAbove()) {
-      IntRect bounds = ItemBounds(item);
-      printf("Trying %s %d %d %d %d\n", item->Name(), bounds.x, bounds.y, bounds.width, bounds.height);
-      // skip items not in inside the invalidation bounds
-      if (!mInvalidRect.Intersects(bounds)) {
-        printf("Passing\n");
-        continue;
-      }
 
-      // XXX: will the DeviceBounds of nsDisplayTransform be correct?
-
-      nsDisplayList *children = item->GetChildren();
-      if (children) {
-        printf("doing children\n");
-        aGrouper->PushParent(this, item, context, recorder);
-
-      } else {
-        // XXX: what's this for? flush_item(blobData.mRect);
-        // We need to set the clip here.
-        // What should the clip settting strategy be? We can set the full clip everytime.
-        // this is probably easiest for now. An alternative would be to put the push and the pop
-        // into separate items and let invalidation handle it that way.
-        DisplayItemClip currentClip = item->GetClip();
-
-        context->Save();
-        int commonClipCount = 0; // Don't share any clips, always apply all clips.
-        if (currentClip.HasClip()) {
-          currentClip.ApplyTo(context, aGrouper->mAppUnitsPerDevPixel, commonClipCount);
-        }
-        context->NewPath();
-        printf("painting %s\n", item->Name());
-        item->Paint(aGrouper->mDisplayListBuilder, context);
-        context->Restore();
-        dt->FlushItem(bounds);
-      }
-    }
+    PaintItemRange(aGrouper, aStartItem, aEndItem, context, recorder);
 
     if (!mKey) {
       dt->FillRect(gfx::Rect(0, 0, size.width, size.height), gfx::ColorPattern(gfx::Color(0., 1., 0., 0.5)));
@@ -371,7 +347,7 @@ struct DIGroup {
       if (!aResources.AddBlobImage(key, descriptor, bytes)) {
         return;
       }
-      //mKey = Some(key);
+      mKey = Some(key);
     } else {
       wr::ImageDescriptor descriptor(size, 0, dt->GetFormat(), isOpaque);
       auto bottomRight = mInvalidRect.BottomRight();
@@ -391,6 +367,49 @@ struct DIGroup {
                        mKey.value());
   }
 
+  void PaintItemRange(Grouper* aGrouper,
+                      nsDisplayItem* aStartItem,
+                      nsDisplayItem* aEndItem,
+                      gfxContext* aContext,
+                      gfx::DrawEventRecorderMemory* aRecorder) {
+    for (nsDisplayItem* item = aStartItem; item != aEndItem; item = item->GetAbove()) {
+      IntRect bounds = ItemBounds(item);
+      printf("Trying %s %d %d %d %d\n", item->Name(), bounds.x, bounds.y, bounds.width, bounds.height);
+      // skip items not in inside the invalidation bounds
+      if (!mInvalidRect.Intersects(bounds)) {
+        printf("Passing\n");
+        continue;
+      }
+
+      // XXX: will the DeviceBounds of nsDisplayTransform be correct?
+
+      nsDisplayList* children = item->GetChildren();
+      if (children) {
+        printf("doing children in EndGroup\n");
+        aGrouper->PushParent(this, item, aContext, aRecorder);
+        PaintItemRange(aGrouper, children->GetBottom(), nullptr, aContext, aRecorder);
+        aGrouper->PopParent(this, item, aContext, aRecorder);
+      } else {
+        // XXX: what's this for? flush_item(blobData.mRect);
+        // We need to set the clip here.
+        // What should the clip settting strategy be? We can set the full clip everytime.
+        // this is probably easiest for now. An alternative would be to put the push and the pop
+        // into separate items and let invalidation handle it that way.
+        DisplayItemClip currentClip = item->GetClip();
+
+        aContext->Save();
+        int commonClipCount = 0; // Don't share any clips, always apply all clips.
+        if (currentClip.HasClip()) {
+          currentClip.ApplyTo(aContext, aGrouper->mAppUnitsPerDevPixel, commonClipCount);
+        }
+        aContext->NewPath();
+        printf("painting %s\n", item->Name());
+        item->Paint(aGrouper->mDisplayListBuilder, aContext);
+        aContext->Restore();
+        aContext->GetDrawTarget()->FlushItem(bounds);
+      }
+    }
+  }
 };
 
 inline
@@ -456,6 +475,7 @@ public:
 static bool
 IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBuilder)
 {
+  return false;
   if (aItem->GetType() == DisplayItemType::TYPE_TRANSFORM) {
     nsDisplayTransform* transformItem = static_cast<nsDisplayTransform*>(aItem);
     Matrix4x4 t = transformItem->GetTransform();
@@ -486,6 +506,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
       currentGroup->EndGroup(aCommandBuilder->mManager, aBuilder, aResources, this, startOfCurrentGroup, item);
       // Note: this call to CreateWebRenderCommands can recurse back into
       // this function.
+      mScrollingHelper.BeginItem(item, aSc);
       bool createdWRCommands =
         item->CreateWebRenderCommands(aBuilder, aResources, aSc, aCommandBuilder->mManager,
                                       mDisplayListBuilder);
@@ -519,10 +540,10 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
         printf("t2d: %f %f\n", t2d._31, t2d._32); 
         mTransform.PreMultiply(t2d);
         printf("mTransform: %f %f\n", mTransform._31, mTransform._32); 
-        ConstructGroups(aCommandBuilder, aBuilder, aResources, currentGroup, transformItem->GetChildren(), aSc);
+        ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, transformItem->GetChildren(), aSc);
         mTransform = m;
       } else if (children) {
-        ConstructGroups(aCommandBuilder, aBuilder, aResources, currentGroup, children, aSc);
+        ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, children, aSc);
       }
 
       printf("Including %s\n", item->Name());
@@ -544,6 +565,56 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
   currentGroup->EndGroup(aCommandBuilder->mManager, aBuilder, aResources, this, startOfCurrentGroup, nullptr);
 }
 
+// This does a pass over the display lists and will join the display items
+// into groups as well as paint them
+void
+Grouper::ConstructGroupsInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
+                                       wr::DisplayListBuilder& aBuilder,
+                                       wr::IpcResourceUpdateQueue& aResources,
+                                       DIGroup* aGroup, nsDisplayList* aList,
+                                       const StackingContextHelper& aSc)
+{
+  DIGroup* currentGroup = aGroup;
+
+  nsDisplayItem* item = aList->GetBottom();
+  while (item) {
+    nsDisplayList* children = item->GetChildren();
+
+    if (item->GetType() == DisplayItemType::TYPE_TRANSFORM) {
+      nsDisplayTransform* transformItem = static_cast<nsDisplayTransform*>(item);
+      Matrix4x4 t = transformItem->GetTransform();
+      Matrix t2d;
+      bool is2D = t.Is2D(&t2d);
+      MOZ_RELEASE_ASSERT(is2D, "Non-2D transforms should be treated as active");
+
+      //XXX what's this here for?
+      // clear_display_items();
+      Matrix m = mTransform;
+
+      printf("t2d: %f %f\n", t2d._31, t2d._32); 
+      mTransform.PreMultiply(t2d);
+      printf("mTransform: %f %f\n", mTransform._31, mTransform._32); 
+      ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, transformItem->GetChildren(), aSc);
+      mTransform = m;
+    } else if (children) {
+      ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, children, aSc);
+    }
+
+    printf("Including %s\n", item->Name());
+
+    BlobItemData* data = GetBlobItemData(item->Frame(), item->GetPerFrameKey());
+    // Iterate over display items looking up their BlobItemData
+    if (!data) {
+      currentGroup->mDisplayItems.PutEntry(new BlobItemData(item));
+      data = GetBlobItemData(item->Frame(), item->GetPerFrameKey());
+    }
+    data->mUsed = true;
+    currentGroup->ComputeGeometryChange(item, data, mTransform, mDisplayListBuilder); // we compute the geometry change here because we have the transform around still
+
+    item = item->GetAbove();
+  }
+}
+
 void
 WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
                                                   nsDisplayItem* aWrappingItem,
@@ -556,7 +627,8 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
     return;
   }
 
-  Grouper g;
+  // mScrollingHelper.BeginList();
+  Grouper g(mScrollingHelper);
   g.mAppUnitsPerDevPixel = aWrappingItem->Frame()->PresContext()->AppUnitsPerDevPixel();
   printf("DoGroupingForDisplayList\n");
 
@@ -581,6 +653,7 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
   group.mGroupBounds = groupBounds;
   group.mGroupOffset = group.mGroupBounds.TopLeft().ToNearestPixels(g.mAppUnitsPerDevPixel);
   g.ConstructGroups(this, aBuilder, aResources, &group, aList, aSc);
+  // mScrollingHelper.EndList();
 }
 
 // transform becomes inactive
@@ -708,6 +781,7 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
     MOZ_RELEASE_ASSERT(aWrappingItem, "Only the root list should have a null wrapping item, and mDoGrouping should never be true for the root list.");
     printf("actually entering the grouping code\n");
     DoGroupingForDisplayList(aDisplayList, aWrappingItem, aDisplayListBuilder, aSc, aBuilder, aResources);
+    return;
   }
   mScrollingHelper.BeginList();
 
@@ -834,7 +908,7 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
       // this function if the |item| is a wrapper for a sublist.
       bool createdWRCommands =
         item->CreateWebRenderCommands(aBuilder, aResources, aSc, mManager,
-                                       aDisplayListBuilder);
+                                      aDisplayListBuilder);
       if (!createdWRCommands) {
         PushItemAsImage(item, aBuilder, aResources, aSc, aDisplayListBuilder);
       }
