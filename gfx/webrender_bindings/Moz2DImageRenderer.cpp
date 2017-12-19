@@ -255,7 +255,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   float b = float(rand()) / RAND_MAX;
   dt->FillRect(gfx::Rect(0, 0, aSize.width, aSize.height), gfx::ColorPattern(gfx::Color(r, g, b, 0.5)));
 
-#if 1
+#if 0
   static int i = 0;
   char filename[40];
   sprintf(filename, "out%d.png", i++);
