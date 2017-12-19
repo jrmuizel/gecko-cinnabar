@@ -3312,7 +3312,7 @@ RecordedEvent::LoadEvent(S &aStream, EventType aType)
 }
 
 #define DO_WITH_EVENT_TYPE(_typeenum, _class) \
-  case _typeenum: { auto e = _class(aStream); printf(# _typeenum "\n"); return f(&e); }
+  case _typeenum: { auto e = _class(aStream); /*printf(# _typeenum "\n");*/ return f(&e); }
 
 template<class S, class F>
 bool
