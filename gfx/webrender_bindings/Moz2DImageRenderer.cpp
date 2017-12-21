@@ -173,12 +173,14 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
 {
   MOZ_ASSERT(aSize.width > 0 && aSize.height > 0);
   if (aSize.width <= 0 || aSize.height <= 0) {
+    printf("Moz2DRenderCallback: BadCallback\n");
     return false;
   }
 
   auto stride = aSize.width * gfx::BytesPerPixel(aFormat);
 
   if (aOutput.length() < static_cast<size_t>(aSize.height * stride)) {
+    printf("Moz2DRenderCallback: BadLength\n");
     return false;
   }
 
@@ -195,6 +197,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   );
 
   if (!dt) {
+    printf("Moz2DRenderCallback: BadDT\n");
     return false;
   }
 
@@ -243,8 +246,9 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   size_t indexOffset = *(size_t*)(aBlob.end().get()-sizeof(size_t));
   Reader reader(aBlob.begin().get()+indexOffset, aBlob.length()-sizeof(size_t)-indexOffset);
 
-  bool ret;
+  bool ret = false;
   size_t offset = 0;
+  printf("Moz2DRenderCallback: Begin: %d %d - %d len %d\n", reader.pos, reader.len, indexOffset, aBlob.length());
   while (reader.pos < reader.len) {
     size_t end = reader.ReadSize();
     size_t extra_end = reader.ReadSize();
@@ -261,6 +265,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
     }
     Range<const uint8_t> blob(aBlob.begin() + offset, aBlob.begin() + end);
     ret = translator.TranslateRecording((char*)blob.begin().get(), blob.length());
+    printf("Moz2DRenderCallback: Translate: %d\n", ret);
     offset = extra_end;
   }
 
@@ -276,6 +281,7 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   sprintf(filename, "out%d.png", i++);
   gfxUtils::WriteAsPNG(dt, filename);
 #endif
+  printf("Moz2DRenderCallback: Finished: %d\n", ret);
 
   return ret;
 }

@@ -62,12 +62,14 @@ InlineTranslator::TranslateRecording(char *aData, size_t aLen)
   uint16_t majorRevision;
   ReadElement(reader, majorRevision);
   if (majorRevision != kMajorRevision) {
+    printf("InlineTranslator: bad revision failed\n");
     return false;
   }
 
   uint16_t minorRevision;
   ReadElement(reader, minorRevision);
   if (minorRevision > kMinorRevision) {
+    printf("InlineTranslator: bad revision failed\n");
     return false;
   }
 
@@ -78,16 +80,19 @@ InlineTranslator::TranslateRecording(char *aData, size_t aLen)
                                [&] (RecordedEvent *recordedEvent) {
                                  // Make sure that the whole event was read from the stream successfully.
                                  if (!reader.good()) {
+                                      printf("InlineTranslator: bad reader\n");
                                      return false;
                                  }
 
                                  if (!recordedEvent->PlayEvent(this)) {
+                                      printf("InlineTranslator: bad play\n");
                                      return false;
                                  }
 
                                  return true;
                               });
     if (!success) {
+      printf("InlineTranslator: Event failed\n");
       return false;
     }
 

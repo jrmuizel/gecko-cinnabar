@@ -270,6 +270,10 @@ fn merge_blob_images(old: &[u8], new: &[u8], dirty_rect: DeviceUintRect, ) -> Ve
 
 impl BlobImageRenderer for Moz2dImageRenderer {
     fn add(&mut self, key: ImageKey, data: BlobImageData, tiling: Option<TileSize>) {
+        {
+            let index = create_index_reader(&data);
+            assert!(index.pos < index.buf.len());
+        }
         self.blob_commands.insert(key, (Arc::new(data), tiling));
     }
 
@@ -344,6 +348,7 @@ impl BlobImageRenderer for Moz2dImageRenderer {
         }
         {
             let mut index = create_index_reader(&commands);
+            assert!(index.pos < index.buf.len());
             while index.pos < index.buf.len() {
                 let (end, extra_end, _)  = index.read_entry();
                 process_fonts(BufReader::new(&commands[end..extra_end]), resources);
@@ -373,8 +378,8 @@ impl BlobImageRenderer for Moz2dImageRenderer {
                         data: output,
                     })
                 } else {
-                    panic!("Moz2D replay problem");
-                    Err(BlobImageError::Other("Unknown error".to_string()))
+                    panic!("Moz2D replay problem")
+                    //Err(BlobImageError::Other("Unknown error".to_string()))
                 }
             };
 
