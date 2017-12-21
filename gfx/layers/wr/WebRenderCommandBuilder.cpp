@@ -292,6 +292,7 @@ struct DIGroup {
       if (!data->mUsed) {
         InvalidateRect(data->mRect);
         iter.Remove();
+        delete data;
       } else {
         data->mUsed = false;
       }
