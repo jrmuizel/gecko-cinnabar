@@ -300,8 +300,6 @@ struct DIGroup {
 
     LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(mGroupBounds, aGrouper->mAppUnitsPerDevPixel);
     IntSize size = mGroupBounds.Size().ToNearestPixels(aGrouper->mAppUnitsPerDevPixel);
-    // We only care about invalidations inside our drawing area.
-    mInvalidRect = mInvalidRect.Intersect(IntRect(IntPoint(0, 0), size));
 
     if (mInvalidRect.IsEmpty()) {
       printf("Not repainting group because it's empty\n");
