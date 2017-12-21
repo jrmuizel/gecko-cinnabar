@@ -51,6 +51,8 @@ struct BlobItemData {
   UniquePtr<nsDisplayItemGeometry> mGeometry;
   DisplayItemClip mClip; // this can change
   uint32_t        mDisplayItemKey;
+  // XXX: only used for debugging
+  bool mInvalid;
   bool mUsed;
   /**
     * Temporary storage of the display item being referenced, only valid between
@@ -58,6 +60,7 @@ struct BlobItemData {
     */
   //nsDisplayItem *mItem;
   BlobItemData(nsDisplayItem *aItem) {
+    mInvalid = false;
     mDisplayItemKey = aItem->GetPerFrameKey();
     AddFrame(aItem->Frame());
   }
@@ -115,6 +118,7 @@ GetBlobItemData(nsDisplayItem* aItem)
 // We keep around the BlobItemData so that when we invalidate it get properly included in the rect
 void RemoveFrameFromBlobGroup(nsTArray<BlobItemData*>* aArray) {
   for (BlobItemData* item : *aArray) {
+    printf("RemoveFrameFromBlobGroup: %p-%d\n", item->mFrame, item->mDisplayItemKey);
     item->mFrame = nullptr;
   }
   delete aArray;
@@ -207,7 +211,7 @@ struct DIGroup {
       return;
     }*/
 
-    printf("pre mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
+    printf("pre mInvalidRect: %s %p - inv: %d %d %d %d\n", item->Name(), item->Frame(), mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
     if (!aData->mGeometry) {
       // This item is being added for the first time, invalidate its entire area.
       UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
@@ -226,6 +230,7 @@ struct DIGroup {
       printf("%d %d,  %f %f\n", mGroupOffset.x, mGroupOffset.y, mMatrix._11, mMatrix._22);
       printf("mRect %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.width, aData->mRect.height);
       InvalidateRect(aData->mRect);
+      aData->mInvalid = true;
     } else if (/*aData->mIsInvalid || XXX: handle image load invalidation */ (item->IsInvalid(invalid) && invalid.IsEmpty())) {
       UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
       combined = aData->mClip.ApplyNonRoundedIntersection(aData->mGeometry->ComputeInvalidationRegion());
@@ -257,6 +262,7 @@ struct DIGroup {
              aData->mRect.y,
              aData->mRect.width,
              aData->mRect.height);
+      aData->mInvalid = true;
     } else {
       printf("else invalidate: %s\n", item->Name());
       // this includes situations like reflow changing the position
@@ -266,8 +272,10 @@ struct DIGroup {
         // Probably not.
         IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
         aData->mRect = transformedRect.Intersect(imageRect);
+        printf("combined not empty: mRect %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.width, aData->mRect.height);
         // invalidate the invalidated area.
         InvalidateRect(aData->mRect);
+        aData->mInvalid = true;
       } else {
         // We haven't detected any changes so far. Unfortunately we don't
         // currently have a good way of checking if the transform has changed so we just
@@ -304,15 +312,18 @@ struct DIGroup {
                 nsDisplayItem* aEndItem) {
 
     mLastAnimatedGeometryRootOrigin = mAnimatedGeometryRootOrigin;
-    printf("EndGroup\n");
+    printf("\n\nBegin EndGroup\n");
 
     // Invalidate any unused items
+    printf("mDisplayItems\n");
     for (auto iter = mDisplayItems.Iter(); !iter.Done(); iter.Next()) {
       BlobItemData* data = iter.Get()->GetKey();
       // XXX: If we had two hash tables we could actually move items from one into the other
       // and then only iterate over the old items. However, this is probably more expensive
       // because doing an insert is more expensive than doing a lookup because of resizing?
+      printf("  : %p-%d\n", data->mFrame, data->mDisplayItemKey);
       if (!data->mUsed) {
+        printf("Invalidate unused: %p-%d\n", data->mFrame, data->mDisplayItemKey);
         InvalidateRect(data->mRect);
         iter.Remove();
         delete data;
@@ -326,6 +337,7 @@ struct DIGroup {
 
     if (mInvalidRect.IsEmpty()) {
       printf("Not repainting group because it's empty\n");
+      printf("End EndGroup\n");
       PushImage(aBuilder, bounds);
       return;
     }
@@ -367,9 +379,9 @@ struct DIGroup {
     PaintItemRange(aGrouper, aStartItem, aEndItem, context, recorder);
 
     if (!mKey) {
-      context->SetMatrix(Matrix());
-      dt->FillRect(gfx::Rect(0, 0, size.width, size.height), gfx::ColorPattern(gfx::Color(0., 1., 0., 0.5)));
-      dt->FlushItem(IntRect(IntPoint(0, 0), size));
+      //context->SetMatrix(Matrix());
+      //dt->FillRect(gfx::Rect(0, 0, size.width, size.height), gfx::ColorPattern(gfx::Color(0., 1., 0., 0.5)));
+      //dt->FlushItem(IntRect(IntPoint(0, 0), size));
     }
     bool isOpaque = false; // XXX: set this correctly
     //assert(end or active);
@@ -395,6 +407,7 @@ struct DIGroup {
     }
     mInvalidRect.SetEmpty();
     PushImage(aBuilder, bounds);
+    printf("End EndGroup\n\n");
   }
 
   void PushImage(wr::DisplayListBuilder& aBuilder, const LayoutDeviceRect& bounds) {
@@ -414,11 +427,20 @@ struct DIGroup {
                       gfx::DrawEventRecorderMemory* aRecorder) {
     for (nsDisplayItem* item = aStartItem; item != aEndItem; item = item->GetAbove()) {
       IntRect bounds = ItemBounds(item);
-      printf("Trying %s %d %d %d %d\n", item->Name(), bounds.x, bounds.y, bounds.width, bounds.height);
+      printf("Trying %s %p-%d %d %d %d %d\n", item->Name(), item->Frame(), item->GetPerFrameKey(), bounds.x, bounds.y, bounds.XMost(), bounds.YMost());
       // skip items not in inside the invalidation bounds
       if (!mInvalidRect.Intersects(bounds)) {
         printf("Passing\n");
         continue;
+      }
+      if (mInvalidRect.Contains(bounds)) {
+        printf("Wholely contained\n");
+        BlobItemData* data = GetBlobItemData(item);
+        data->mInvalid = false;
+      } else {
+        BlobItemData* data = GetBlobItemData(item);
+        // if the item is invalid it needs to be fully contained
+        MOZ_RELEASE_ASSERT(!data->mInvalid);
       }
 
       // XXX: will the DeviceBounds of nsDisplayTransform be correct?
@@ -441,7 +463,7 @@ struct DIGroup {
           currentClip.ApplyTo(aContext, aGrouper->mAppUnitsPerDevPixel, commonClipCount);
         }
         aContext->NewPath();
-        printf("painting %s\n", item->Name());
+        printf("painting %s %p-%d\n", item->Name(), item->Frame(), item->GetPerFrameKey());
         item->Paint(aGrouper->mDisplayListBuilder, aContext);
         aContext->Restore();
         aContext->GetDrawTarget()->FlushItem(bounds);
@@ -472,13 +494,15 @@ Grouper::PaintContainerItem(DIGroup* aGroup, nsDisplayItem* aItem,
       auto opacityItem = static_cast<nsDisplayOpacity*>(aItem);
       float opacity = opacityItem->GetOpacity();
       if (opacity == 0.0f) {
-        return;
+        //return;
       }
 
       aContext->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacityItem->GetOpacity());
+      printf("beginGroup %s %p-%d\n", aItem->Name(), aItem->Frame(), aItem->GetPerFrameKey());
       aContext->GetDrawTarget()->FlushItem(aGroup->ItemBounds(aItem));
       aGroup->PaintItemRange(this, aChildren->GetBottom(), nullptr, aContext, aRecorder);
       aContext->PopGroupAndBlend();
+      printf("endGroup %s %p-%d\n", aItem->Name(), aItem->Frame(), aItem->GetPerFrameKey());
       aContext->GetDrawTarget()->FlushItem(aGroup->ItemBounds(aItem));
       break;
     }

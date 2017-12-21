@@ -135,7 +135,7 @@ impl BufWriter {
 
 
 // XXX: Do we want to allow negative values here or clamp to the image bounds?
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy)]
 struct Box2d {
     x1: u32,
     y1: u32,
@@ -169,6 +169,22 @@ fn create_index_reader(buf: &[u8]) -> BufReader {
     BufReader::new(&buf[index_offset..index_offset_pos])
 }
 
+fn dump_blob_index(blob: &[u8], dirty_rect: Box2d) {
+    let mut index = create_index_reader(blob);
+    while index.pos < index.buf.len() {
+        let (_, _, bounds) = index.read_entry();
+        println!("  {:?} {}", bounds,
+                 if bounds.contained_by(&dirty_rect) {
+                 "*"
+                 } else if bounds.overlaps(&dirty_rect) {
+                 "seq"
+                 } else {
+                 ""
+                 }
+        );
+    }
+}
+
 /* The invarients that we need for this to work properly are that
  * - all new content is contained in the dirty_rect
  * - all content that overlaps with the dirty_rect is included in the new index
@@ -179,6 +195,11 @@ fn merge_blob_images(old: &[u8], new: &[u8], dirty_rect: DeviceUintRect, ) -> Ve
     let dirty_rect = Box2d{ x1: dirty_rect.min_x(), y1: dirty_rect.min_y(), x2: dirty_rect.max_x(), y2: dirty_rect.max_y() };
 
     let mut result = BufWriter::new();
+    println!("dirty: {:?}", dirty_rect);
+                        println!("old:");
+                        dump_blob_index(old, dirty_rect);
+                        println!("new:");
+                        dump_blob_index(new, dirty_rect);
 
     let mut index = create_index_reader(old);
     let mut new_index = create_index_reader(new);
@@ -191,19 +212,19 @@ fn merge_blob_images(old: &[u8], new: &[u8], dirty_rect: DeviceUintRect, ) -> Ve
     println!("dirty rect: {:?}", dirty_rect);
     while index.pos < index.buf.len() {
         let (extra, end, bounds) = index.read_entry();
-        println!("bounds: {} {} {:?}", extra, end, bounds);
+        //println!("bounds: {} {} {:?}", extra, end, bounds);
         if bounds.contained_by(&dirty_rect) {
-            println!("skip");
+            // println!("skip");
             // skip these items as they will be replaced with items from new
         } else if bounds.overlaps(&dirty_rect) {
             // this is a sync point between the old and new lists
             // find matching rect in new list.
             while new_index.pos < new_index.buf.len() {
                 let (new_extra, new_end, new_bounds) = new_index.read_entry();
-                println!("new bounds: {} {} {:?}", new_extra, new_end, new_bounds);
+               // println!("new bounds: {} {} {:?}", new_extra, new_end, new_bounds);
 
                 if new_bounds.contained_by(&dirty_rect) {
-                    println!("new item");
+                    //println!("new item");
                     
                     result.new_entry(new_end - new_extra, new_bounds, &new[new_begin..new_end]);
                 } else if new_bounds.overlaps(&dirty_rect) {
@@ -352,6 +373,7 @@ impl BlobImageRenderer for Moz2dImageRenderer {
                         data: output,
                     })
                 } else {
+                    panic!("Moz2D replay problem");
                     Err(BlobImageError::Other("Unknown error".to_string()))
                 }
             };
