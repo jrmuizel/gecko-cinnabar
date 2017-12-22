@@ -354,6 +354,16 @@ struct DIGroup {
     printf("mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
     // Chase the invalidator and paint any invalid items.
 
+    bool empty = aStartItem == aEndItem;
+#if 0
+    if (empty) {
+      if (mKey) {
+        aWrManager->AddImageKeyForDiscard(mKey.value());
+        mKey = Nothing();
+      }
+      return;
+    }
+#endif
     PaintItemRange(aGrouper, aStartItem, aEndItem, context, recorder);
 
     if (!mKey) {
