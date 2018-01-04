@@ -203,15 +203,15 @@ struct DIGroup {
     // computation for regular fallback. We should be more disciplined.
     LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(mGroupBounds, appUnitsPerDevPixel);
     LayoutDeviceIntPoint offset = RoundedToInt(bounds.TopLeft());
-    auto layoutImageRect = LayoutDeviceIntRect(offset, LayoutDeviceIntSize(RoundedToInt(bounds.Size())));
-    MOZ_RELEASE_ASSERT(mGroupOffset.x == layoutImageRect.x && mGroupOffset.y == layoutImageRect.y);
-    IntRect imageRect(0, 0, layoutImageRect.width, layoutImageRect.height);
-
+    IntSize size = mGroupBounds.Size().ToNearestPixels(appUnitsPerDevPixel);
+    MOZ_RELEASE_ASSERT(mGroupOffset.x == offset.x && mGroupOffset.y == offset.y);
+    IntRect imageRect(0, 0, size.width, size.height);
+    printf("imageSize: %d %d\n", size.width, size.height);
     /*if (item->IsReused() && aData->mGeometry) {
       return;
     }*/
 
-    printf("pre mInvalidRect: %s %p - inv: %d %d %d %d\n", item->Name(), item->Frame(), mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
+    printf("pre mInvalidRect: %s %p-%d - inv: %d %d %d %d\n", item->Name(), item->Frame(), item->GetPerFrameKey(), mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
     if (!aData->mGeometry) {
       // This item is being added for the first time, invalidate its entire area.
       UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
@@ -367,7 +367,7 @@ struct DIGroup {
     // Chase the invalidator and paint any invalid items.
 
     bool empty = aStartItem == aEndItem;
-#if 0
+#if 1
     if (empty) {
       if (mKey) {
         aWrManager->AddImageKeyForDiscard(mKey.value());
@@ -399,6 +399,7 @@ struct DIGroup {
     } else {
       wr::ImageDescriptor descriptor(size, 0, dt->GetFormat(), isOpaque);
       auto bottomRight = mInvalidRect.BottomRight();
+      printf("check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, size.width, size.height);
       MOZ_RELEASE_ASSERT(bottomRight.x <= size.width && bottomRight.y <= size.height);
       printf("Update Blob %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
       if (!aResources.UpdateBlobImage(mKey.value(), descriptor, bytes, ViewAs<ImagePixel>(mInvalidRect))) {
@@ -425,9 +426,14 @@ struct DIGroup {
                       nsDisplayItem* aEndItem,
                       gfxContext* aContext,
                       gfx::DrawEventRecorderMemory* aRecorder) {
+    IntSize size = mGroupBounds.Size().ToNearestPixels(aGrouper->mAppUnitsPerDevPixel);
     for (nsDisplayItem* item = aStartItem; item != aEndItem; item = item->GetAbove()) {
       IntRect bounds = ItemBounds(item);
+      auto bottomRight = bounds.BottomRight();
+
       printf("Trying %s %p-%d %d %d %d %d\n", item->Name(), item->Frame(), item->GetPerFrameKey(), bounds.x, bounds.y, bounds.XMost(), bounds.YMost());
+      printf("paint check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, size.width, size.height);
+      MOZ_RELEASE_ASSERT(bottomRight.x <= size.width && bottomRight.y <= size.height);
       // skip items not in inside the invalidation bounds
       if (!mInvalidRect.Intersects(bounds)) {
         printf("Passing\n");
@@ -575,6 +581,18 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
       // Initialize groupData->mFollowingGroup
       // TODO: compute the group bounds post-grouping, so that they can be
       // tighter for just the sublist that made it into this group.
+      // We want to ensure the tight bounds are still clipped by area
+      // that we're building the display list for.
+      if (groupData->mFollowingGroup.mKey) {
+        if (!groupData->mFollowingGroup.mGroupBounds.IsEqualEdges(currentGroup->mGroupBounds)) {
+          // The group changed size
+          printf("Inner group size change\n");
+          aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
+          groupData->mFollowingGroup.mKey = Nothing();
+          IntSize size = currentGroup->mGroupBounds.Size().ToNearestPixels(mAppUnitsPerDevPixel);
+          groupData->mFollowingGroup.mInvalidRect = IntRect(IntPoint(0, 0), size);
+        }
+      }
       groupData->mFollowingGroup.mGroupBounds = currentGroup->mGroupBounds;
       groupData->mFollowingGroup.mGroupOffset = currentGroup->mGroupOffset;
 
