@@ -269,7 +269,28 @@ struct DIGroup {
         // invalidate the invalidated area.
         InvalidateRect(aData->mRect);
       } else {
-        printf("NoChange: %s\n", item->Name());
+        // We haven't detected any changes so far. Unfortunately we don't
+        // currently have a good way of checking if the transform has changed so we just
+        // recompute our rect and see if it has changed.
+        // If we want this to go faster, we can probably put a flag on the frame
+        // using the style sytem UpdateTransformLayer hint and check for that.
+        combined = clip.ApplyNonRoundedIntersection(aData->mGeometry->ComputeInvalidationRegion());
+        nsRect bounds = combined.GetBounds();
+
+        auto transBounds = nsLayoutUtils::MatrixTransformRect(bounds,
+                                                              Matrix4x4::From2D(mMatrix),
+                                                              float(appUnitsPerDevPixel));
+
+        IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
+        IntRect newBounds = transformedRect.Intersect(imageRect);
+        if (!aData->mRect.IsEqualEdges(newBounds)) {
+          printf("Changed transform/position\n");
+          InvalidateRect(aData->mRect);
+          aData->mRect = newBounds;
+          InvalidateRect(aData->mRect);
+        } else {
+          printf("NoChange: %s\n", item->Name());
+        }
       }
     }
     printf("post mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
