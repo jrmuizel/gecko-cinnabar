@@ -124,6 +124,7 @@ void
 DrawEventRecorderMemory::Finish()
 {
   printf("FINISH\n");
+  // this length might be 0, and things should still work.
   size_t indexOffset = mOutputStream.mLength;
   // write out the index
   mOutputStream.write(mIndex.mData, mIndex.mLength);

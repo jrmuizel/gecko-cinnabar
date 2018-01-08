@@ -239,6 +239,7 @@ fn merge_blob_images(old: &[u8], new: &[u8], dirty_rect: DeviceUintRect, ) -> Ar
     let k = result.finish();
     {
         let mut index = create_index_reader(&k);
+        assert!(index.pos < index.buf.len(), "Unexpectedly empty result. This blob should just have been deleted");
         while index.pos < index.buf.len() {
             let (extra, end, bounds) = index.read_entry();
             println!("result bounds: {} {} {:?}", extra, end, bounds);
@@ -418,3 +419,33 @@ impl Moz2dImageRenderer {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use moz2d_renderer::*;
+    #[test]
+    fn test_basic_merging() {
+        let mut buf1 = BufWriter::new();
+        buf1.new_entry(0, Box2d { x1: 0, y1: 0, x2: 1, y2: 1 }, &[1, 2, 3, 4]);
+        let buf1 = buf1.finish();
+        let buf2 = BufWriter::new();
+        let buf2 = buf2.finish();
+        let dirty_rect = DeviceUintRect::new(
+            DeviceUintPoint::new(10, 10),
+            DeviceUintSize::new(100, 100));
+        merge_blob_images(&buf1, &buf2, dirty_rect);
+    }
+    #[test]
+    fn test_deleting() {
+        let mut buf1 = BufWriter::new();
+        buf1.new_entry(0, Box2d { x1: 0, y1: 0, x2: 1, y2: 1 }, &[1, 2, 3, 4]);
+        buf1.new_entry(0, Box2d { x1: 20, y1: 20, x2: 21, y2: 21 }, &[1, 2, 3, 4]);
+        let buf1 = buf1.finish();
+        let buf2 = BufWriter::new();
+        let buf2 = buf2.finish();
+        let dirty_rect = DeviceUintRect::new(
+            DeviceUintPoint::new(10, 10),
+            DeviceUintSize::new(100, 100));
+        merge_blob_images(&buf1, &buf2, dirty_rect);
+    }
+}
