@@ -178,7 +178,7 @@ struct DIGroup {
   Maybe<wr::ImageKey> mKey;
 
   void InvalidateRect(IntRect aRect) {
-    mInvalidRect = mInvalidRect.Union(aRect);
+    mInvalidRect = mInvalidRect.UnionEdges(aRect);
   }
 
   IntRect ItemBounds(nsDisplayItem *item)
@@ -338,7 +338,8 @@ struct DIGroup {
     if (mInvalidRect.IsEmpty()) {
       printf("Not repainting group because it's empty\n");
       printf("End EndGroup\n");
-      PushImage(aBuilder, bounds);
+      if (mKey)
+        PushImage(aBuilder, bounds);
       return;
     }
 
@@ -392,6 +393,7 @@ struct DIGroup {
       wr::ImageKey key = aWrManager->WrBridge()->GetNextImageKey();
       printf("No previous key making new one %d\n", key.mHandle);
       wr::ImageDescriptor descriptor(size, 0, dt->GetFormat(), isOpaque);
+      MOZ_RELEASE_ASSERT(bytes.length() > sizeof(size_t));
       if (!aResources.AddBlobImage(key, descriptor, bytes)) {
         return;
       }

@@ -979,6 +979,8 @@ pub extern "C" fn wr_resource_updates_add_image(
     descriptor: &WrImageDescriptor,
     bytes: &mut WrVecU8,
 ) {
+    println!("key {:?} length {}", image_key, bytes.length);
+    assert!(bytes.length > 4);
     resources.add_image(
         image_key,
         descriptor.into(),
