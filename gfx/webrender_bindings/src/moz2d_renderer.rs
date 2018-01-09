@@ -207,10 +207,9 @@ fn merge_blob_images(old: &[u8], new: &[u8], dirty_rect: DeviceUintRect, ) -> Ar
                     
                     result.new_entry(new_end - new_extra, new_bounds, &new[new_begin..new_end]);
                 } else if new_bounds.overlaps(&dirty_rect) {
-                    println!("sync item");
-                    assert!(new_bounds == bounds, "new_bounds {:?} old_bounds {:?}", new_bounds, bounds);
-                    // XXX: in theory we don't even need to record these items
-                    //assert!(new[new_begin..new_end] == old[begin..end], "{:?} {:?}", new_begin..new_end, begin..end);
+                    // you might thing that bounds == new_bounds, but sequence points might not be in the same
+                    // because of an earlier update. We don't need them to be in the same order
+                    // we just need the same number of them.
                     result.new_entry(new_end - new_extra, new_bounds, &new[new_begin..new_end]);
                     new_begin = new_end;
                     break;
@@ -447,5 +446,34 @@ mod tests {
             DeviceUintPoint::new(10, 10),
             DeviceUintSize::new(100, 100));
         merge_blob_images(&buf1, &buf2, dirty_rect);
+    }
+    #[test]
+    fn test_ordering() {
+        // test that the merge algorithm works even though sequence points might get reordered
+        let mut buf1 = BufWriter::new();
+        buf1.new_entry(0, Box2d { x1: 0, y1: 0, x2: 1, y2: 1 }, &[1, 2, 3, 4]);
+        buf1.new_entry(0, Box2d { x1: 30, y1: 10, x2: 31, y2: 11 }, &[1, 2, 3, 4]);
+        buf1.new_entry(0, Box2d { x1: 20, y1: 20, x2: 51, y2: 21 }, &[1, 2, 3, 4]);
+        buf1.new_entry(0, Box2d { x1: 20, y1: 30, x2: 51, y2: 31 }, &[1, 2, 3, 4]);
+        buf1.new_entry(0, Box2d { x1: 30, y1: 40, x2: 31, y2: 41 }, &[1, 2, 3, 4]);
+        let buf1 = buf1.finish();
+        let mut buf2 = BufWriter::new();
+        buf2.new_entry(0, Box2d { x1: 20, y1: 20, x2: 51, y2: 21 }, &[1, 2, 3, 4]);
+        let buf2 = buf2.finish();
+        let dirty_rect = DeviceUintRect::new(
+            DeviceUintPoint::new(20, 20),
+            DeviceUintSize::new(31, 1));
+        let result = merge_blob_images(&buf1, &buf2, dirty_rect);
+
+        let mut buf2 = BufWriter::new();
+        buf2.new_entry(0, Box2d { x1: 30, y1: 10, x2: 31, y2: 11 }, &[1, 2, 3, 4]);
+        buf2.new_entry(0, Box2d { x1: 20, y1: 20, x2: 51, y2: 21 }, &[1, 2, 3, 4]);
+        buf2.new_entry(0, Box2d { x1: 20, y1: 30, x2: 51, y2: 31 }, &[1, 2, 3, 4]);
+        buf2.new_entry(0, Box2d { x1: 30, y1: 40, x2: 31, y2: 41 }, &[1, 2, 3, 4]);
+        let buf2 = buf2.finish();
+        let dirty_rect = DeviceUintRect::new(
+            DeviceUintPoint::new(30, 10),
+            DeviceUintSize::new(1, 31));
+        merge_blob_images(&result, &buf2, dirty_rect);
     }
 }
