@@ -174,7 +174,7 @@ fn create_index_reader(buf: &[u8]) -> BufReader {
  * - all content that overlaps with the dirty_rect is included in the new index
  *   this is needed so that we can properly synchronize our buffers
  */
-fn merge_blob_images(old: &[u8], new: &[u8], dirty_rect: DeviceUintRect, ) -> Arc<Vec<u8>> {
+fn merge_blob_images(old: &[u8], new: &[u8], dirty_rect: DeviceUintRect, ) -> Vec<u8> {
 
     let dirty_rect = Box2d{ x1: dirty_rect.min_x(), y1: dirty_rect.min_y(), x2: dirty_rect.max_x(), y2: dirty_rect.max_y() };
 
@@ -235,17 +235,16 @@ fn merge_blob_images(old: &[u8], new: &[u8], dirty_rect: DeviceUintRect, ) -> Ar
         new_begin = new_end;
     }
 
-    let k = result.finish();
+    let result = result.finish();
     {
-        let mut index = create_index_reader(&k);
+        let mut index = create_index_reader(&result);
         assert!(index.pos < index.buf.len(), "Unexpectedly empty result. This blob should just have been deleted");
         while index.pos < index.buf.len() {
             let (extra, end, bounds) = index.read_entry();
             println!("result bounds: {} {} {:?}", extra, end, bounds);
         }
     }
-
-    Arc::new(k)
+    result
 }
 
 impl BlobImageRenderer for Moz2dImageRenderer {
@@ -257,7 +256,7 @@ impl BlobImageRenderer for Moz2dImageRenderer {
         match self.blob_commands.entry(key) {
             Entry::Occupied(mut e) => {
                 let old_data = &mut e.get_mut().0;
-                *old_data = merge_blob_images(&old_data, &data, dirty_rect.unwrap());
+                *old_data = Arc::new(merge_blob_images(&old_data, &data, dirty_rect.unwrap()));
             }
             _ => { panic!("missing image key"); }
         }
