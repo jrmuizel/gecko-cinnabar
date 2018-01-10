@@ -180,7 +180,8 @@ struct DIGroup {
   Maybe<wr::ImageKey> mKey;
 
   void InvalidateRect(IntRect aRect) {
-    mInvalidRect = mInvalidRect.UnionEdges(aRect);
+    // Empty rects get dropped
+    mInvalidRect = mInvalidRect.Union(aRect);
   }
 
   IntRect ItemBounds(nsDisplayItem *item)
@@ -253,7 +254,7 @@ struct DIGroup {
              aData->mRect.y,
              aData->mRect.width,
              aData->mRect.height);
-      InvalidateRect(aData->mRect);
+      InvalidateRect(aData->mRect.Intersect(imageRect));
       // We want to snap to outside pixels. When should we multiply by the matrix?
       // XXX: TransformBounds is expensive. We should avoid doing it if we have no transform
       IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
@@ -294,12 +295,14 @@ struct DIGroup {
         IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
         IntRect newBounds = transformedRect.Intersect(imageRect);
         if (!aData->mRect.IsEqualEdges(newBounds)) {
-          printf("Changed transform/position\n");
-          InvalidateRect(aData->mRect);
+          printf("Changed transform/position %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
+          InvalidateRect(aData->mRect.Intersect(imageRect));
           aData->mRect = newBounds;
+          printf("New rect: %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
           InvalidateRect(aData->mRect);
         } else {
-          printf("NoChange: %s\n", item->Name());
+          printf("NoChange: %s %d %d %d %d\n", item->Name(),
+                 aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
         }
       }
     }
@@ -439,6 +442,7 @@ struct DIGroup {
       printf("paint check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, size.width, size.height);
       MOZ_RELEASE_ASSERT(bottomRight.x <= size.width && bottomRight.y <= size.height);
       // skip items not in inside the invalidation bounds
+      // empty 'bounds' will be skipped
       if (!mInvalidRect.Intersects(bounds)) {
         printf("Passing\n");
         continue;

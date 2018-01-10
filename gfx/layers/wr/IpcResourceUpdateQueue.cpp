@@ -249,6 +249,7 @@ IpcResourceUpdateQueue::AddBlobImage(ImageKey key, const ImageDescriptor& aDescr
                                      Range<uint8_t> aBytes)
 {
   auto bytes = mWriter.Write(aBytes);
+  MOZ_RELEASE_ASSERT(bytes.length() != 111);
   if (!bytes.length()) {
     return false;
   }
