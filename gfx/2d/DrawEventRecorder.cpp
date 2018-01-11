@@ -120,21 +120,21 @@ DrawEventRecorderMemory::FlushItem(IntRect aRect)
   WriteHeader(mOutputStream);
 }
 
-void
+bool
 DrawEventRecorderMemory::Finish()
 {
   printf("FINISH\n");
   // this length might be 0, and things should still work.
+  // for example if there are no items in a particular area
   size_t indexOffset = mOutputStream.mLength;
-  if (indexOffset == 0) {
-    MOZ_RELEASE_ASSERT(mIndex.mLength);
-  }
   // write out the index
   mOutputStream.write(mIndex.mData, mIndex.mLength);
+  bool hasItems = mIndex.mLength != 0;
   mIndex = MemStream();
   // write out the offset of the Index to the end of the output stream
   WriteElement(mOutputStream, indexOffset);
   ClearResources();
+  return hasItems;
 }
 
 

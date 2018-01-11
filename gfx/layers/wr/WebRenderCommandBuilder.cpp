@@ -392,9 +392,12 @@ struct DIGroup {
     bool isOpaque = false; // XXX: set this correctly
     //assert(end or active);
 
-    recorder->Finish();
+    bool hasItems = recorder->Finish();
+    printf("%d Finish\n", hasItems);
     Range<uint8_t> bytes((uint8_t*)recorder->mOutputStream.mData, recorder->mOutputStream.mLength);
     if (!mKey) {
+      if (!hasItems)
+        return;
       wr::ImageKey key = aWrManager->WrBridge()->GetNextImageKey();
       printf("No previous key making new one %d\n", key.mHandle);
       wr::ImageDescriptor descriptor(size, 0, dt->GetFormat(), isOpaque);
@@ -440,13 +443,13 @@ struct DIGroup {
 
       printf("Trying %s %p-%d %d %d %d %d\n", item->Name(), item->Frame(), item->GetPerFrameKey(), bounds.x, bounds.y, bounds.XMost(), bounds.YMost());
       printf("paint check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, size.width, size.height);
-      MOZ_RELEASE_ASSERT(bottomRight.x <= size.width && bottomRight.y <= size.height);
       // skip items not in inside the invalidation bounds
       // empty 'bounds' will be skipped
       if (!mInvalidRect.Intersects(bounds)) {
         printf("Passing\n");
         continue;
       }
+      MOZ_RELEASE_ASSERT(bottomRight.x <= size.width && bottomRight.y <= size.height);
       if (mInvalidRect.Contains(bounds)) {
         printf("Wholely contained\n");
         BlobItemData* data = GetBlobItemData(item);
