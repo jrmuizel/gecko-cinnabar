@@ -54,6 +54,7 @@ struct BlobItemData {
   // XXX: only used for debugging
   bool mInvalid;
   bool mUsed;
+  bool mEmpty;
   /**
     * Temporary storage of the display item being referenced, only valid between
     * BeginUpdate and EndUpdate.
@@ -61,6 +62,7 @@ struct BlobItemData {
   //nsDisplayItem *mItem;
   BlobItemData(nsDisplayItem *aItem) {
     mInvalid = false;
+    mEmpty = false;
     mDisplayItemKey = aItem->GetPerFrameKey();
     AddFrame(aItem->Frame());
   }
