@@ -95,13 +95,15 @@ struct BlobItemData {
 };
 
 BlobItemData*
-GetBlobItemData(nsIFrame* aFrame, uint32_t aKey)
+GetBlobItemData(nsDisplayItem* aItem)
 {
+  nsIFrame* frame = aItem->Frame();
+  uint32_t key = aItem->GetPerFrameKey();
   const nsTArray<BlobItemData*>* array =
-    aFrame->GetProperty(BlobGroupDataProperty());
+    frame->GetProperty(BlobGroupDataProperty());
   if (array) {
     for (BlobItemData *item : *array) {
-      if (item->mDisplayItemKey == aKey
+      if (item->mDisplayItemKey == key
           // XXX: do we need something like this? && item->mLayer->Manager() == mRetainingManager
           ) {
         return item;
@@ -177,7 +179,7 @@ struct DIGroup {
 
   IntRect ItemBounds(nsDisplayItem *item)
   {
-    BlobItemData* data = GetBlobItemData(item->Frame(), item->GetPerFrameKey());
+    BlobItemData* data = GetBlobItemData(item);
     return data->mRect;
   }
 
@@ -548,11 +550,11 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
 
       printf("Including %s\n", item->Name());
 
-      BlobItemData* data = GetBlobItemData(item->Frame(), item->GetPerFrameKey());
+      BlobItemData* data = GetBlobItemData(item);
       // Iterate over display items looking up their BlobItemData
       if (!data) {
         currentGroup->mDisplayItems.PutEntry(new BlobItemData(item));
-        data = GetBlobItemData(item->Frame(), item->GetPerFrameKey());
+        data = GetBlobItemData(item);
       }
       data->mUsed = true;
       currentGroup->ComputeGeometryChange(item, data, mTransform, mDisplayListBuilder); // we compute the geometry change here because we have the transform around still
@@ -602,11 +604,11 @@ Grouper::ConstructGroupsInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
 
     printf("Including %s\n", item->Name());
 
-    BlobItemData* data = GetBlobItemData(item->Frame(), item->GetPerFrameKey());
+    BlobItemData* data = GetBlobItemData(item);
     // Iterate over display items looking up their BlobItemData
     if (!data) {
       currentGroup->mDisplayItems.PutEntry(new BlobItemData(item));
-      data = GetBlobItemData(item->Frame(), item->GetPerFrameKey());
+      data = GetBlobItemData(item);
     }
     data->mUsed = true;
     currentGroup->ComputeGeometryChange(item, data, mTransform, mDisplayListBuilder); // we compute the geometry change here because we have the transform around still
