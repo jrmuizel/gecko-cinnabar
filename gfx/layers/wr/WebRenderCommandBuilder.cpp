@@ -201,11 +201,14 @@ struct DIGroup {
 
     nsPoint shift = mAnimatedGeometryRootOrigin - mLastAnimatedGeometryRootOrigin;
 
+    if (shift.x != 0 || shift.y != 0)
+      printf("shift %d %d\n", shift.x, shift.y);
     int32_t appUnitsPerDevPixel = item->Frame()->PresContext()->AppUnitsPerDevPixel();
     // XXX: we need to compute this properly. This basically just matches the
     // computation for regular fallback. We should be more disciplined.
     LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(mGroupBounds, appUnitsPerDevPixel);
     LayoutDeviceIntPoint offset = RoundedToInt(bounds.TopLeft());
+    printf("\nCGC offset %d %d\n", offset.x, offset.y);
     IntSize size = mGroupBounds.Size().ToNearestPixels(appUnitsPerDevPixel);
     MOZ_RELEASE_ASSERT(mGroupOffset.x == offset.x && mGroupOffset.y == offset.y);
     IntRect imageRect(0, 0, size.width, size.height);
@@ -268,6 +271,7 @@ struct DIGroup {
       aData->mInvalid = true;
     } else {
       printf("else invalidate: %s\n", item->Name());
+      aData->mGeometry->MoveBy(shift);
       // this includes situations like reflow changing the position
       item->ComputeInvalidationRegion(builder, aData->mGeometry.get(), &combined);
       if (!combined.IsEmpty()) {
@@ -287,12 +291,17 @@ struct DIGroup {
         // using the style sytem UpdateTransformLayer hint and check for that.
         combined = clip.ApplyNonRoundedIntersection(aData->mGeometry->ComputeInvalidationRegion());
         nsRect bounds = combined.GetBounds();
-
+        printf("bounds %d %d %d %d\n", bounds.x, bounds.y, bounds.XMost(), bounds.YMost());
+        bool snapped;
+        nsRect ibounds = item->GetBounds(builder, &snapped);
+        printf("item bounds %d %d %d %d\n", ibounds.x, ibounds.y, ibounds.XMost(), ibounds.YMost());
         auto transBounds = nsLayoutUtils::MatrixTransformRect(bounds,
                                                               Matrix4x4::From2D(mMatrix),
                                                               float(appUnitsPerDevPixel));
 
+        printf("trans bounds %d %d %d %d\n", transBounds.x, transBounds.y, transBounds.XMost(), transBounds.YMost());
         IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
+        printf("trans rect %d %d %d %d\n", transformedRect.x, transformedRect.y, transformedRect.XMost(), transformedRect.YMost());
         IntRect newBounds = transformedRect.Intersect(imageRect);
         if (!aData->mRect.IsEqualEdges(newBounds)) {
           printf("Changed transform/position %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
@@ -641,6 +650,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
         data = GetBlobItemData(item);
       }
       data->mUsed = true;
+      bool snapped;
       currentGroup->ComputeGeometryChange(item, data, mTransform, mDisplayListBuilder); // we compute the geometry change here because we have the transform around still
 
     }
@@ -695,6 +705,7 @@ Grouper::ConstructGroupsInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
       data = GetBlobItemData(item);
     }
     data->mUsed = true;
+      bool snapped;
     currentGroup->ComputeGeometryChange(item, data, mTransform, mDisplayListBuilder); // we compute the geometry change here because we have the transform around still
 
     item = item->GetAbove();
@@ -723,6 +734,9 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
   bool snapped;
   nsRect groupBounds = aWrappingItem->GetBounds(aDisplayListBuilder, &snapped);
   DIGroup& group = groupData->mSubGroup;
+  AnimatedGeometryRoot* agr = aWrappingItem->GetAnimatedGeometryRoot();
+  const nsIFrame* referenceFrame = aWrappingItem->ReferenceFrameForChildren();
+  nsPoint topLeft = (*agr)->GetOffsetToCrossDoc(referenceFrame);
   if (!group.mGroupBounds.IsEqualEdges(groupBounds)) {
     // The bounds have changed so we need to discard the old image and add all
     // the commands again.
@@ -738,6 +752,7 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
   }
   group.mGroupBounds = groupBounds;
   group.mGroupOffset = group.mGroupBounds.TopLeft().ToNearestPixels(g.mAppUnitsPerDevPixel);
+  group.mAnimatedGeometryRootOrigin = group.mGroupBounds.TopLeft();
   g.ConstructGroups(this, aBuilder, aResources, &group, aList, aSc);
   // mScrollingHelper.EndList();
 }
