@@ -405,7 +405,7 @@ struct DIGroup {
     printf("%d Finish\n", hasItems);
     Range<uint8_t> bytes((uint8_t*)recorder->mOutputStream.mData, recorder->mOutputStream.mLength);
     if (!mKey) {
-      if (!hasItems)
+      if (!hasItems) // we don't want to send a new image that doesn't have any items in it
         return;
       wr::ImageKey key = aWrManager->WrBridge()->GetNextImageKey();
       printf("No previous key making new one %d\n", key.mHandle);
