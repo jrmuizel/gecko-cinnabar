@@ -55,6 +55,10 @@ struct BlobItemData {
   bool mInvalid;
   bool mUsed;
   bool mEmpty;
+  Matrix mMatrix;
+  IntRect mImageRect;
+  IntPoint mGroupOffset;
+
   /**
     * Temporary storage of the display item being referenced, only valid between
     * BeginUpdate and EndUpdate.
@@ -238,19 +242,20 @@ struct DIGroup {
       InvalidateRect(aData->mRect);
       aData->mInvalid = true;
     } else if (/*aData->mIsInvalid || XXX: handle image load invalidation */ (item->IsInvalid(invalid) && invalid.IsEmpty())) {
+      MOZ_RELEASE_ASSERT(imageRect.IsEqualEdges(aData->mImageRect));
+      MOZ_RELEASE_ASSERT(mGroupOffset == aData->mGroupOffset);
       UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
+      /* Instead of doing this dance, let's just invalidate the old rect and the
+       * new rect.
       combined = aData->mClip.ApplyNonRoundedIntersection(aData->mGeometry->ComputeInvalidationRegion());
       combined.MoveBy(shift);
       combined.Or(combined, clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion()));
       aData->mGeometry = Move(geometry);
-      nsRect bounds = combined.GetBounds();
-      auto transBounds = nsLayoutUtils::MatrixTransformRect(bounds,
-                                                            Matrix4x4::From2D(mMatrix),
-                                                            float(appUnitsPerDevPixel));
-
+      */
+      combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
+      aData->mGeometry = Move(geometry);
 
       printf("matrix: %f %f\n", mMatrix._31, mMatrix._32); 
-      printf("transBounds %d %d %d %d\n", transBounds.x, transBounds.y, transBounds.width, transBounds.height);
       printf("frame invalid invalidate: %s\n", item->Name());
       printf("old rect: %d %d %d %d\n",
              aData->mRect.x,
@@ -270,13 +275,14 @@ struct DIGroup {
              aData->mRect.height);
       aData->mInvalid = true;
     } else {
+      MOZ_RELEASE_ASSERT(imageRect.IsEqualEdges(aData->mImageRect));
+      MOZ_RELEASE_ASSERT(mGroupOffset == aData->mGroupOffset);
       printf("else invalidate: %s\n", item->Name());
       aData->mGeometry->MoveBy(shift);
       // this includes situations like reflow changing the position
       item->ComputeInvalidationRegion(builder, aData->mGeometry.get(), &combined);
       if (!combined.IsEmpty()) {
-        // InvalidateRect(aData->mRect); Do we need to invalidate the old rect?
-        // Probably not.
+        InvalidateRect(aData->mRect.Intersect(imageRect)); // invalidate the old area
         IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
         aData->mRect = transformedRect.Intersect(imageRect);
         printf("combined not empty: mRect %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.width, aData->mRect.height);
@@ -289,32 +295,30 @@ struct DIGroup {
         // recompute our rect and see if it has changed.
         // If we want this to go faster, we can probably put a flag on the frame
         // using the style sytem UpdateTransformLayer hint and check for that.
-        combined = clip.ApplyNonRoundedIntersection(aData->mGeometry->ComputeInvalidationRegion());
-        nsRect bounds = combined.GetBounds();
-        printf("bounds %d %d %d %d\n", bounds.x, bounds.y, bounds.XMost(), bounds.YMost());
-        bool snapped;
-        nsRect ibounds = item->GetBounds(builder, &snapped);
-        printf("item bounds %d %d %d %d\n", ibounds.x, ibounds.y, ibounds.XMost(), ibounds.YMost());
-        auto transBounds = nsLayoutUtils::MatrixTransformRect(bounds,
-                                                              Matrix4x4::From2D(mMatrix),
-                                                              float(appUnitsPerDevPixel));
-
-        printf("trans bounds %d %d %d %d\n", transBounds.x, transBounds.y, transBounds.XMost(), transBounds.YMost());
-        IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
-        printf("trans rect %d %d %d %d\n", transformedRect.x, transformedRect.y, transformedRect.XMost(), transformedRect.YMost());
-        IntRect newBounds = transformedRect.Intersect(imageRect);
-        if (!aData->mRect.IsEqualEdges(newBounds)) {
-          printf("Changed transform/position %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
+        if (mMatrix != aData->mMatrix) {
+          UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
+          combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
+          aData->mGeometry = Move(geometry);
+          nsRect bounds = combined.GetBounds();
+          IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
           InvalidateRect(aData->mRect.Intersect(imageRect));
-          aData->mRect = newBounds;
-          printf("New rect: %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
+          aData->mRect = transformedRect.Intersect(imageRect);
           InvalidateRect(aData->mRect);
+          printf("Matrix change\n");
         } else {
+          UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
+          combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
+          IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
+          auto rect = transformedRect.Intersect(imageRect);
+          MOZ_RELEASE_ASSERT(rect.IsEqualEdges(aData->mRect));
           printf("NoChange: %s %d %d %d %d\n", item->Name(),
                  aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
         }
       }
     }
+    aData->mMatrix = mMatrix;
+    aData->mGroupOffset = mGroupOffset;
+    aData->mImageRect = imageRect;
     printf("post mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
   }
 
@@ -559,6 +563,7 @@ public:
 static bool
 IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBuilder)
 {
+  return false;
   if (aItem->GetType() == DisplayItemType::TYPE_TRANSFORM) {
     nsDisplayTransform* transformItem = static_cast<nsDisplayTransform*>(aItem);
     Matrix4x4 t = transformItem->GetTransform();
@@ -641,11 +646,13 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
         ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, children, aSc);
       }
 
-      printf("Including %s\n", item->Name());
+      printf("Including %s of %d\n", item->Name(), currentGroup->mDisplayItems.Count());
 
       BlobItemData* data = GetBlobItemData(item);
       // Iterate over display items looking up their BlobItemData
+      if (data) { MOZ_RELEASE_ASSERT(currentGroup->mDisplayItems.Count() != 0); }
       if (!data) {
+        printf("Allocating blob data\n");
         currentGroup->mDisplayItems.PutEntry(new BlobItemData(item));
         data = GetBlobItemData(item);
       }
@@ -696,11 +703,13 @@ Grouper::ConstructGroupsInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
       ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, children, aSc);
     }
 
-    printf("Including %s\n", item->Name());
+    printf("Including %s of %d\n", item->Name(), currentGroup->mDisplayItems.Count());
 
     BlobItemData* data = GetBlobItemData(item);
     // Iterate over display items looking up their BlobItemData
+    if (data) { MOZ_RELEASE_ASSERT(currentGroup->mDisplayItems.Count() != 0); }
     if (!data) {
+      printf("Allocating blob data\n");
       currentGroup->mDisplayItems.PutEntry(new BlobItemData(item));
       data = GetBlobItemData(item);
     }
@@ -737,12 +746,23 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
   AnimatedGeometryRoot* agr = aWrappingItem->GetAnimatedGeometryRoot();
   const nsIFrame* referenceFrame = aWrappingItem->ReferenceFrameForChildren();
   nsPoint topLeft = (*agr)->GetOffsetToCrossDoc(referenceFrame);
+  auto p = group.mGroupBounds;
+  auto q = groupBounds;
+  printf("Bounds: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
   if (!group.mGroupBounds.IsEqualEdges(groupBounds)) {
     // The bounds have changed so we need to discard the old image and add all
     // the commands again.
     auto p = group.mGroupBounds;
     auto q = groupBounds;
     printf("Bounds change: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
+    printf("items: %d\n", group.mDisplayItems.Count());
+    for (auto iter = group.mDisplayItems.Iter(); !iter.Done(); iter.Next()) {
+      BlobItemData* data = iter.Get()->GetKey();
+      printf("Deleting %p-%d\n", data->mFrame, data->mDisplayItemKey);
+      iter.Remove();
+      delete data;
+    }
+
     if (group.mKey) {
       IntSize size = groupBounds.Size().ToNearestPixels(g.mAppUnitsPerDevPixel);
       group.mInvalidRect = IntRect(IntPoint(0, 0), size);
