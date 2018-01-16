@@ -500,6 +500,14 @@ struct DIGroup {
       }
     }
   }
+  ~DIGroup() {
+    for (auto iter = mDisplayItems.Iter(); !iter.Done(); iter.Next()) {
+      BlobItemData* data = iter.Get()->GetKey();
+      printf("Deleting %p-%d\n", data->mFrame, data->mDisplayItemKey);
+      iter.Remove();
+      delete data;
+    }
+  }
 };
 
 void
