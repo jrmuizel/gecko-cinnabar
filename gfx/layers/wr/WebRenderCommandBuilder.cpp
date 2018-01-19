@@ -55,7 +55,11 @@ struct BlobItemData {
   bool mInvalid;
   bool mUsed;
   bool mEmpty;
+  // properties that are used to emulate layer tree invalidation
   Matrix mMatrix;
+  Matrix4x4 mTransform;
+  float mOpacity;
+
   IntRect mImageRect;
   IntPoint mGroupOffset;
 
@@ -156,6 +160,56 @@ struct Grouper {
                                        DIGroup* aGroup, nsDisplayList* aList,
                                        const StackingContextHelper& aSc);
 };
+
+bool LayerItem(nsDisplayItem* aItem) {
+  switch (aItem->GetType()) {
+    case DisplayItemType::TYPE_TRANSFORM: {
+      return true;
+    }
+    case DisplayItemType::TYPE_LAYER_EVENT_REGIONS: {
+      return true;
+    }
+    case DisplayItemType::TYPE_OPACITY: {
+      return true;
+    }
+    default: {
+     return false;
+    }
+  }
+}
+
+#include <sstream>
+
+bool LayerPropertyChanged(nsDisplayItem* aItem, BlobItemData* aData) {
+  bool changed = false;
+  switch (aItem->GetType()) {
+    case DisplayItemType::TYPE_TRANSFORM: {
+      auto transformItem = static_cast<nsDisplayTransform*>(aItem);
+      auto trans = transformItem->GetTransform();
+      changed = aData->mTransform != trans;
+
+      if (changed) {
+        std::stringstream ss;
+        ss << trans << ' ' << aData->mTransform;
+        printf("LayerPropertyChanged Matrix %d %s\n", changed, ss.str().c_str());
+      }
+
+      aData->mTransform = trans;
+      break;
+    }
+    case DisplayItemType::TYPE_OPACITY: {
+      auto opacityItem = static_cast<nsDisplayOpacity*>(aItem);
+      float opacity = opacityItem->GetOpacity();
+      changed = aData->mOpacity != opacity;
+      aData->mOpacity = opacity;
+      printf("LayerPropertyChanged Opacity\n");
+      break;
+    }
+    default:
+      break;
+  }
+  return changed;
+}
 
 // layers free 
 
@@ -297,14 +351,40 @@ struct DIGroup {
         // using the style sytem UpdateTransformLayer hint and check for that.
         if (mMatrix != aData->mMatrix) {
           UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
-          combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
-          aData->mGeometry = Move(geometry);
-          nsRect bounds = combined.GetBounds();
+          if (!LayerItem(item)) {
+            // the bounds of layer items can change on us
+            MOZ_RELEASE_ASSERT(geometry->mBounds.IsEqualEdges(aData->mGeometry->mBounds));
+          }
+          combined = clip.ApplyNonRoundedIntersection(aData->mGeometry->ComputeInvalidationRegion());
           IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
           InvalidateRect(aData->mRect.Intersect(imageRect));
+          auto rect = transformedRect.Intersect(imageRect);
           aData->mRect = transformedRect.Intersect(imageRect);
           InvalidateRect(aData->mRect);
-          printf("Matrix change\n");
+
+          printf("TransformChange: %s %d %d %d %d\n", item->Name(),
+                 aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
+        } else if (LayerItem(item)) {
+          UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
+          // we need to catch bounds changes of containers so that continue to have the correct bounds rects in the recording
+          if (!geometry->mBounds.IsEqualEdges(aData->mGeometry->mBounds) ||
+              LayerPropertyChanged(item, aData)) {
+            combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
+            aData->mGeometry = Move(geometry);
+            nsRect bounds = combined.GetBounds();
+            IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
+            InvalidateRect(aData->mRect.Intersect(imageRect));
+            aData->mRect = transformedRect.Intersect(imageRect);
+            InvalidateRect(aData->mRect);
+            printf("LayerPropertyChanged change\n");
+          } else {
+            combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
+            IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
+            auto rect = transformedRect.Intersect(imageRect);
+            MOZ_RELEASE_ASSERT(rect.IsEqualEdges(aData->mRect));
+            printf("Layer NoChange: %s %d %d %d %d\n", item->Name(),
+                   aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
+          }
         } else {
           UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
           combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
