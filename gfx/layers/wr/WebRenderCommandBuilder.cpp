@@ -59,6 +59,8 @@ struct BlobItemData {
   Matrix mMatrix;
   Matrix4x4 mTransform;
   float mOpacity;
+  struct DIGroup* mGroup;
+
 
   IntRect mImageRect;
   IntPoint mGroupOffset;
@@ -68,7 +70,7 @@ struct BlobItemData {
     * BeginUpdate and EndUpdate.
     */
   //nsDisplayItem *mItem;
-  BlobItemData(nsDisplayItem *aItem) {
+  BlobItemData(DIGroup* aGroup, nsDisplayItem *aItem) : mGroup(aGroup) {
     mInvalid = false;
     mEmpty = false;
     mDisplayItemKey = aItem->GetPerFrameKey();
@@ -651,7 +653,6 @@ public:
 static bool
 IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBuilder)
 {
-  return false;
   if (aItem->GetType() == DisplayItemType::TYPE_TRANSFORM) {
     nsDisplayTransform* transformItem = static_cast<nsDisplayTransform*>(aItem);
     Matrix4x4 t = transformItem->GetTransform();
@@ -738,11 +739,18 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
 
       BlobItemData* data = GetBlobItemData(item);
       // Iterate over display items looking up their BlobItemData
-      if (data) { MOZ_RELEASE_ASSERT(currentGroup->mDisplayItems.Count() != 0); }
+      if (data) {
+        MOZ_RELEASE_ASSERT(data->mGroup->mDisplayItems.Contains(data));
+        if (data->mGroup != currentGroup) {
+          // the item is for another group
+          // it should be cleared out as being unused at the end of this paint
+          data = nullptr;
+        }
+      }
       if (!data) {
         printf("Allocating blob data\n");
-        currentGroup->mDisplayItems.PutEntry(new BlobItemData(item));
-        data = GetBlobItemData(item);
+        data = new BlobItemData(currentGroup, item);
+        currentGroup->mDisplayItems.PutEntry(data);
       }
       data->mUsed = true;
       bool snapped;
@@ -793,16 +801,23 @@ Grouper::ConstructGroupsInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
 
     printf("Including %s of %d\n", item->Name(), currentGroup->mDisplayItems.Count());
 
-    BlobItemData* data = GetBlobItemData(item);
     // Iterate over display items looking up their BlobItemData
-    if (data) { MOZ_RELEASE_ASSERT(currentGroup->mDisplayItems.Count() != 0); }
+    BlobItemData* data = GetBlobItemData(item);
+    if (data) {
+      MOZ_RELEASE_ASSERT(data->mGroup->mDisplayItems.Contains(data));
+      if (data->mGroup != currentGroup) {
+        // the item is for another group
+        // it should be cleared out as being unused at the end of this paint
+        data = nullptr;
+      }
+    }
     if (!data) {
       printf("Allocating blob data\n");
-      currentGroup->mDisplayItems.PutEntry(new BlobItemData(item));
-      data = GetBlobItemData(item);
+      data = new BlobItemData(currentGroup, item);
+      currentGroup->mDisplayItems.PutEntry(data);
     }
     data->mUsed = true;
-      bool snapped;
+    bool snapped;
     currentGroup->ComputeGeometryChange(item, data, mTransform, mDisplayListBuilder); // we compute the geometry change here because we have the transform around still
 
     item = item->GetAbove();
