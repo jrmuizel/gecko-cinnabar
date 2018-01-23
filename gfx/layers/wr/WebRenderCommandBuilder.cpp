@@ -649,6 +649,21 @@ public:
   DIGroup mFollowingGroup;
 };
 
+static bool
+IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBuilder);
+
+static bool
+HasActiveChildren(const nsDisplayList& aList, nsDisplayListBuilder *aDisplayListBuilder)
+{
+  for (nsDisplayItem* i = aList.GetBottom(); i; i = i->GetAbove()) {
+    if (IsItemProbablyActive(i, aDisplayListBuilder)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
 // We can't easily use GetLayerState because it wants a bunch of layers related information.
 static bool
 IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBuilder)
@@ -659,7 +674,7 @@ IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBui
     Matrix t2d;
     bool is2D = t.Is2D(&t2d);
     printf("active: %d\n", transformItem->MayBeAnimated(aDisplayListBuilder));
-    return transformItem->MayBeAnimated(aDisplayListBuilder) || !is2D;
+    return transformItem->MayBeAnimated(aDisplayListBuilder) || !is2D || HasActiveChildren(*transformItem->GetChildren(), aDisplayListBuilder);
   }
   // TODO: handle opacity etc.
   return false;
