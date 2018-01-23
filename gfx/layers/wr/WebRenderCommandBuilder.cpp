@@ -658,6 +658,7 @@ IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBui
     Matrix4x4 t = transformItem->GetTransform();
     Matrix t2d;
     bool is2D = t.Is2D(&t2d);
+    printf("active: %d\n", transformItem->MayBeAnimated(aDisplayListBuilder));
     return transformItem->MayBeAnimated(aDisplayListBuilder) || !is2D;
   }
   // TODO: handle opacity etc.
