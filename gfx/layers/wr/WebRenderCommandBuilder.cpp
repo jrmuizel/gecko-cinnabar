@@ -28,6 +28,8 @@ namespace layers {
 
 using namespace gfx;
 
+int indent;
+#define GP(msg, ...) do { for (int i = 0; i<indent; i++) { printf(" "); } printf(msg, ##__VA_ARGS__); } while (0)
 
 //XXX: problems:
 // - How do we deal with scrolling while having only a single invalidation rect?
@@ -130,7 +132,7 @@ GetBlobItemData(nsDisplayItem* aItem)
 // We keep around the BlobItemData so that when we invalidate it get properly included in the rect
 void RemoveFrameFromBlobGroup(nsTArray<BlobItemData*>* aArray) {
   for (BlobItemData* item : *aArray) {
-    printf("RemoveFrameFromBlobGroup: %p-%d\n", item->mFrame, item->mDisplayItemKey);
+    GP("RemoveFrameFromBlobGroup: %p-%d\n", item->mFrame, item->mDisplayItemKey);
     item->mFrame = nullptr;
   }
   delete aArray;
@@ -140,6 +142,7 @@ struct DIGroup;
 struct Grouper {
   Grouper(ScrollingLayersHelper& aScrollingHelper)
    : mScrollingHelper(aScrollingHelper)
+   , mGroupCount(0)
   {}
 
   int32_t mAppUnitsPerDevPixel;
@@ -147,6 +150,7 @@ struct Grouper {
   nsDisplayListBuilder* mDisplayListBuilder;
   ScrollingLayersHelper& mScrollingHelper;
   Matrix mTransform;
+  int mGroupCount;
 
   void PaintContainerItem(DIGroup* aGroup, nsDisplayItem* aItem,
                           nsDisplayList* aChildren, gfxContext* aContext,
@@ -161,6 +165,9 @@ struct Grouper {
                                        wr::IpcResourceUpdateQueue& aResources,
                                        DIGroup* aGroup, nsDisplayList* aList,
                                        const StackingContextHelper& aSc);
+  ~Grouper() {
+    GP("Group count: %d\n", mGroupCount);
+  }
 };
 
 bool LayerItem(nsDisplayItem* aItem) {
@@ -193,7 +200,7 @@ bool LayerPropertyChanged(nsDisplayItem* aItem, BlobItemData* aData) {
       if (changed) {
         std::stringstream ss;
         ss << trans << ' ' << aData->mTransform;
-        printf("LayerPropertyChanged Matrix %d %s\n", changed, ss.str().c_str());
+        GP("LayerPropertyChanged Matrix %d %s\n", changed, ss.str().c_str());
       }
 
       aData->mTransform = trans;
@@ -204,7 +211,7 @@ bool LayerPropertyChanged(nsDisplayItem* aItem, BlobItemData* aData) {
       float opacity = opacityItem->GetOpacity();
       changed = aData->mOpacity != opacity;
       aData->mOpacity = opacity;
-      printf("LayerPropertyChanged Opacity\n");
+      GP("LayerPropertyChanged Opacity\n");
       break;
     }
     default:
@@ -262,22 +269,23 @@ struct DIGroup {
     nsPoint shift = mAnimatedGeometryRootOrigin - mLastAnimatedGeometryRootOrigin;
 
     if (shift.x != 0 || shift.y != 0)
-      printf("shift %d %d\n", shift.x, shift.y);
+      GP("shift %d %d\n", shift.x, shift.y);
     int32_t appUnitsPerDevPixel = item->Frame()->PresContext()->AppUnitsPerDevPixel();
     // XXX: we need to compute this properly. This basically just matches the
     // computation for regular fallback. We should be more disciplined.
     LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(mGroupBounds, appUnitsPerDevPixel);
     LayoutDeviceIntPoint offset = RoundedToInt(bounds.TopLeft());
-    printf("\nCGC offset %d %d\n", offset.x, offset.y);
+    GP("\n");
+    GP("CGC offset %d %d\n", offset.x, offset.y);
     IntSize size = mGroupBounds.Size().ToNearestPixels(appUnitsPerDevPixel);
     MOZ_RELEASE_ASSERT(mGroupOffset.x == offset.x && mGroupOffset.y == offset.y);
     IntRect imageRect(0, 0, size.width, size.height);
-    printf("imageSize: %d %d\n", size.width, size.height);
+    GP("imageSize: %d %d\n", size.width, size.height);
     /*if (item->IsReused() && aData->mGeometry) {
       return;
     }*/
 
-    printf("pre mInvalidRect: %s %p-%d - inv: %d %d %d %d\n", item->Name(), item->Frame(), item->GetPerFrameKey(), mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
+    GP("pre mInvalidRect: %s %p-%d - inv: %d %d %d %d\n", item->Name(), item->Frame(), item->GetPerFrameKey(), mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
     if (!aData->mGeometry) {
       // This item is being added for the first time, invalidate its entire area.
       UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
@@ -291,10 +299,10 @@ struct DIGroup {
 
       IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
       aData->mRect = transformedRect.Intersect(imageRect);
-      printf("CGC %s %d %d %d %d\n", item->Name(), bounds.x, bounds.y, bounds.width, bounds.height);
-      printf("transBounds %d %d %d %d\n", transBounds.x, transBounds.y, transBounds.width, transBounds.height);
-      printf("%d %d,  %f %f\n", mGroupOffset.x, mGroupOffset.y, mMatrix._11, mMatrix._22);
-      printf("mRect %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.width, aData->mRect.height);
+      GP("CGC %s %d %d %d %d\n", item->Name(), bounds.x, bounds.y, bounds.width, bounds.height);
+      GP("transBounds %d %d %d %d\n", transBounds.x, transBounds.y, transBounds.width, transBounds.height);
+      GP("%d %d,  %f %f\n", mGroupOffset.x, mGroupOffset.y, mMatrix._11, mMatrix._22);
+      GP("mRect %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.width, aData->mRect.height);
       InvalidateRect(aData->mRect);
       aData->mInvalid = true;
     } else if (/*aData->mIsInvalid || XXX: handle image load invalidation */ (item->IsInvalid(invalid) && invalid.IsEmpty())) {
@@ -311,9 +319,9 @@ struct DIGroup {
       combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
       aData->mGeometry = Move(geometry);
 
-      printf("matrix: %f %f\n", mMatrix._31, mMatrix._32); 
-      printf("frame invalid invalidate: %s\n", item->Name());
-      printf("old rect: %d %d %d %d\n",
+      GP("matrix: %f %f\n", mMatrix._31, mMatrix._32); 
+      GP("frame invalid invalidate: %s\n", item->Name());
+      GP("old rect: %d %d %d %d\n",
              aData->mRect.x,
              aData->mRect.y,
              aData->mRect.width,
@@ -324,7 +332,7 @@ struct DIGroup {
       IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
       aData->mRect = transformedRect.Intersect(imageRect);
       InvalidateRect(aData->mRect);
-      printf("new rect: %d %d %d %d\n",
+      GP("new rect: %d %d %d %d\n",
              aData->mRect.x,
              aData->mRect.y,
              aData->mRect.width,
@@ -333,7 +341,7 @@ struct DIGroup {
     } else {
       MOZ_RELEASE_ASSERT(imageRect.IsEqualEdges(aData->mImageRect));
       MOZ_RELEASE_ASSERT(mGroupOffset == aData->mGroupOffset);
-      printf("else invalidate: %s\n", item->Name());
+      GP("else invalidate: %s\n", item->Name());
       aData->mGeometry->MoveBy(shift);
       // this includes situations like reflow changing the position
       item->ComputeInvalidationRegion(builder, aData->mGeometry.get(), &combined);
@@ -341,7 +349,7 @@ struct DIGroup {
         InvalidateRect(aData->mRect.Intersect(imageRect)); // invalidate the old area
         IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
         aData->mRect = transformedRect.Intersect(imageRect);
-        printf("combined not empty: mRect %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.width, aData->mRect.height);
+        GP("combined not empty: mRect %d %d %d %d\n", aData->mRect.x, aData->mRect.y, aData->mRect.width, aData->mRect.height);
         // invalidate the invalidated area.
         InvalidateRect(aData->mRect);
         aData->mInvalid = true;
@@ -364,7 +372,7 @@ struct DIGroup {
           aData->mRect = transformedRect.Intersect(imageRect);
           InvalidateRect(aData->mRect);
 
-          printf("TransformChange: %s %d %d %d %d\n", item->Name(),
+          GP("TransformChange: %s %d %d %d %d\n", item->Name(),
                  aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
         } else if (LayerItem(item)) {
           UniquePtr<nsDisplayItemGeometry> geometry(item->AllocateGeometry(builder));
@@ -378,13 +386,13 @@ struct DIGroup {
             InvalidateRect(aData->mRect.Intersect(imageRect));
             aData->mRect = transformedRect.Intersect(imageRect);
             InvalidateRect(aData->mRect);
-            printf("LayerPropertyChanged change\n");
+            GP("LayerPropertyChanged change\n");
           } else {
             combined = clip.ApplyNonRoundedIntersection(geometry->ComputeInvalidationRegion());
             IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
             auto rect = transformedRect.Intersect(imageRect);
             MOZ_RELEASE_ASSERT(rect.IsEqualEdges(aData->mRect));
-            printf("Layer NoChange: %s %d %d %d %d\n", item->Name(),
+            GP("Layer NoChange: %s %d %d %d %d\n", item->Name(),
                    aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
           }
         } else {
@@ -393,7 +401,7 @@ struct DIGroup {
           IntRect transformedRect = RoundedOut(mMatrix.TransformBounds(ToRect(nsLayoutUtils::RectToGfxRect(combined.GetBounds(), appUnitsPerDevPixel)))) - mGroupOffset;
           auto rect = transformedRect.Intersect(imageRect);
           MOZ_RELEASE_ASSERT(rect.IsEqualEdges(aData->mRect));
-          printf("NoChange: %s %d %d %d %d\n", item->Name(),
+          GP("NoChange: %s %d %d %d %d\n", item->Name(),
                  aData->mRect.x, aData->mRect.y, aData->mRect.XMost(), aData->mRect.YMost());
         }
       }
@@ -401,7 +409,7 @@ struct DIGroup {
     aData->mMatrix = mMatrix;
     aData->mGroupOffset = mGroupOffset;
     aData->mImageRect = imageRect;
-    printf("post mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
+    GP("post mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
   }
 
   void EndGroup(WebRenderLayerManager* aWrManager,
@@ -412,18 +420,19 @@ struct DIGroup {
                 nsDisplayItem* aEndItem) {
 
     mLastAnimatedGeometryRootOrigin = mAnimatedGeometryRootOrigin;
-    printf("\n\nBegin EndGroup\n");
+    GP("\n\n");
+    GP("Begin EndGroup\n");
 
     // Invalidate any unused items
-    printf("mDisplayItems\n");
+    GP("mDisplayItems\n");
     for (auto iter = mDisplayItems.Iter(); !iter.Done(); iter.Next()) {
       BlobItemData* data = iter.Get()->GetKey();
       // XXX: If we had two hash tables we could actually move items from one into the other
       // and then only iterate over the old items. However, this is probably more expensive
       // because doing an insert is more expensive than doing a lookup because of resizing?
-      printf("  : %p-%d\n", data->mFrame, data->mDisplayItemKey);
+      GP("  : %p-%d\n", data->mFrame, data->mDisplayItemKey);
       if (!data->mUsed) {
-        printf("Invalidate unused: %p-%d\n", data->mFrame, data->mDisplayItemKey);
+        GP("Invalidate unused: %p-%d\n", data->mFrame, data->mDisplayItemKey);
         InvalidateRect(data->mRect);
         iter.Remove();
         delete data;
@@ -436,8 +445,8 @@ struct DIGroup {
     IntSize size = mGroupBounds.Size().ToNearestPixels(aGrouper->mAppUnitsPerDevPixel);
 
     if (mInvalidRect.IsEmpty()) {
-      printf("Not repainting group because it's empty\n");
-      printf("End EndGroup\n");
+      GP("Not repainting group because it's empty\n");
+      GP("End EndGroup\n");
       if (mKey)
         PushImage(aBuilder, bounds);
       return;
@@ -461,10 +470,10 @@ struct DIGroup {
     RefPtr<gfx::DrawTarget> dt = gfx::Factory::CreateRecordingDrawTarget(recorder, dummyDt, size);
     // Setup the gfxContext
     RefPtr<gfxContext> context = gfxContext::CreateOrNull(dt);
-    printf("ctx-offset %f %f\n", bounds.x, bounds.y);
+    GP("ctx-offset %f %f\n", bounds.x, bounds.y);
     context->SetMatrix(Matrix::Translation(-bounds.x, -bounds.y));
 
-    printf("mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
+    GP("mInvalidRect: %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
     // Chase the invalidator and paint any invalid items.
 
     bool empty = aStartItem == aEndItem;
@@ -488,13 +497,13 @@ struct DIGroup {
     //assert(end or active);
 
     bool hasItems = recorder->Finish();
-    printf("%d Finish\n", hasItems);
+    GP("%d Finish\n", hasItems);
     Range<uint8_t> bytes((uint8_t*)recorder->mOutputStream.mData, recorder->mOutputStream.mLength);
     if (!mKey) {
       if (!hasItems) // we don't want to send a new image that doesn't have any items in it
         return;
       wr::ImageKey key = aWrManager->WrBridge()->GetNextImageKey();
-      printf("No previous key making new one %d\n", key.mHandle);
+      GP("No previous key making new one %d\n", key.mHandle);
       wr::ImageDescriptor descriptor(size, 0, dt->GetFormat(), isOpaque);
       MOZ_RELEASE_ASSERT(bytes.length() > sizeof(size_t));
       if (!aResources.AddBlobImage(key, descriptor, bytes)) {
@@ -504,21 +513,21 @@ struct DIGroup {
     } else {
       wr::ImageDescriptor descriptor(size, 0, dt->GetFormat(), isOpaque);
       auto bottomRight = mInvalidRect.BottomRight();
-      printf("check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, size.width, size.height);
+      GP("check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, size.width, size.height);
       MOZ_RELEASE_ASSERT(bottomRight.x <= size.width && bottomRight.y <= size.height);
-      printf("Update Blob %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
+      GP("Update Blob %d %d %d %d\n", mInvalidRect.x, mInvalidRect.y, mInvalidRect.width, mInvalidRect.height);
       if (!aResources.UpdateBlobImage(mKey.value(), descriptor, bytes, ViewAs<ImagePixel>(mInvalidRect))) {
         return;
       }
     }
     mInvalidRect.SetEmpty();
     PushImage(aBuilder, bounds);
-    printf("End EndGroup\n\n");
+    GP("End EndGroup\n\n");
   }
 
   void PushImage(wr::DisplayListBuilder& aBuilder, const LayoutDeviceRect& bounds) {
     wr::LayoutRect dest = wr::ToLayoutRect(bounds);
-    printf("PushImage: %f %f %f %f\n", dest.origin.x, dest.origin.y, dest.size.width, dest.size.height);
+    GP("PushImage: %f %f %f %f\n", dest.origin.x, dest.origin.y, dest.size.width, dest.size.height);
     gfx::SamplingFilter sampleFilter = gfx::SamplingFilter::LINEAR; //nsLayoutUtils::GetSamplingFilterForFrame(aItem->Frame());
     bool backfaceHidden = false;
     aBuilder.PushImage(dest, dest, !backfaceHidden,
@@ -536,17 +545,17 @@ struct DIGroup {
       IntRect bounds = ItemBounds(item);
       auto bottomRight = bounds.BottomRight();
 
-      printf("Trying %s %p-%d %d %d %d %d\n", item->Name(), item->Frame(), item->GetPerFrameKey(), bounds.x, bounds.y, bounds.XMost(), bounds.YMost());
-      printf("paint check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, size.width, size.height);
+      GP("Trying %s %p-%d %d %d %d %d\n", item->Name(), item->Frame(), item->GetPerFrameKey(), bounds.x, bounds.y, bounds.XMost(), bounds.YMost());
+      GP("paint check invalid %d %d - %d %d\n", bottomRight.x, bottomRight.y, size.width, size.height);
       // skip items not in inside the invalidation bounds
       // empty 'bounds' will be skipped
       if (!mInvalidRect.Intersects(bounds)) {
-        printf("Passing\n");
+        GP("Passing\n");
         continue;
       }
       MOZ_RELEASE_ASSERT(bottomRight.x <= size.width && bottomRight.y <= size.height);
       if (mInvalidRect.Contains(bounds)) {
-        printf("Wholely contained\n");
+        GP("Wholely contained\n");
         BlobItemData* data = GetBlobItemData(item);
         data->mInvalid = false;
       } else {
@@ -559,7 +568,7 @@ struct DIGroup {
 
       nsDisplayList* children = item->GetChildren();
       if (children) {
-        printf("doing children in EndGroup\n");
+        GP("doing children in EndGroup\n");
         aGrouper->PaintContainerItem(this, item, children, aContext, aRecorder);
       } else {
         // XXX: what's this for? flush_item(blobData.mRect);
@@ -575,7 +584,7 @@ struct DIGroup {
           currentClip.ApplyTo(aContext, aGrouper->mAppUnitsPerDevPixel, commonClipCount);
         }
         aContext->NewPath();
-        printf("painting %s %p-%d\n", item->Name(), item->Frame(), item->GetPerFrameKey());
+        GP("painting %s %p-%d\n", item->Name(), item->Frame(), item->GetPerFrameKey());
         item->Paint(aGrouper->mDisplayListBuilder, aContext);
         aContext->Restore();
         aContext->GetDrawTarget()->FlushItem(bounds);
@@ -583,9 +592,10 @@ struct DIGroup {
     }
   }
   ~DIGroup() {
+    GP("Group destruct\n");
     for (auto iter = mDisplayItems.Iter(); !iter.Done(); iter.Next()) {
       BlobItemData* data = iter.Get()->GetKey();
-      printf("Deleting %p-%d\n", data->mFrame, data->mDisplayItemKey);
+      GP("Deleting %p-%d\n", data->mFrame, data->mDisplayItemKey);
       iter.Remove();
       delete data;
     }
@@ -618,11 +628,11 @@ Grouper::PaintContainerItem(DIGroup* aGroup, nsDisplayItem* aItem,
       }
 
       aContext->PushGroupForBlendBack(gfxContentType::COLOR_ALPHA, opacityItem->GetOpacity());
-      printf("beginGroup %s %p-%d\n", aItem->Name(), aItem->Frame(), aItem->GetPerFrameKey());
+      GP("beginGroup %s %p-%d\n", aItem->Name(), aItem->Frame(), aItem->GetPerFrameKey());
       aContext->GetDrawTarget()->FlushItem(aGroup->ItemBounds(aItem));
       aGroup->PaintItemRange(this, aChildren->GetBottom(), nullptr, aContext, aRecorder);
       aContext->PopGroupAndBlend();
-      printf("endGroup %s %p-%d\n", aItem->Name(), aItem->Frame(), aItem->GetPerFrameKey());
+      GP("endGroup %s %p-%d\n", aItem->Name(), aItem->Frame(), aItem->GetPerFrameKey());
       aContext->GetDrawTarget()->FlushItem(aGroup->ItemBounds(aItem));
       break;
     }
@@ -673,7 +683,7 @@ IsItemProbablyActive(nsDisplayItem* aItem, nsDisplayListBuilder* aDisplayListBui
     Matrix4x4 t = transformItem->GetTransform();
     Matrix t2d;
     bool is2D = t.Is2D(&t2d);
-    printf("active: %d\n", transformItem->MayBeAnimated(aDisplayListBuilder));
+    GP("active: %d\n", transformItem->MayBeAnimated(aDisplayListBuilder));
     return transformItem->MayBeAnimated(aDisplayListBuilder) || !is2D || HasActiveChildren(*transformItem->GetChildren(), aDisplayListBuilder);
   }
   // TODO: handle opacity etc.
@@ -696,13 +706,16 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
   while (item) {
     nsDisplayList* children = item->GetChildren();
     if (IsItemProbablyActive(item, mDisplayListBuilder)) {
+      mGroupCount++;
       currentGroup->EndGroup(aCommandBuilder->mManager, aBuilder, aResources, this, startOfCurrentGroup, item);
       // Note: this call to CreateWebRenderCommands can recurse back into
       // this function.
       mScrollingHelper.BeginItem(item, aSc);
+      indent++;
       bool createdWRCommands =
         item->CreateWebRenderCommands(aBuilder, aResources, aSc, aCommandBuilder->mManager,
                                       mDisplayListBuilder);
+      indent--;
       MOZ_RELEASE_ASSERT(createdWRCommands, "active transforms should always succeed at creating WebRender commands");
 
       RefPtr<WebRenderGroupData> groupData =
@@ -716,7 +729,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
       if (groupData->mFollowingGroup.mKey) {
         if (!groupData->mFollowingGroup.mGroupBounds.IsEqualEdges(currentGroup->mGroupBounds)) {
           // The group changed size
-          printf("Inner group size change\n");
+          GP("Inner group size change\n");
           aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
           groupData->mFollowingGroup.mKey = Nothing();
           IntSize size = currentGroup->mGroupBounds.Size().ToNearestPixels(mAppUnitsPerDevPixel);
@@ -742,16 +755,16 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
         // clear_display_items();
         Matrix m = mTransform;
 
-        printf("t2d: %f %f\n", t2d._31, t2d._32); 
+        GP("t2d: %f %f\n", t2d._31, t2d._32); 
         mTransform.PreMultiply(t2d);
-        printf("mTransform: %f %f\n", mTransform._31, mTransform._32); 
+        GP("mTransform: %f %f\n", mTransform._31, mTransform._32); 
         ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, transformItem->GetChildren(), aSc);
         mTransform = m;
       } else if (children) {
         ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, children, aSc);
       }
 
-      printf("Including %s of %d\n", item->Name(), currentGroup->mDisplayItems.Count());
+      GP("Including %s of %d\n", item->Name(), currentGroup->mDisplayItems.Count());
 
       BlobItemData* data = GetBlobItemData(item);
       // Iterate over display items looking up their BlobItemData
@@ -764,7 +777,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
         }
       }
       if (!data) {
-        printf("Allocating blob data\n");
+        GP("Allocating blob data\n");
         data = new BlobItemData(currentGroup, item);
         currentGroup->mDisplayItems.PutEntry(data);
       }
@@ -777,6 +790,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
     item = item->GetAbove();
   }
 
+  mGroupCount++;
   currentGroup->EndGroup(aCommandBuilder->mManager, aBuilder, aResources, this, startOfCurrentGroup, nullptr);
 }
 
@@ -806,29 +820,30 @@ Grouper::ConstructGroupsInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
       // clear_display_items();
       Matrix m = mTransform;
 
-      printf("t2d: %f %f\n", t2d._31, t2d._32); 
+      GP("t2d: %f %f\n", t2d._31, t2d._32); 
       mTransform.PreMultiply(t2d);
-      printf("mTransform: %f %f\n", mTransform._31, mTransform._32); 
+      GP("mTransform: %f %f\n", mTransform._31, mTransform._32); 
       ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, transformItem->GetChildren(), aSc);
       mTransform = m;
     } else if (children) {
       ConstructGroupsInsideInactive(aCommandBuilder, aBuilder, aResources, currentGroup, children, aSc);
     }
 
-    printf("Including %s of %d\n", item->Name(), currentGroup->mDisplayItems.Count());
+    GP("Including %s of %d\n", item->Name(), currentGroup->mDisplayItems.Count());
 
     // Iterate over display items looking up their BlobItemData
     BlobItemData* data = GetBlobItemData(item);
     if (data) {
       MOZ_RELEASE_ASSERT(data->mGroup->mDisplayItems.Contains(data));
       if (data->mGroup != currentGroup) {
+        GP("group don't match %p %p\n", data->mGroup, currentGroup);
         // the item is for another group
         // it should be cleared out as being unused at the end of this paint
         data = nullptr;
       }
     }
     if (!data) {
-      printf("Allocating blob data\n");
+      GP("Allocating blob data\n");
       data = new BlobItemData(currentGroup, item);
       currentGroup->mDisplayItems.PutEntry(data);
     }
@@ -855,7 +870,7 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
   // mScrollingHelper.BeginList();
   Grouper g(mScrollingHelper);
   g.mAppUnitsPerDevPixel = aWrappingItem->Frame()->PresContext()->AppUnitsPerDevPixel();
-  printf("DoGroupingForDisplayList\n");
+  GP("DoGroupingForDisplayList\n");
 
   g.mDisplayListBuilder = aDisplayListBuilder;
   RefPtr<WebRenderGroupData> groupData = CreateOrRecycleWebRenderUserData<WebRenderGroupData>(aWrappingItem);
@@ -867,17 +882,17 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
   nsPoint topLeft = (*agr)->GetOffsetToCrossDoc(referenceFrame);
   auto p = group.mGroupBounds;
   auto q = groupBounds;
-  printf("Bounds: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
+  GP("Bounds: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
   if (!group.mGroupBounds.IsEqualEdges(groupBounds)) {
     // The bounds have changed so we need to discard the old image and add all
     // the commands again.
     auto p = group.mGroupBounds;
     auto q = groupBounds;
-    printf("Bounds change: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
-    printf("items: %d\n", group.mDisplayItems.Count());
+    GP("Bounds change: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
+    GP("items: %d\n", group.mDisplayItems.Count());
     for (auto iter = group.mDisplayItems.Iter(); !iter.Done(); iter.Next()) {
       BlobItemData* data = iter.Get()->GetKey();
-      printf("Deleting %p-%d\n", data->mFrame, data->mDisplayItemKey);
+      GP("Deleting %p-%d\n", data->mFrame, data->mDisplayItemKey);
       iter.Remove();
       delete data;
     }
@@ -1019,7 +1034,7 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
 {
   if (mDoGrouping) {
     MOZ_RELEASE_ASSERT(aWrappingItem, "Only the root list should have a null wrapping item, and mDoGrouping should never be true for the root list.");
-    printf("actually entering the grouping code\n");
+    GP("actually entering the grouping code\n");
     DoGroupingForDisplayList(aDisplayList, aWrappingItem, aDisplayListBuilder, aSc, aBuilder, aResources);
     return;
   }
@@ -1138,7 +1153,7 @@ WebRenderCommandBuilder::CreateWebRenderCommandsFromDisplayList(nsDisplayList* a
         // animated geometry root, so we can combine subsequent items of that
         // type into the same image.
         mDoGrouping = true;
-        printf("attempting to enter the grouping code\n");
+        GP("attempting to enter the grouping code\n");
       }/* else if (itemType == DisplayItemType::TYPE_FOREIGN_OBJECT) {
         // We do not want to apply grouping inside <foreignObject>.
         // TODO: TYPE_FOREIGN_OBJECT does not exist yet, make it exist
@@ -1697,6 +1712,7 @@ WebRenderGroupData::WebRenderGroupData(WebRenderLayerManager* aWRManager, nsDisp
 
 WebRenderGroupData::~WebRenderGroupData()
 {
+  GP("Group data destruct\n");
 }
 
 
