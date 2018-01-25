@@ -771,6 +771,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
       if (data) {
         MOZ_RELEASE_ASSERT(data->mGroup->mDisplayItems.Contains(data));
         if (data->mGroup != currentGroup) {
+          GP("group don't match %p %p\n", data->mGroup, currentGroup);
           // the item is for another group
           // it should be cleared out as being unused at the end of this paint
           data = nullptr;
