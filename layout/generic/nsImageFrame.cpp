@@ -650,7 +650,7 @@ nsImageFrame::InvalidateSelf(const nsIntRect* aLayerInvalidRect,
     nsIFrame::WebRenderUserDataTable* userDataTable =
       GetProperty(nsIFrame::WebRenderUserDataProperty());
     RefPtr<WebRenderUserData> data;
-    userDataTable->Get(static_cast<uint32_t>(DisplayItemType::TYPE_IMAGE), getter_AddRefs(data));
+    userDataTable->Get(WebRenderUserDataKey(static_cast<uint32_t>(DisplayItemType::TYPE_IMAGE), WebRenderUserData::UserDataType::eFallback), getter_AddRefs(data));
     if (data && data->AsFallbackData()) {
       data->AsFallbackData()->SetInvalid(true);
     }

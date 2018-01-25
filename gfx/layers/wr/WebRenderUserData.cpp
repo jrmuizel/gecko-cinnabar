@@ -30,7 +30,8 @@ WebRenderUserData::SupportsAsyncUpdate(nsIFrame* aFrame)
   nsIFrame::WebRenderUserDataTable* userDataTable =
     aFrame->GetProperty(nsIFrame::WebRenderUserDataProperty());
 
-  userDataTable->Get(static_cast<uint32_t>(DisplayItemType::TYPE_VIDEO), getter_AddRefs(data));
+  userDataTable->Get(WebRenderUserDataKey(static_cast<uint32_t>(DisplayItemType::TYPE_VIDEO), WebRenderUserData::UserDataType::eImage),
+                     getter_AddRefs(data));
   if (data && data->AsImageData()) {
     return data->AsImageData()->IsAsync();
   }

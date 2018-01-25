@@ -1676,7 +1676,7 @@ WebRenderCommandBuilder::RemoveUnusedAndResetWebRenderUserData()
 
       MOZ_ASSERT(userDataTable->Count());
 
-      userDataTable->Remove(data->GetDisplayItemKey());
+      userDataTable->Remove(WebRenderUserDataKey(data->GetDisplayItemKey(), data->GetType()));
 
       if (!userDataTable->Count()) {
         frame->RemoveProperty(nsIFrame::WebRenderUserDataProperty());

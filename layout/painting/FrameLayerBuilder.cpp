@@ -2059,7 +2059,7 @@ FrameLayerBuilder::HasRetainedDataFor(nsIFrame* aFrame, uint32_t aDisplayItemKey
   }
   if (auto userDataTable =
        aFrame->GetProperty(nsIFrame::WebRenderUserDataProperty())) {
-    RefPtr<WebRenderUserData> data = userDataTable->Get(aDisplayItemKey);
+    RefPtr<WebRenderUserData> data = userDataTable->Get(WebRenderUserDataKey(aDisplayItemKey, WebRenderUserData::UserDataType::eFallback));
     if (data) {
       return true;
     }
@@ -6248,7 +6248,7 @@ FrameLayerBuilder::GetMostRecentGeometry(nsDisplayItem* aItem)
   }
   if (auto userDataTable =
        aItem->Frame()->GetProperty(nsIFrame::WebRenderUserDataProperty())) {
-    if (RefPtr<WebRenderUserData> data = userDataTable->Get(itemPerFrameKey)) {
+    if (RefPtr<WebRenderUserData> data = userDataTable->Get(WebRenderUserDataKey(itemPerFrameKey, WebRenderUserData::UserDataType::eFallback))) {
       return data->GetGeometry();
     }
   }

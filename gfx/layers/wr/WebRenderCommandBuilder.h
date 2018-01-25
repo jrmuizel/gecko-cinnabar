@@ -131,7 +131,7 @@ public:
       frame->AddProperty(nsIFrame::WebRenderUserDataProperty(), userDataTable);
     }
 
-    RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(aItem->GetPerFrameKey());
+    RefPtr<WebRenderUserData>& data = userDataTable->GetOrInsert(WebRenderUserDataKey(aItem->GetPerFrameKey(), T::Type()));
     if (!data || (data->GetType() != T::Type()) || !data->IsDataValid(mManager)) {
       // To recreate a new user data, we should remove the data from the table first.
       if (data) {
@@ -167,7 +167,7 @@ public:
       return nullptr;
     }
 
-    RefPtr<WebRenderUserData> data = userDataTable->Get(aPerFrameKey);
+    RefPtr<WebRenderUserData> data = userDataTable->Get(WebRenderUserDataKey(aPerFrameKey, T::Type()));
     if (data && (data->GetType() == T::Type()) && data->IsDataValid(mManager)) {
       RefPtr<T> result = static_cast<T*>(data.get());
       return result.forget();

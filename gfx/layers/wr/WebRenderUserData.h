@@ -7,6 +7,8 @@
 #ifndef GFX_WEBRENDERUSERDATA_H
 #define GFX_WEBRENDERUSERDATA_H
 
+#include <type_traits>
+
 #include "BasicLayers.h"                // for BasicLayerManager
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/webrender/WebRenderAPI.h"
@@ -81,6 +83,25 @@ protected:
   uint32_t mDisplayItemKey;
   WebRenderUserDataRefTable* mTable;
   bool mUsed;
+};
+
+struct WebRenderUserDataKey {
+  WebRenderUserDataKey(uint32_t aFrameKey, WebRenderUserData::UserDataType aType)
+    : mFrameKey(aFrameKey)
+    , mType(aType)
+  { }
+
+  bool operator==(const WebRenderUserDataKey& other) const
+  {
+    return mFrameKey == other.mFrameKey && mType == other.mType;
+  }
+  PLDHashNumber Hash() const
+  {
+    return HashGeneric(mFrameKey, static_cast<std::underlying_type<decltype(mType)>::type>(mType));
+  }
+
+  uint32_t mFrameKey;
+  WebRenderUserData::UserDataType mType;
 };
 
 class WebRenderImageData : public WebRenderUserData

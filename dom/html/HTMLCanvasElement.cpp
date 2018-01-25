@@ -1090,7 +1090,7 @@ HTMLCanvasElement::InvalidateCanvasContent(const gfx::Rect* damageRect)
     nsIFrame::WebRenderUserDataTable* userDataTable =
       frame->GetProperty(nsIFrame::WebRenderUserDataProperty());
     RefPtr<WebRenderUserData> data;
-    userDataTable->Get(static_cast<uint32_t>(DisplayItemType::TYPE_CANVAS), getter_AddRefs(data));
+    userDataTable->Get(WebRenderUserDataKey(static_cast<uint32_t>(DisplayItemType::TYPE_CANVAS), WebRenderUserData::UserDataType::eCanvas), getter_AddRefs(data));
     if (data && data->AsCanvasData()) {
       renderer = data->AsCanvasData()->GetCanvasRenderer();
     }

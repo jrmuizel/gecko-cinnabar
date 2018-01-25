@@ -1171,7 +1171,7 @@ public:
   typedef AutoTArray<nsDisplayItem*, 4> DisplayItemArray;
 
   typedef mozilla::layers::WebRenderUserData WebRenderUserData;
-  typedef nsRefPtrHashtable<nsUint32HashKey, WebRenderUserData> WebRenderUserDataTable;
+  typedef nsRefPtrHashtable<nsGenericHashKey<mozilla::layers::WebRenderUserDataKey>, WebRenderUserData> WebRenderUserDataTable;
 
 #define NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(prop, type, dtor)             \
   static const mozilla::FramePropertyDescriptor<type>* prop() {           \
