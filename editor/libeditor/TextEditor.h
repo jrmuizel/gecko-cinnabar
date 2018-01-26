@@ -21,7 +21,6 @@ class nsIDOMElement;
 class nsIDOMEvent;
 class nsIDOMNode;
 class nsIDocumentEncoder;
-class nsIEditRules;
 class nsIOutputStream;
 class nsISelectionController;
 class nsITransferable;
@@ -30,7 +29,8 @@ namespace mozilla {
 
 class AutoEditInitRulesTrigger;
 class HTMLEditRules;
-class TextEditRules;
+enum class EditAction : int32_t;
+
 namespace dom {
 class Selection;
 } // namespace dom
@@ -130,7 +130,7 @@ public:
   virtual nsresult HandleKeyPressEvent(
                      WidgetKeyboardEvent* aKeyboardEvent) override;
 
-  virtual already_AddRefed<dom::EventTarget> GetDOMEventTarget() override;
+  virtual dom::EventTarget* GetDOMEventTarget() override;
 
   virtual nsresult BeginIMEComposition(WidgetCompositionEvent* aEvent) override;
   virtual nsresult UpdateIMEComposition(
@@ -188,20 +188,19 @@ protected:
                                          const nsACString& aCharset);
 
   /**
-   * CreateBR() creates new <br> element and inserts it before the point,
-   * aNode - aOffset, and collapse selection if it's necessary.
+   * CreateBR() creates new <br> element and inserts it before aPointToInsert,
+   * and collapse selection if it's necessary.
    *
-   * @param aNode       The container node to insert new <br> element.
-   * @param aOffset     The offset in aNode to insert new <br> element.
-   * @param aSelect     If eNone, this won't change selection.
-   *                    If eNext, selection will be collapsed after the <br>
-   *                    element.
-   *                    If ePrevious, selection will be collapsed at the <br>
-   *                    element.
-   * @return            The new <br> node.  If failed to create new <br> node,
-   *                    returns nullptr.
+   * @param aPointToInsert  The point to insert new <br> element.
+   * @param aSelect         If eNone, this won't change selection.
+   *                        If eNext, selection will be collapsed after the
+   *                        <br> element.
+   *                        If ePrevious, selection will be collapsed at the
+   *                        <br> element.
+   * @return                The new <br> node.  If failed to create new <br>
+   *                        node, returns nullptr.
    */
-  already_AddRefed<Element> CreateBR(nsINode* aNode, int32_t aOffset,
+  already_AddRefed<Element> CreateBR(const EditorRawDOMPoint& aPointToInsert,
                                      EDirection aSelect = eNone);
 
   /**
@@ -257,7 +256,6 @@ protected:
                          const nsACString& aCharacterSet);
 
 protected:
-  nsCOMPtr<nsIEditRules> mRules;
   nsCOMPtr<nsIDocumentEncoder> mCachedDocumentEncoder;
   nsString mCachedDocumentEncoderType;
   int32_t mWrapColumn;

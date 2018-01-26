@@ -28,10 +28,13 @@ from taskgraph.util.schema import (
     optionally_keyed_by,
     Schema,
 )
+from mozbuild.schedules import INCLUSIVE_COMPONENTS
+
 from voluptuous import (
     Any,
     Optional,
     Required,
+    Exclusive,
 )
 
 import copy
@@ -102,6 +105,11 @@ WINDOWS_WORKER_TYPES = {
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
     },
     'windows10-64-asan': {
+      'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
+      'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
+      'hardware': 'releng-hardware/gecko-t-win10-64-hw',
+    },
+    'windows10-64-qr': {
       'virtual': 'aws-provisioner-v1/gecko-t-win10-64',
       'virtual-with-gpu': 'aws-provisioner-v1/gecko-t-win10-64-gpu',
       'hardware': 'releng-hardware/gecko-t-win10-64-hw',
@@ -182,7 +190,7 @@ test_description_schema = Schema({
     # Note that the special case 'built-projects', the default, uses the parent
     # build task's run-on-projects, meaning that tests run only on platforms
     # that are built.
-    Optional('run-on-projects', default='built-projects'): optionally_keyed_by(
+    Optional('run-on-projects'): optionally_keyed_by(
         'test-platform',
         Any([basestring], 'built-projects')),
 
@@ -194,7 +202,7 @@ test_description_schema = Schema({
     # number of chunks to create for this task.  This can be keyed by test
     # platform by passing a dictionary in the `by-test-platform` key.  If the
     # test platform is not found, the key 'default' will be tried.
-    Required('chunks', default=1): optionally_keyed_by(
+    Required('chunks'): optionally_keyed_by(
         'test-platform',
         int),
 
@@ -206,27 +214,27 @@ test_description_schema = Schema({
     # without e10s; if true, run with e10s; if 'both', run one task with and
     # one task without e10s.  E10s tasks have "-e10s" appended to the test name
     # and treeherder group.
-    Required('e10s', default='true'): optionally_keyed_by(
+    Required('e10s'): optionally_keyed_by(
         'test-platform', 'project',
         Any(bool, 'both')),
 
     # Whether the task should run with WebRender enabled or not.
-    Optional('webrender', default=False): bool,
+    Optional('webrender'): bool,
 
     # The EC2 instance size to run these tests on.
-    Required('instance-size', default='default'): optionally_keyed_by(
+    Required('instance-size'): optionally_keyed_by(
         'test-platform',
         Any('default', 'large', 'xlarge')),
 
     # type of virtualization or hardware required by test.
-    Required('virtualization', default='virtual'): optionally_keyed_by(
+    Required('virtualization'): optionally_keyed_by(
         'test-platform',
         Any('virtual', 'virtual-with-gpu', 'hardware')),
 
     # Whether the task requires loopback audio or video (whatever that may mean
     # on the platform)
-    Required('loopback-audio', default=False): bool,
-    Required('loopback-video', default=False): bool,
+    Required('loopback-audio'): bool,
+    Required('loopback-video'): bool,
 
     # Whether the test can run using a software GL implementation on Linux
     # using the GL compositor. May not be used with "legacy" sized instances
@@ -238,7 +246,7 @@ test_description_schema = Schema({
     # name of the docker image or in-tree docker image to run the task in.  If
     # in-tree, then a dependency will be created automatically.  This is
     # generally `desktop-test`, or an image that acts an awful lot like it.
-    Required('docker-image', default={'in-tree': 'desktop1604-test'}): optionally_keyed_by(
+    Required('docker-image'): optionally_keyed_by(
         'test-platform',
         Any(
             # a raw Docker image path (repo/image:tag)
@@ -252,7 +260,7 @@ test_description_schema = Schema({
 
     # seconds of runtime after which the task will be killed.  Like 'chunks',
     # this can be keyed by test pltaform.
-    Required('max-run-time', default=3600): optionally_keyed_by(
+    Required('max-run-time'): optionally_keyed_by(
         'test-platform',
         int),
 
@@ -260,10 +268,10 @@ test_description_schema = Schema({
     Optional('retry-exit-status'): int,
 
     # Whether to perform a gecko checkout.
-    Required('checkout', default=False): bool,
+    Required('checkout'): bool,
 
     # Wheter to perform a machine reboot after test is done
-    Optional('reboot', default=False):
+    Optional('reboot'):
         Any(False, 'always', 'on-exception', 'on-failure'),
 
     # What to run
@@ -286,7 +294,7 @@ test_description_schema = Schema({
 
         # additional command-line options for mozharness, beyond those
         # automatically added
-        Required('extra-options', default=[]): optionally_keyed_by(
+        Required('extra-options'): optionally_keyed_by(
             'test-platform',
             [basestring]),
 
@@ -295,11 +303,11 @@ test_description_schema = Schema({
         Optional('build-artifact-name'): basestring,
 
         # If true, tooltool downloads will be enabled via relengAPIProxy.
-        Required('tooltool-downloads', default=False): bool,
+        Required('tooltool-downloads'): bool,
 
         # This mozharness script also runs in Buildbot and tries to read a
         # buildbot config file, so tell it not to do so in TaskCluster
-        Required('no-read-buildbot-config', default=False): bool,
+        Required('no-read-buildbot-config'): bool,
 
         # Add --blob-upload-branch=<project> mozharness parameter
         Optional('include-blob-upload-branch'): bool,
@@ -312,16 +320,16 @@ test_description_schema = Schema({
         # environment.  This is more than just a helpful path setting -- it
         # causes xpcshell tests to start additional servers, and runs
         # additional tests.
-        Required('set-moz-node-path', default=False): bool,
+        Required('set-moz-node-path'): bool,
 
         # If true, include chunking information in the command even if the number
         # of chunks is 1
-        Required('chunked', default=False): optionally_keyed_by(
+        Required('chunked'): optionally_keyed_by(
             'test-platform',
             bool),
 
         # The chunking argument format to use
-        Required('chunking-args', default='this-chunk'): Any(
+        Required('chunking-args'): Any(
             # Use the usual --this-chunk/--total-chunk arguments
             'this-chunk',
             # Use --test-suite=<suite>-<chunk-suffix>; see chunk-suffix, below
@@ -333,7 +341,7 @@ test_description_schema = Schema({
         # be replaced with the chunk number.
         Optional('chunk-suffix'): basestring,
 
-        Required('requires-signed-builds', default=False): optionally_keyed_by(
+        Required('requires-signed-builds'): optionally_keyed_by(
             'test-platform',
             bool),
     },
@@ -343,7 +351,7 @@ test_description_schema = Schema({
 
     # os user groups for test task workers; required scopes, will be
     # added automatically
-    Optional('os-groups', default=[]): optionally_keyed_by(
+    Optional('os-groups'): optionally_keyed_by(
         'test-platform',
         [basestring]),
 
@@ -372,9 +380,13 @@ test_description_schema = Schema({
     Optional('product'): basestring,
 
     # conditional files to determine when these tests should be run
-    Optional('when'): Any({
+    Exclusive(Optional('when'), 'optimization'): Any({
         Optional('files-changed'): [basestring],
     }),
+
+    # The SCHEDULES component for this task; this defaults to the suite
+    # (not including the flavor) but can be overridden here.
+    Exclusive(Optional('schedules-component'), 'optimization'): basestring,
 
     Optional('worker-type'): optionally_keyed_by(
         'test-platform',
@@ -382,13 +394,6 @@ test_description_schema = Schema({
     ),
 
 }, required=True)
-
-
-@transforms.add
-def validate(config, tests):
-    for test in tests:
-        yield validate_schema(test_description_schema, test,
-                              "In test {!r}:".format(test['test-name']))
 
 
 @transforms.add
@@ -415,7 +420,7 @@ def set_defaults(config, tests):
         else:
             # all non-android tests want to run the bits that require node
             test['mozharness']['set-moz-node-path'] = True
-            test.setdefault('e10s', 'true')
+            test.setdefault('e10s', True)
 
         # software-gl-layers is only meaningful on linux unittests, where it defaults to True
         if test['test-platform'].startswith('linux') and test['suite'] != 'talos':
@@ -423,11 +428,11 @@ def set_defaults(config, tests):
         else:
             test['allow-software-gl-layers'] = False
 
-        # Enable WebRender by default on the QuantumRender test platform, since
+        # Enable WebRender by default on the QuantumRender test platforms, since
         # the whole point of QuantumRender is to run with WebRender enabled.
-        # If other *-qr test platforms are added they should also be checked for
-        # here; currently linux64-qr is the only one.
-        if test['test-platform'].startswith('linux64-qr'):
+        # This currently matches linux64-qr and windows10-64-qr; both of these
+        # have /opt and /debug variants.
+        if "-qr/" in test['test-platform']:
             test['webrender'] = True
         else:
             test.setdefault('webrender', False)
@@ -439,8 +444,32 @@ def set_defaults(config, tests):
         test.setdefault('run-on-projects', 'built-projects')
         test.setdefault('instance-size', 'default')
         test.setdefault('max-run-time', 3600)
-        test.setdefault('reboot', True)
+        test.setdefault('reboot', False)
+        test.setdefault('virtualization', 'virtual')
+        test.setdefault('run-on-projects', 'built-projects')
+        test.setdefault('chunks', 1)
+        test.setdefault('instance-size', 'default')
+        test.setdefault('loopback-audio', False)
+        test.setdefault('loopback-video', False)
+        test.setdefault('docker-image', {'in-tree': 'desktop1604-test'})
+        test.setdefault('max-run-time', 3600)
+        test.setdefault('checkout', False)
+
         test['mozharness'].setdefault('extra-options', [])
+        test['mozharness'].setdefault('requires-signed-builds', False)
+        test['mozharness'].setdefault('tooltool-downloads', False)
+        test['mozharness'].setdefault('no-read-buildbot-config', False)
+        test['mozharness'].setdefault('set-moz-node-path', False)
+        test['mozharness'].setdefault('chunked', False)
+        test['mozharness'].setdefault('chunking-args', 'this-chunk')
+        yield test
+
+
+@transforms.add
+def validate(config, tests):
+    for test in tests:
+        validate_schema(test_description_schema, test,
+                        "In test {!r}:".format(test['test-name']))
         yield test
 
 
@@ -647,7 +676,7 @@ def handle_suite_category(config, tests):
 
         script = test['mozharness']['script']
         category_arg = None
-        if suite == 'test-verification':
+        if suite == 'test-verify':
             pass
         elif script == 'android_emulator_unittest.py':
             category_arg = '--test-suite'
@@ -670,7 +699,6 @@ def enable_code_coverage(config, tests):
     for test in tests:
         if 'ccov' in test['build-platform'] and not test['test-name'].startswith('test-verify'):
             test['mozharness'].setdefault('extra-options', []).append('--code-coverage')
-            test['when'] = {}
             test['instance-size'] = 'xlarge'
             # Ensure we don't run on inbound/autoland/beta, but if the test is try only, ignore it
             if 'mozilla-central' in test['run-on-projects'] or \
@@ -958,6 +986,7 @@ def make_job_description(config, tests):
         jobdesc['description'] = test['description']
         jobdesc['attributes'] = attributes
         jobdesc['dependencies'] = {'build': build_label}
+        jobdesc['job-from'] = test['job-from']
 
         if test['mozharness']['requires-signed-builds'] is True:
             jobdesc['dependencies']['build-signing'] = test['build-signing-label']
@@ -984,16 +1013,23 @@ def make_job_description(config, tests):
             'platform': test.get('treeherder-machine-platform', test['build-platform']),
         }
 
+        suite = test.get('schedules-component', attributes['unittest_suite'])
+        if suite in INCLUSIVE_COMPONENTS:
+            # if this is an "inclusive" test, then all files which might
+            # cause it to run are annotated with SCHEDULES in moz.build,
+            # so do not include the platform or any other components here
+            schedules = [suite]
+        else:
+            schedules = [suite, platform_family(test['build-platform'])]
+
         if test.get('when'):
             jobdesc['when'] = test['when']
+        elif config.params['project'] != 'try':
+            # for non-try branches, include SETA
+            jobdesc['optimization'] = {'skip-unless-schedules-or-seta': schedules}
         else:
-            schedules = [attributes['unittest_suite'], platform_family(test['build-platform'])]
-            if config.params['project'] != 'try':
-                # for non-try branches, include SETA
-                jobdesc['optimization'] = {'skip-unless-schedules-or-seta': schedules}
-            else:
-                # otherwise just use skip-unless-schedules
-                jobdesc['optimization'] = {'skip-unless-schedules': schedules}
+            # otherwise just use skip-unless-schedules
+            jobdesc['optimization'] = {'skip-unless-schedules': schedules}
 
         run = jobdesc['run'] = {}
         run['using'] = 'mozharness-test'

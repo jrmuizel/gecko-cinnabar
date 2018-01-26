@@ -7,6 +7,7 @@
 #include "InterceptedHttpChannel.h"
 #include "nsContentSecurityManager.h"
 #include "nsEscape.h"
+#include "mozilla/dom/PerformanceStorage.h"
 
 namespace mozilla {
 namespace net {
@@ -32,6 +33,7 @@ InterceptedHttpChannel::InterceptedHttpChannel(PRTime aCreationTime,
   , mResumeStartPos(0)
   , mSynthesizedOrReset(Invalid)
   , mCallingStatusAndProgress(false)
+  , mDiverting(false)
 {
   // Pre-set the creation and AsyncOpen times based on the original channel
   // we are intercepting.  We don't want our extra internal redirect to mask
@@ -199,6 +201,8 @@ InterceptedHttpChannel::FollowSyntheticRedirect()
     redirectFlags = nsIChannelEventSink::REDIRECT_PERMANENT;
   }
 
+  PropagateReferenceIfNeeded(mURI, redirectURI);
+
   bool rewriteToGET = ShouldRewriteRedirectToGET(mResponseHead->Status(),
                                                  mRequestHead.ParsedMethod());
 
@@ -208,6 +212,7 @@ InterceptedHttpChannel::FollowSyntheticRedirect()
   rv = NS_NewChannelInternal(getter_AddRefs(newChannel),
                              redirectURI,
                              redirectLoadInfo,
+                             nullptr, // PerformanceStorage
                              nullptr, // aLoadGroup
                              nullptr, // aCallbacks
                              mLoadFlags,
@@ -498,6 +503,15 @@ InterceptedHttpChannel::Cancel(nsresult aStatus)
     mStatus = aStatus;
   }
 
+  // Everything is suspended during diversion until it completes.  Since the
+  // intercepted channel could be a long-running stream, we need to request that
+  // cancellation be triggered in the child, completing the diversion and
+  // allowing cancellation to run to completion.
+  if (mDiverting) {
+    Unused << mParentChannel->CancelDiversion();
+    // (We want the pump to be canceled as well, so don't directly return.)
+  }
+
   if (mPump) {
     return mPump->Cancel(mStatus);
   }
@@ -652,6 +666,7 @@ InterceptedHttpChannel::ResetInterception(void)
   nsresult rv = NS_NewChannelInternal(getter_AddRefs(newChannel),
                                       mURI,
                                       redirectLoadInfo,
+                                      nullptr, // PerformanceStorage
                                       nullptr, // aLoadGroup
                                       nullptr, // aCallbacks
                                       mLoadFlags);
@@ -942,8 +957,12 @@ InterceptedHttpChannel::SetChannelResetEnd(mozilla::TimeStamp aTimeStamp)
 NS_IMETHODIMP
 InterceptedHttpChannel::SaveTimeStamps(void)
 {
-  nsCString navigationOrSubresource = nsContentUtils::IsNonSubresourceRequest(this) ?
+  bool isNonSubresourceRequest = nsContentUtils::IsNonSubresourceRequest(this);
+  nsCString navigationOrSubresource = isNonSubresourceRequest ?
     NS_LITERAL_CSTRING("navigation") : NS_LITERAL_CSTRING("subresource");
+
+  nsAutoCString subresourceKey(EmptyCString());
+  GetSubresourceTimeStampKey(this, subresourceKey);
 
   // We may have null timestamps if the fetch dispatch runnable was cancelled
   // and we defaulted to resuming the request.
@@ -953,16 +972,31 @@ InterceptedHttpChannel::SaveTimeStamps(void)
       Telemetry::SERVICE_WORKER_FETCH_EVENT_CHANNEL_RESET_MS;
     Telemetry::Accumulate(id, navigationOrSubresource,
       static_cast<uint32_t>((mFinishResponseEnd - mFinishResponseStart).ToMilliseconds()));
+    if (!isNonSubresourceRequest && !subresourceKey.IsEmpty()) {
+      Telemetry::Accumulate(id, subresourceKey,
+        static_cast<uint32_t>((mFinishResponseEnd - mFinishResponseStart).ToMilliseconds()));
+    }
   }
 
   Telemetry::Accumulate(Telemetry::SERVICE_WORKER_FETCH_EVENT_DISPATCH_MS,
     navigationOrSubresource,
     static_cast<uint32_t>((mHandleFetchEventStart - mDispatchFetchEventStart).ToMilliseconds()));
 
+  if (!isNonSubresourceRequest && !subresourceKey.IsEmpty()) {
+    Telemetry::Accumulate(Telemetry::SERVICE_WORKER_FETCH_EVENT_DISPATCH_MS,
+      subresourceKey,
+      static_cast<uint32_t>((mHandleFetchEventStart - mDispatchFetchEventStart).ToMilliseconds()));
+  }
+
   if (!mFinishResponseEnd.IsNull()) {
     Telemetry::Accumulate(Telemetry::SERVICE_WORKER_FETCH_INTERCEPTION_DURATION_MS,
       navigationOrSubresource,
       static_cast<uint32_t>((mFinishResponseEnd - mDispatchFetchEventStart).ToMilliseconds()));
+    if (!isNonSubresourceRequest && !subresourceKey.IsEmpty()) {
+      Telemetry::Accumulate(Telemetry::SERVICE_WORKER_FETCH_INTERCEPTION_DURATION_MS,
+        subresourceKey,
+        static_cast<uint32_t>((mFinishResponseEnd - mDispatchFetchEventStart).ToMilliseconds()));
+    }
   }
 
   return NS_OK;
@@ -1043,10 +1077,10 @@ InterceptedHttpChannel::OnStopRequest(nsIRequest* aRequest,
 
   mIsPending = false;
 
-  // Register entry to the Performance resource timing
-  mozilla::dom::Performance* documentPerformance = GetPerformance();
-  if (documentPerformance) {
-    documentPerformance->AddEntry(this, this);
+  // Register entry to the PerformanceStorage resource timing
+  mozilla::dom::PerformanceStorage* performanceStorage = GetPerformanceStorage();
+  if (performanceStorage) {
+    performanceStorage->AddEntry(this, this);
   }
 
   if (mListener) {
@@ -1092,6 +1126,7 @@ InterceptedHttpChannel::MessageDiversionStarted(ADivertableParentChannel* aParen
 {
   MOZ_ASSERT(!mParentChannel);
   mParentChannel = aParentChannel;
+  mDiverting = true;
   uint32_t suspendCount = mSuspendCount;
   while(suspendCount--) {
     mParentChannel->SuspendMessageDiversion();
@@ -1104,6 +1139,7 @@ InterceptedHttpChannel::MessageDiversionStop()
 {
   MOZ_ASSERT(mParentChannel);
   mParentChannel = nullptr;
+  mDiverting = false;
   return NS_OK;
 }
 

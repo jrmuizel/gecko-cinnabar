@@ -64,6 +64,9 @@ impl HandyDandyRectBuilder for (i32, i32) {
 pub trait Example {
     const TITLE: &'static str = "WebRender Sample App";
     const PRECACHE_SHADERS: bool = false;
+    const WIDTH: u32 = 1920;
+    const HEIGHT: u32 = 1080;
+
     fn render(
         &mut self,
         api: &RenderApi,
@@ -79,7 +82,7 @@ pub trait Example {
     fn get_image_handlers(
         &mut self,
         _gl: &gl::Gl,
-    ) -> (Option<Box<webrender::ExternalImageHandler>>, 
+    ) -> (Option<Box<webrender::ExternalImageHandler>>,
           Option<Box<webrender::OutputImageHandler>>) {
         (None, None)
     }
@@ -103,6 +106,7 @@ pub fn main_wrapper<E: Example>(
     let window = glutin::WindowBuilder::new()
         .with_title(E::TITLE)
         .with_multitouch()
+        .with_dimensions(E::WIDTH, E::HEIGHT)
         .with_gl(glutin::GlRequest::GlThenGles {
             opengl_version: (3, 2),
             opengles_version: (3, 0),
@@ -114,13 +118,14 @@ pub fn main_wrapper<E: Example>(
         window.make_current().ok();
     }
 
-    let gl = match gl::GlType::default() {
-        gl::GlType::Gl => unsafe {
+    let gl = match window.get_api() {
+        glutin::Api::OpenGl => unsafe {
             gl::GlFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
         },
-        gl::GlType::Gles => unsafe {
+        glutin::Api::OpenGlEs => unsafe {
             gl::GlesFns::load_with(|symbol| window.get_proc_address(symbol) as *const _)
         },
+        glutin::Api::WebGl => unimplemented!(),
     };
 
     println!("OpenGL version {}", gl.get_string(gl::VERSION));
@@ -135,6 +140,7 @@ pub fn main_wrapper<E: Example>(
         precache_shaders: E::PRECACHE_SHADERS,
         device_pixel_ratio,
         clear_color: Some(ColorF::new(0.3, 0.0, 0.0, 1.0)),
+        //scatter_gpu_cache_updates: false,
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 
@@ -159,7 +165,7 @@ pub fn main_wrapper<E: Example>(
 
     let epoch = Epoch(0);
     let pipeline_id = PipelineId(0, 0);
-    let layout_size = framebuffer_size.to_f32() / euclid::ScaleFactor::new(device_pixel_ratio);
+    let layout_size = framebuffer_size.to_f32() / euclid::TypedScale::new(device_pixel_ratio);
     let mut builder = DisplayListBuilder::new(pipeline_id, layout_size);
     let mut resources = ResourceUpdates::new();
 
@@ -171,17 +177,18 @@ pub fn main_wrapper<E: Example>(
         pipeline_id,
         document_id,
     );
-    api.set_display_list(
-        document_id,
+    let mut txn = Transaction::new();
+    txn.set_display_list(
         epoch,
         None,
         layout_size,
         builder.finalize(),
         true,
-        resources,
     );
-    api.set_root_pipeline(document_id, pipeline_id);
-    api.generate_frame(document_id, None);
+    txn.update_resources(resources);
+    txn.set_root_pipeline(pipeline_id);
+    txn.generate_frame();
+    api.send_transaction(document_id, txn);
 
     println!("Entering event loop");
     'outer: for event in window.wait_events() {
@@ -189,6 +196,7 @@ pub fn main_wrapper<E: Example>(
         events.push(event);
         events.extend(window.poll_events());
 
+        let mut txn = Transaction::new();
         for event in events {
             match event {
                 glutin::Event::Closed |
@@ -225,6 +233,13 @@ pub fn main_wrapper<E: Example>(
                 glutin::Event::KeyboardInput(
                     glutin::ElementState::Pressed,
                     _,
+                    Some(glutin::VirtualKeyCode::S),
+                ) => {
+                    renderer.toggle_debug_flags(webrender::DebugFlags::COMPACT_PROFILER);
+                }
+                glutin::Event::KeyboardInput(
+                    glutin::ElementState::Pressed,
+                    _,
                     Some(glutin::VirtualKeyCode::Q),
                 ) => {
                     renderer.toggle_debug_flags(webrender::DebugFlags::GPU_TIME_QUERIES
@@ -235,8 +250,7 @@ pub fn main_wrapper<E: Example>(
                     _,
                     Some(glutin::VirtualKeyCode::Key1),
                 ) => {
-                    api.set_window_parameters(
-                        document_id,
+                    txn.set_window_parameters(
                         framebuffer_size,
                         DeviceUintRect::new(DeviceUintPoint::zero(), framebuffer_size),
                         1.0
@@ -247,8 +261,7 @@ pub fn main_wrapper<E: Example>(
                     _,
                     Some(glutin::VirtualKeyCode::Key2),
                 ) => {
-                    api.set_window_parameters(
-                        document_id,
+                    txn.set_window_parameters(
                         framebuffer_size,
                         DeviceUintRect::new(DeviceUintPoint::zero(), framebuffer_size),
                         2.0
@@ -260,6 +273,18 @@ pub fn main_wrapper<E: Example>(
                     Some(glutin::VirtualKeyCode::M),
                 ) => {
                     api.notify_memory_pressure();
+                }
+                #[cfg(feature = "capture")]
+                glutin::Event::KeyboardInput(
+                    glutin::ElementState::Pressed,
+                    _,
+                    Some(glutin::VirtualKeyCode::C),
+                ) => {
+                    let path: PathBuf = "../captures/example".into();
+                    //TODO: switch between SCENE/FRAME capture types
+                    // based on "shift" modifier, when `glutin` is updated.
+                    let bits = CaptureBits::all();
+                    api.save_capture(path, bits);
                 }
                 _ => if example.on_event(event, &api, document_id) {
                     let mut builder = DisplayListBuilder::new(pipeline_id, layout_size);
@@ -273,19 +298,19 @@ pub fn main_wrapper<E: Example>(
                         pipeline_id,
                         document_id,
                     );
-                    api.set_display_list(
-                        document_id,
+                    txn.set_display_list(
                         epoch,
                         None,
                         layout_size,
                         builder.finalize(),
                         true,
-                        resources,
                     );
-                    api.generate_frame(document_id, None);
-                },
+                    txn.update_resources(resources);
+                    txn.generate_frame();
+                }
             }
         }
+        api.send_transaction(document_id, txn);
 
         renderer.update();
         renderer.render(framebuffer_size).unwrap();

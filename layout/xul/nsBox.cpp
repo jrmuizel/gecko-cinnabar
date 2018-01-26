@@ -7,6 +7,7 @@
 #include "nsBoxLayoutState.h"
 #include "nsBox.h"
 #include "nsBoxFrame.h"
+#include "nsDOMAttributeMap.h"
 #include "nsPresContext.h"
 #include "nsCOMPtr.h"
 #include "nsIContent.h"
@@ -14,12 +15,12 @@
 #include "nsNameSpaceManager.h"
 #include "nsGkAtoms.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMMozNamedAttrMap.h"
-#include "nsIDOMAttr.h"
 #include "nsITheme.h"
 #include "nsIServiceManager.h"
 #include "nsBoxLayout.h"
 #include "FrameLayerBuilder.h"
+#include "mozilla/dom/Attr.h"
+#include "mozilla/dom/Element.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -65,18 +66,15 @@ nsBox::ListBox(nsAutoString& aResult)
     nsIContent* content = GetContent();
 
     // add on all the set attributes
-    if (content) {
-      nsCOMPtr<nsIDOMNode> node(do_QueryInterface(content));
-      nsCOMPtr<nsIDOMMozNamedAttrMap> namedMap;
+    if (content && content->IsElement()) {
+      RefPtr<nsDOMAttributeMap> namedMap = content->AsElement()->Attributes();
 
-      node->GetAttributes(getter_AddRefs(namedMap));
-      uint32_t length;
-      namedMap->GetLength(&length);
+      uint32_t length = namedMap->Length();
 
-      nsCOMPtr<nsIDOMAttr> attribute;
+      RefPtr<dom::Attr> attribute;
       for (uint32_t i = 0; i < length; ++i)
       {
-        namedMap->Item(i, getter_AddRefs(attribute));
+        attribute = namedMap->Item(i);
         attribute->GetName(name);
         nsAutoString value;
         attribute->GetValue(value);
@@ -465,7 +463,7 @@ nsIFrame::GetXULOrdinal()
     nsresult error;
     nsAutoString value;
 
-    content->GetAttr(kNameSpaceID_None, nsGkAtoms::ordinal, value);
+    content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::ordinal, value);
     if (!value.IsEmpty()) {
       ordinal = value.ToInteger(&error);
     }
@@ -636,7 +634,7 @@ nsIFrame::AddXULPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
         nsAutoString value;
         nsresult error;
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::width, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::width, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
 
@@ -645,7 +643,7 @@ nsIFrame::AddXULPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
             aWidthSet = true;
         }
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::height, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::height, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
 
@@ -737,7 +735,7 @@ nsIFrame::AddXULMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
         nsAutoString value;
         nsresult error;
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::minwidth, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::minwidth, value);
         if (!value.IsEmpty())
         {
             value.Trim("%");
@@ -749,7 +747,7 @@ nsIFrame::AddXULMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
             aWidthSet = true;
         }
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::minheight, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::minheight, value);
         if (!value.IsEmpty())
         {
             value.Trim("%");
@@ -800,7 +798,7 @@ nsIFrame::AddXULMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aH
         nsAutoString value;
         nsresult error;
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::maxwidth, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::maxwidth, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
 
@@ -810,7 +808,7 @@ nsIFrame::AddXULMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aH
             aWidthSet = true;
         }
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::maxheight, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::maxheight, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
 
@@ -839,7 +837,7 @@ nsIFrame::AddXULFlex(nsIFrame* aBox, nscoord& aFlex)
         nsresult error;
         nsAutoString value;
 
-        content->GetAttr(kNameSpaceID_None, nsGkAtoms::flex, value);
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::flex, value);
         if (!value.IsEmpty()) {
             value.Trim("%");
             aFlex = value.ToInteger(&error);

@@ -39,11 +39,6 @@ add_task(async function setup() {
 });
 
 async function run_drag_test(startBookmarkIndex, newParentGuid) {
-  if (!PlacesUIUtils.useAsyncTransactions) {
-    Assert.ok(true, "Skipping test as async transactions are turned off");
-    return;
-  }
-
   if (!newParentGuid) {
     newParentGuid = PlacesUtils.bookmarks.unfiledGuid;
   }
@@ -55,7 +50,7 @@ async function run_drag_test(startBookmarkIndex, newParentGuid) {
   let dragBookmark = bookmarks[startBookmarkIndex];
 
   await withSidebarTree("bookmarks", async (tree) => {
-    tree.selectItems([PlacesUtils.unfiledBookmarksFolderId]);
+    tree.selectItems([PlacesUtils.bookmarks.unfiledGuid]);
     PlacesUtils.asContainer(tree.selectedNode).containerOpen = true;
 
     // Simulating a drag-drop with a tree view turns out to be really difficult

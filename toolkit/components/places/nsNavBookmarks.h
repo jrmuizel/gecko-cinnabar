@@ -115,6 +115,12 @@ public:
   typedef mozilla::places::ItemChangeData ItemChangeData;
   typedef mozilla::places::BookmarkStatementId BookmarkStatementId;
 
+  nsresult OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
+                   int64_t aSessionId, int64_t aReferringId,
+                   uint32_t aTransitionType, const nsACString& aGUID,
+                   bool aHidden, uint32_t aVisitCount,
+                   uint32_t aTyped, const nsAString& aLastKnownTitle);
+
   nsresult ResultNodeForContainer(int64_t aID,
                                   nsNavHistoryQueryOptions* aOptions,
                                   nsNavHistoryResultNode** aNode);
@@ -134,7 +140,8 @@ public:
    *        A Storage statement (in the case of synchronous execution) or row of
    *        a result set (in the case of asynchronous execution).
    * @param aOptions
-   *        The options of the parent folder node.
+   *        The options of the parent folder node. These are the options used
+   *        to fill the parent node.
    * @param aChildren
    *        The children of the parent folder node.
    * @param aCurrentIndex
@@ -156,7 +163,6 @@ public:
    *        execution.
    */
   nsresult QueryFolderChildrenAsync(nsNavHistoryFolderResultNode* aNode,
-                                    int64_t aFolderId,
                                     mozIStoragePendingStatement** _pendingStmt);
 
   /**
@@ -393,19 +399,6 @@ private:
                               uint16_t aSource,
                               int64_t* _itemId,
                               nsACString& _guid);
-
-  /**
-   * TArray version of getBookmarksIdForURI for ease of use in C++ code.
-   * Pass in a reference to a TArray; it will get filled with the
-   * resulting list of bookmark IDs.
-   *
-   * @param aURI
-   *        URI to get bookmarks for.
-   * @param aResult
-   *        Array of bookmark ids.
-   */
-  nsresult GetBookmarkIdsForURITArray(nsIURI* aURI,
-                                      nsTArray<int64_t>& aResult);
 
   nsresult GetBookmarksForURI(nsIURI* aURI,
                               nsTArray<BookmarkData>& _bookmarks);

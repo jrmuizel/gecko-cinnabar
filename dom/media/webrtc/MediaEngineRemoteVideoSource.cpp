@@ -179,8 +179,10 @@ MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID,
     return NS_ERROR_FAILURE;
   }
 
-  mImageContainer =
-    layers::LayerManager::CreateImageContainer(layers::ImageContainer::ASYNCHRONOUS);
+  if (!mImageContainer) {
+    mImageContainer =
+      layers::LayerManager::CreateImageContainer(layers::ImageContainer::ASYNCHRONOUS);
+  }
 
   {
     MonitorAutoLock lock(mMonitor);
@@ -188,7 +190,7 @@ MediaEngineRemoteVideoSource::Start(SourceMediaStream* aStream, TrackID aID,
     mPrincipalHandles.AppendElement(aPrincipalHandle);
     mTargetCapabilities.AppendElement(mTargetCapability);
     mHandleIds.AppendElement(mHandleId);
-    mImages.AppendElement(mImageContainer->CreatePlanarYCbCrImage());
+    mImages.AppendElement(nullptr);
 
     MOZ_ASSERT(mSources.Length() == mPrincipalHandles.Length());
     MOZ_ASSERT(mSources.Length() == mTargetCapabilities.Length());
@@ -296,10 +298,12 @@ MediaEngineRemoteVideoSource::UpdateSingleSource(
     case kReleased:
       MOZ_ASSERT(aHandle);
       mHandleId = aHandle->mId;
+      LOG(("ChooseCapability(kFitness) for mTargetCapability and mCapability ++"));
       if (!ChooseCapability(aNetConstraints, aPrefs, aDeviceId, mCapability, kFitness)) {
         *aOutBadConstraint = FindBadConstraint(aNetConstraints, *this, aDeviceId);
         return NS_ERROR_FAILURE;
       }
+      LOG(("ChooseCapability(kFitness) for mTargetCapability and mCapability --"));
       mTargetCapability = mCapability;
 
       if (camera::GetChildAndCall(&camera::CamerasChild::AllocateCaptureDevice,
@@ -321,11 +325,13 @@ MediaEngineRemoteVideoSource::UpdateSingleSource(
           index = mHandleIds.IndexOf(mHandleId);
         }
 
+        LOG(("ChooseCapability(kFitness) for mTargetCapability ++"));
         if (!ChooseCapability(aNewConstraint, aPrefs, aDeviceId, mTargetCapability,
                               kFitness)) {
           *aOutBadConstraint = FindBadConstraint(aNewConstraint, *this, aDeviceId);
           return NS_ERROR_FAILURE;
         }
+        LOG(("ChooseCapability(kFitness) for mTargetCapability --"));
 
         if (index != mHandleIds.NoIndex) {
           MonitorAutoLock lock(mMonitor);
@@ -336,11 +342,13 @@ MediaEngineRemoteVideoSource::UpdateSingleSource(
           MOZ_ASSERT(mSources.Length() == mImages.Length());
         }
 
+        LOG(("ChooseCapability(kFeasibility) for mCapability ++"));
         if (!ChooseCapability(aNetConstraints, aPrefs, aDeviceId, mCapability,
                               kFeasibility)) {
           *aOutBadConstraint = FindBadConstraint(aNetConstraints, *this, aDeviceId);
           return NS_ERROR_FAILURE;
         }
+        LOG(("ChooseCapability(kFeasibility) for mCapability --"));
 
         if (mCapability != mLastCapability) {
           camera::GetChildAndCall(&camera::CamerasChild::StopCapture,

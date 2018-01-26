@@ -1425,6 +1425,7 @@ struct SetEnumValueHelper
     aField = static_cast<type_>(value); \
   }
 
+  DEFINE_ENUM_CLASS_SETTER(StyleBorderImageRepeat, Stretch, Space)
   DEFINE_ENUM_CLASS_SETTER(StyleBoxAlign, Stretch, End)
   DEFINE_ENUM_CLASS_SETTER(StyleBoxDecorationBreak, Slice, Clone)
   DEFINE_ENUM_CLASS_SETTER(StyleBoxDirection, Normal, Reverse)
@@ -2473,7 +2474,7 @@ nsRuleNode::WalkRuleTree(const nsStyleStructID aSID,
   AutoCSSValueArray dataArray(dataStorage, nprops);
 
   nsRuleData ruleData(nsCachedStyleData::GetBitForSID(aSID),
-                      dataArray.get(), mPresContext, aContext);
+                      dataArray.get(), aContext);
   ruleData.mValueOffsets[aSID] = 0;
 
   // We start at the most specific rule in the tree.
@@ -4083,8 +4084,7 @@ nsRuleNode::SetGenericFont(nsPresContext* aPresContext,
     GeckoStyleContext* context = contextPath[i];
     AutoCSSValueArray dataArray(dataStorage, nprops);
 
-    nsRuleData ruleData(NS_STYLE_INHERIT_BIT(Font), dataArray.get(),
-                        aPresContext, context);
+    nsRuleData ruleData(NS_STYLE_INHERIT_BIT(Font), dataArray.get(), context);
     ruleData.mValueOffsets[eStyleStruct_Font] = 0;
 
     // Trimmed down version of ::WalkRuleTree() to re-apply the style rules
@@ -7424,64 +7424,6 @@ nsRuleNode::ComputeBorderData(void* aStartStruct,
     }
   }
 
-  // -moz-border-*-colors: color, string, enum, none, inherit/initial
-  nscolor borderColor;
-  nscolor unused = NS_RGB(0,0,0);
-
-  static const nsCSSPropertyID borderColorsProps[] = {
-    eCSSProperty__moz_border_top_colors,
-    eCSSProperty__moz_border_right_colors,
-    eCSSProperty__moz_border_bottom_colors,
-    eCSSProperty__moz_border_left_colors
-  };
-
-  NS_FOR_CSS_SIDES(side) {
-    const nsCSSValue& value = *aRuleData->ValueFor(borderColorsProps[side]);
-    switch (value.GetUnit()) {
-    case eCSSUnit_Null:
-      break;
-
-    case eCSSUnit_Initial:
-    case eCSSUnit_Unset:
-    case eCSSUnit_None:
-      border->ClearBorderColors(side);
-      break;
-
-    case eCSSUnit_Inherit: {
-      conditions.SetUncacheable();
-      border->ClearBorderColors(side);
-      if (parentBorder->mBorderColors) {
-        border->EnsureBorderColors();
-        border->mBorderColors->mColors[side] =
-          parentBorder->mBorderColors->mColors[side];
-      }
-      break;
-    }
-
-    case eCSSUnit_List:
-    case eCSSUnit_ListDep: {
-      // Some composite border color information has been specified for this
-      // border side.
-      border->EnsureBorderColors();
-      border->ClearBorderColors(side);
-      const nsCSSValueList* list = value.GetListValue();
-      while (list) {
-        if (SetColor(list->mValue, unused, mPresContext,
-                     aContext, borderColor, conditions))
-          border->mBorderColors->mColors[side].AppendElement(borderColor);
-        else {
-          NS_NOTREACHED("unexpected item in -moz-border-*-colors list");
-        }
-        list = list->mNext;
-      }
-      break;
-    }
-
-    default:
-      MOZ_ASSERT(false, "unrecognized border color unit");
-    }
-  }
-
   // border-color, border-*-color: color, string, enum, inherit
   {
     const nsCSSPropertyID* subprops =
@@ -7602,14 +7544,14 @@ nsRuleNode::ComputeBorderData(void* aStartStruct,
            conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
            parentBorder->mBorderImageRepeatH,
-           NS_STYLE_BORDER_IMAGE_REPEAT_STRETCH);
+           StyleBorderImageRepeat::Stretch);
 
   SetValue(borderImageRepeat.mYValue,
            border->mBorderImageRepeatV,
            conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
            parentBorder->mBorderImageRepeatV,
-           NS_STYLE_BORDER_IMAGE_REPEAT_STRETCH);
+           StyleBorderImageRepeat::Stretch);
 
   COMPUTE_END_RESET(Border, border)
 }
@@ -10192,8 +10134,7 @@ nsRuleNode::HasAuthorSpecifiedRules(GeckoStyleContext* aStyleContext,
   AutoCSSValueArray dataArray(dataStorage, nprops);
 
   /* We're relying on the use of |styleContext| not mutating it! */
-  nsRuleData ruleData(inheritBits, dataArray.get(),
-                      styleContext->PresContext(), styleContext);
+  nsRuleData ruleData(inheritBits, dataArray.get(), styleContext);
 
   if (ruleTypeMask & NS_AUTHOR_SPECIFIED_BACKGROUND) {
     ruleData.mValueOffsets[eStyleStruct_Background] = backgroundOffset;
@@ -10386,8 +10327,7 @@ nsRuleNode::ComputePropertiesOverridingAnimation(
   AutoCSSValueArray dataArray(dataStorage, nprops);
 
   // We're relying on the use of |aStyleContext| not mutating it!
-  nsRuleData ruleData(structBits, dataArray.get(),
-                      aStyleContext->PresContext(), aStyleContext);
+  nsRuleData ruleData(structBits, dataArray.get(), aStyleContext);
   for (nsStyleStructID sid = nsStyleStructID(0);
        sid < nsStyleStructID_Length; sid = nsStyleStructID(sid + 1)) {
     if (structBits & nsCachedStyleData::GetBitForSID(sid)) {

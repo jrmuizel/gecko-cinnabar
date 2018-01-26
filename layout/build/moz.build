@@ -48,10 +48,8 @@ LOCAL_INCLUDES += [
     '/dom/xslt/xpath',
     '/dom/xslt/xslt',
     '/dom/xul',
-    '/dom/xul/templates',
     '/editor/composer',
     '/editor/txmgr',
-    '/editor/txtsvc',
     '/extensions/cookie',
     '/js/xpconnect/loader',
     '/js/xpconnect/src',
@@ -87,5 +85,5 @@ if CONFIG['MOZ_SECUREELEMENT']:
 
 FINAL_LIBRARY = 'xul'
 
-if CONFIG['GNU_CXX']:
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']

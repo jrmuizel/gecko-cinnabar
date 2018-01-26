@@ -47,6 +47,7 @@ namespace net {
 class HttpBackgroundChannelChild;
 class InterceptedChannelContent;
 class InterceptStreamListener;
+class SyntheticDiversionListener;
 
 class HttpChannelChild final : public PHttpChannelChild
                              , public HttpBaseChannel
@@ -96,6 +97,7 @@ public:
                               bool aMerge) override;
   NS_IMETHOD SetEmptyRequestHeader(const nsACString& aHeader) override;
   NS_IMETHOD RedirectTo(nsIURI *newURI) override;
+  NS_IMETHOD UpgradeToSecure() override;
   NS_IMETHOD GetProtocolVersion(nsACString& aProtocolVersion) override;
   // nsIHttpChannelInternal
   NS_IMETHOD SetupFallbackChannel(const char *aFallbackKey) override;
@@ -142,7 +144,9 @@ protected:
                                              const int16_t& redirectCount,
                                              const uint32_t& cacheKey,
                                              const nsCString& altDataType,
-                                             const int64_t& altDataLen) override;
+                                             const int64_t& altDataLen,
+                                             const OptionalIPCServiceWorkerDescriptor& aController,
+                                             const bool& aApplyConversion) override;
   mozilla::ipc::IPCResult RecvFailedAsyncOpen(const nsresult& status) override;
   mozilla::ipc::IPCResult RecvRedirect1Begin(const uint32_t& registrarId,
                                              const URIParams& newURI,
@@ -166,6 +170,8 @@ protected:
   mozilla::ipc::IPCResult RecvSetPriority(const int16_t& aPriority) override;
 
   mozilla::ipc::IPCResult RecvAttachStreamFilter(Endpoint<extensions::PStreamFilterParent>&& aEndpoint) override;
+
+  mozilla::ipc::IPCResult RecvCancelDiversion() override;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -241,7 +247,8 @@ private:
                                  const uint32_t& aCount,
                                  const nsCString& aData);
   void ProcessOnStopRequest(const nsresult& aStatusCode,
-                            const ResourceTimingStruct& aTiming);
+                            const ResourceTimingStruct& aTiming,
+                            const nsHttpHeaderArray& aResponseTrailers);
   void ProcessOnProgress(const int64_t& aProgress, const int64_t& aProgressMax);
   void ProcessOnStatus(const nsresult& aStatus);
   void ProcessFlushedForDiversion();
@@ -405,7 +412,9 @@ private:
                       const NetAddr& peerAddr,
                       const uint32_t& cacheKey,
                       const nsCString& altDataType,
-                      const int64_t& altDataLen);
+                      const int64_t& altDataLen,
+                      const Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
+                      const bool& aApplyConversion);
   void MaybeDivertOnData(const nsCString& data,
                          const uint64_t& offset,
                          const uint32_t& count);
@@ -414,7 +423,9 @@ private:
                           const uint64_t& offset,
                           const uint32_t& count,
                           const nsCString& data);
-  void OnStopRequest(const nsresult& channelStatus, const ResourceTimingStruct& timing);
+  void OnStopRequest(const nsresult& channelStatus,
+                     const ResourceTimingStruct& timing,
+                     const nsHttpHeaderArray& aResponseTrailers);
   void MaybeDivertOnStop(const nsresult& aChannelStatus);
   void OnProgress(const int64_t& progress, const int64_t& progressMax);
   void OnStatus(const nsresult& status);
@@ -468,6 +479,7 @@ private:
   friend class HttpAsyncAborter<HttpChannelChild>;
   friend class InterceptStreamListener;
   friend class InterceptedChannelContent;
+  friend class SyntheticDiversionListener;
   friend class HttpBackgroundChannelChild;
   friend class NeckoTargetChannelEvent<HttpChannelChild>;
 };

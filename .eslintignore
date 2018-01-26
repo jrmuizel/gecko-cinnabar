@@ -77,6 +77,10 @@ browser/base/content/newtab/**
 # Test files that are really json not js, and don't need to be linted.
 browser/components/sessionstore/test/unit/data/sessionstore_valid.js
 browser/components/sessionstore/test/unit/data/sessionstore_invalid.js
+# This file is split into two in order to keep it as a valid json file
+# for documentation purposes (policies.json) but to be accessed by the
+# code as a .jsm (schema.jsm)
+browser/components/enterprisepolicies/schemas/schema.jsm
 # generated & special files in cld2
 browser/components/translation/cld2/**
 # Screenshots and Follow-on search are imported as a system add-on and have
@@ -90,6 +94,7 @@ browser/extensions/pocket/content/panels/js/tmpl.js
 browser/extensions/pocket/content/panels/js/vendor/**
 # generated or library files in activity-stream
 browser/extensions/activity-stream/data/content/activity-stream.bundle.js
+browser/extensions/activity-stream/test/**
 browser/extensions/activity-stream/vendor/**
 # The only file in browser/locales/ is pre-processed.
 browser/locales/**
@@ -220,6 +225,7 @@ dom/fetch/**
 dom/file/**
 dom/filehandle/**
 dom/filesystem/**
+dom/flex/**
 dom/flyweb/**
 dom/gamepad/**
 dom/geolocation/**
@@ -240,6 +246,7 @@ dom/network/**
 dom/notification/Notification*.*
 dom/notification/test/browser/**
 dom/notification/test/unit/**
+dom/notification/test/mochitest/**
 dom/offline/**
 dom/payments/**
 dom/performance/**
@@ -305,6 +312,7 @@ js/xpconnect/**
 js/src/devtools/**
 js/src/octane/**
 js/src/jit-test/**
+js/src/jsapi-tests/binast/**
 js/src/tests/**
 js/src/Y.js
 

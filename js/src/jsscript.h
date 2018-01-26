@@ -1695,7 +1695,7 @@ class JSScript : public js::gc::TenuredCell
     bool isTopLevel() { return code() && !functionNonDelazifying(); }
 
     /* Ensure the script has a TypeScript. */
-    inline bool ensureHasTypes(JSContext* cx);
+    inline bool ensureHasTypes(JSContext* cx, js::AutoKeepTypeScripts&);
 
     inline js::TypeScript* types();
 
@@ -2483,9 +2483,9 @@ class Concrete<js::LazyScript> : TracerConcrete<js::LazyScript> {
   public:
     static void construct(void *storage, js::LazyScript *ptr) { new (storage) Concrete(ptr); }
 
-    CoarseType coarseType() const final { return CoarseType::Script; }
+    CoarseType coarseType() const final override { return CoarseType::Script; }
     Size size(mozilla::MallocSizeOf mallocSizeOf) const override;
-    const char* scriptFilename() const final;
+    const char* scriptFilename() const final override;
 
     const char16_t* typeName() const override { return concreteTypeName; }
     static const char16_t concreteTypeName[];

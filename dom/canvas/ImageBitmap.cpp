@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/ImageBitmap.h"
 #include "mozilla/CheckedInt.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/ImageBitmapBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/StructuredCloneTags.h"
@@ -34,6 +35,119 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ImageBitmap)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
+
+/* This class observes shutdown notifications and sends that notification
+ * to the worker thread if the image bitmap is on a worker thread.
+ */
+class ImageBitmapShutdownObserver final : public nsIObserver
+{
+public:
+  explicit ImageBitmapShutdownObserver(ImageBitmap* aImageBitmap)
+  : mImageBitmap(nullptr)
+  {
+    if (NS_IsMainThread()) {
+      mImageBitmap = aImageBitmap;
+    } else {
+      WorkerPrivate* workerPrivate = GetCurrentThreadWorkerPrivate();
+      MOZ_ASSERT(workerPrivate);
+      mMainThreadEventTarget = workerPrivate->MainThreadEventTarget();
+      mSendToWorkerTask = new SendShutdownToWorkerThread(aImageBitmap);
+    }
+  }
+
+  void RegisterObserver() {
+    if (NS_IsMainThread()) {
+      nsContentUtils::RegisterShutdownObserver(this);
+      return;
+    }
+
+    MOZ_ASSERT(mMainThreadEventTarget);
+    RefPtr<ImageBitmapShutdownObserver> self = this;
+    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
+      "ImageBitmapShutdownObserver::RegisterObserver",
+      [self]() {
+        self->RegisterObserver();
+      });
+
+    mMainThreadEventTarget->Dispatch(r.forget());
+  }
+
+  void UnregisterObserver() {
+    if (NS_IsMainThread()) {
+      nsContentUtils::UnregisterShutdownObserver(this);
+      return;
+    }
+
+    MOZ_ASSERT(mMainThreadEventTarget);
+    RefPtr<ImageBitmapShutdownObserver> self = this;
+    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
+      "ImageBitmapShutdownObserver::RegisterObserver",
+      [self]() {
+        self->UnregisterObserver();
+      });
+
+    mMainThreadEventTarget->Dispatch(r.forget());
+  }
+
+  void Clear() {
+    mImageBitmap = nullptr;
+    if (mSendToWorkerTask) {
+      mSendToWorkerTask->mImageBitmap = nullptr;
+    }
+  }
+
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSIOBSERVER
+private:
+  ~ImageBitmapShutdownObserver() {}
+
+  class SendShutdownToWorkerThread : public MainThreadWorkerControlRunnable
+  {
+  public:
+    explicit SendShutdownToWorkerThread(ImageBitmap* aImageBitmap)
+    : MainThreadWorkerControlRunnable(GetCurrentThreadWorkerPrivate())
+    , mImageBitmap(aImageBitmap)
+    {}
+
+    bool WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
+    {
+      if (mImageBitmap) {
+        mImageBitmap->OnShutdown();
+        mImageBitmap = nullptr;
+      }
+      return true;
+    }
+
+    ImageBitmap* mImageBitmap;
+  };
+
+  ImageBitmap* mImageBitmap;
+  nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
+  RefPtr<SendShutdownToWorkerThread> mSendToWorkerTask;
+};
+
+NS_IMPL_ISUPPORTS(ImageBitmapShutdownObserver, nsIObserver)
+
+NS_IMETHODIMP
+ImageBitmapShutdownObserver::Observe(nsISupports* aSubject,
+                                     const char* aTopic,
+                                     const char16_t* aData)
+{
+  if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
+    if (mSendToWorkerTask) {
+      mSendToWorkerTask->Dispatch();
+    } else {
+      if (mImageBitmap) {
+        mImageBitmap->OnShutdown();
+        mImageBitmap = nullptr;
+      }
+    }
+    nsContentUtils::UnregisterShutdownObserver(this);
+  }
+
+  return NS_OK;
+}
+
 
 /*
  * If either aRect.width or aRect.height are negative, then return a new IntRect
@@ -224,28 +338,28 @@ CreateImageFromRawData(const gfx::IntSize& aSize,
   }
 
   // Convert RGBA to BGRA
-  DataSourceSurface::MappedSurface rgbaMap;
   RefPtr<DataSourceSurface> rgbaDataSurface = rgbaSurface->GetDataSurface();
-  if (NS_WARN_IF(!rgbaDataSurface->Map(DataSourceSurface::MapType::READ, &rgbaMap))) {
+  DataSourceSurface::ScopedMap rgbaMap(rgbaDataSurface, DataSourceSurface::READ);
+  if (NS_WARN_IF(!rgbaMap.IsMapped())) {
     return nullptr;
   }
 
   RefPtr<DataSourceSurface> bgraDataSurface =
     Factory::CreateDataSourceSurfaceWithStride(rgbaDataSurface->GetSize(),
                                                SurfaceFormat::B8G8R8A8,
-                                               rgbaMap.mStride);
-
-  DataSourceSurface::MappedSurface bgraMap;
-  if (NS_WARN_IF(!bgraDataSurface->Map(DataSourceSurface::MapType::WRITE, &bgraMap))) {
+                                               rgbaMap.GetStride());
+  if (NS_WARN_IF(!bgraDataSurface)) {
     return nullptr;
   }
 
-  SwizzleData(rgbaMap.mData, rgbaMap.mStride, SurfaceFormat::R8G8B8A8,
-              bgraMap.mData, bgraMap.mStride, SurfaceFormat::B8G8R8A8,
-              bgraDataSurface->GetSize());
+  DataSourceSurface::ScopedMap bgraMap(bgraDataSurface, DataSourceSurface::WRITE);
+  if (NS_WARN_IF(!bgraMap.IsMapped())) {
+    return nullptr;
+  }
 
-  rgbaDataSurface->Unmap();
-  bgraDataSurface->Unmap();
+  SwizzleData(rgbaMap.GetData(), rgbaMap.GetStride(), SurfaceFormat::R8G8B8A8,
+              bgraMap.GetData(), bgraMap.GetStride(), SurfaceFormat::B8G8R8A8,
+              bgraDataSurface->GetSize());
 
   // Create an Image from the BGRA SourceSurface.
   RefPtr<layers::Image> image = CreateImageFromSurface(bgraDataSurface);
@@ -411,10 +525,18 @@ ImageBitmap::ImageBitmap(nsIGlobalObject* aGlobal, layers::Image* aData,
   , mAllocatedImageData(false)
 {
   MOZ_ASSERT(aData, "aData is null in ImageBitmap constructor.");
+
+  mShutdownObserver = new ImageBitmapShutdownObserver(this);
+  mShutdownObserver->RegisterObserver();
 }
 
 ImageBitmap::~ImageBitmap()
 {
+  if (mShutdownObserver) {
+    mShutdownObserver->Clear();
+    mShutdownObserver->UnregisterObserver();
+    mShutdownObserver = nullptr;
+  }
 }
 
 JSObject*
@@ -429,6 +551,14 @@ ImageBitmap::Close()
   mData = nullptr;
   mSurface = nullptr;
   mPictureRect.SetEmpty();
+}
+
+void
+ImageBitmap::OnShutdown()
+{
+  mShutdownObserver = nullptr;
+
+  Close();
 }
 
 void
@@ -480,6 +610,9 @@ ConvertColorFormatIfNeeded(RefPtr<SourceSurface> aSurface)
     Factory::CreateDataSourceSurfaceWithStride(dstSize,
                                                SurfaceFormat::B8G8R8A8,
                                                dstStride);
+  if (NS_WARN_IF(!dstDataSurface)) {
+    return nullptr;
+  }
 
   RefPtr<DataSourceSurface> srcDataSurface = aSurface->GetDataSurface();
   if (NS_WARN_IF(!srcDataSurface)) {
@@ -1428,22 +1561,12 @@ ImageBitmap::WriteStructuredClone(JSStructuredCloneWriter* aWriter,
                                                  map.GetStride(),
                                                  true);
   }
-  MOZ_ASSERT(dstDataSurface);
+  if (NS_WARN_IF(!dstDataSurface)) {
+    return false;
+  }
   Factory::CopyDataSourceSurface(snapshot, dstDataSurface);
   aClonedSurfaces.AppendElement(dstDataSurface);
   return true;
-}
-
-/*static*/ bool
-ImageBitmap::ExtensionsEnabled(JSContext* aCx, JSObject*)
-{
-  if (NS_IsMainThread()) {
-    return Preferences::GetBool("canvas.imagebitmap_extensions.enabled");
-  } else {
-    WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
-    MOZ_ASSERT(workerPrivate);
-    return workerPrivate->ImageBitmapExtensionsEnabled();
-  }
 }
 
 // ImageBitmap extensions.

@@ -99,24 +99,19 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGenericDOMDataNode)
     NS_IMPL_CYCLE_COLLECTION_DESCRIBE(nsGenericDOMDataNode, tmp->mRefCnt.get())
   }
 
-  if (!nsINode::Traverse(tmp, cb)) {
+  if (!nsIContent::Traverse(tmp, cb)) {
     return NS_SUCCESS_INTERRUPTED_TRAVERSE;
-  }
-
-  nsDataSlots *slots = tmp->GetExistingDataSlots();
-  if (slots) {
-    slots->Traverse(cb);
   }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGenericDOMDataNode)
-  nsINode::Unlink(tmp);
+  nsIContent::Unlink(tmp);
 
   // Clear flag here because unlinking slots will clear the
   // containing shadow root pointer.
   tmp->UnsetFlags(NODE_IS_IN_SHADOW_TREE);
 
-  nsDataSlots *slots = tmp->GetExistingDataSlots();
+  nsContentSlots* slots = tmp->GetExistingContentSlots();
   if (slots) {
     slots->Unlink();
   }
@@ -354,7 +349,7 @@ nsGenericDOMDataNode::SetTextInternal(uint32_t aOffset, uint32_t aCount,
     if (aLength) {
       to.Append(aBuffer, aLength);
       if (!bidi && (!document || !document->GetBidiEnabled())) {
-        bidi = HasRTLChars(aBuffer, aLength);
+        bidi = HasRTLChars(MakeSpan(aBuffer, aLength));
       }
     }
     if (endOffset != textLength) {
@@ -508,7 +503,7 @@ nsGenericDOMDataNode::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                  (aParent && aParent->IsInNativeAnonymousSubtree()),
                  "Trying to re-bind content from native anonymous subtree to "
                  "non-native anonymous parent!");
-    DataSlots()->mBindingParent = aBindingParent; // Weak, so no addref happens.
+    ExtendedContentSlots()->mBindingParent = aBindingParent; // Weak, so no addref happens.
     if (aParent->IsInNativeAnonymousSubtree()) {
       SetFlags(NODE_IS_IN_NATIVE_ANONYMOUS_SUBTREE);
     }
@@ -524,7 +519,7 @@ nsGenericDOMDataNode::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
     ShadowRoot* parentContainingShadow = aParent->GetContainingShadow();
     if (parentContainingShadow) {
-      DataSlots()->mContainingShadow = parentContainingShadow;
+      ExtendedContentSlots()->mContainingShadow = parentContainingShadow;
     }
   }
 
@@ -620,7 +615,7 @@ nsGenericDOMDataNode::UnbindFromTree(bool aDeep, bool aNullParent)
     }
   }
 
-  nsDataSlots *slots = GetExistingDataSlots();
+  nsExtendedContentSlots* slots = GetExistingExtendedContentSlots();
   if (slots) {
     slots->mBindingParent = nullptr;
     if (aNullParent || !mParent->IsInShadowTree()) {
@@ -644,121 +639,48 @@ nsGenericDOMDataNode::GetChildCount() const
 }
 
 nsIContent *
-nsGenericDOMDataNode::GetChildAt(uint32_t aIndex) const
+nsGenericDOMDataNode::GetChildAt_Deprecated(uint32_t aIndex) const
 {
   return nullptr;
 }
 
 
 int32_t
-nsGenericDOMDataNode::IndexOf(const nsINode* aPossibleChild) const
+nsGenericDOMDataNode::ComputeIndexOf(const nsINode* aPossibleChild) const
 {
   return -1;
 }
 
 nsresult
-nsGenericDOMDataNode::InsertChildAt(nsIContent* aKid, uint32_t aIndex,
-                                    bool aNotify)
+nsGenericDOMDataNode::InsertChildBefore(nsIContent* aKid,
+                                        nsIContent* aBeforeThis,
+                                        bool aNotify)
+{
+  return NS_OK;
+}
+
+nsresult
+nsGenericDOMDataNode::InsertChildAt_Deprecated(nsIContent* aKid,
+                                               uint32_t aIndex,
+                                               bool aNotify)
 {
   return NS_OK;
 }
 
 void
-nsGenericDOMDataNode::RemoveChildAt(uint32_t aIndex, bool aNotify)
+nsGenericDOMDataNode::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
 {
-}
-
-nsIContent *
-nsGenericDOMDataNode::GetBindingParent() const
-{
-  nsDataSlots *slots = GetExistingDataSlots();
-  return slots ? slots->mBindingParent : nullptr;
-}
-
-ShadowRoot *
-nsGenericDOMDataNode::GetContainingShadow() const
-{
-  nsDataSlots *slots = GetExistingDataSlots();
-  if (!slots) {
-    return nullptr;
-  }
-  return slots->mContainingShadow;
 }
 
 void
-nsGenericDOMDataNode::SetShadowRoot(ShadowRoot* aShadowRoot)
+nsGenericDOMDataNode::RemoveChildNode(nsIContent* aKid, bool aNotify)
 {
-}
-
-nsTArray<nsIContent*>&
-nsGenericDOMDataNode::DestInsertionPoints()
-{
-  nsDataSlots *slots = DataSlots();
-  return slots->mDestInsertionPoints;
-}
-
-nsTArray<nsIContent*>*
-nsGenericDOMDataNode::GetExistingDestInsertionPoints() const
-{
-  nsDataSlots *slots = GetExistingDataSlots();
-  if (slots) {
-    return &slots->mDestInsertionPoints;
-  }
-  return nullptr;
-}
-
-HTMLSlotElement*
-nsGenericDOMDataNode::GetAssignedSlot() const
-{
-  nsDataSlots *slots = GetExistingDataSlots();
-  return slots ? slots->mAssignedSlot.get() : nullptr;
-}
-
-void
-nsGenericDOMDataNode::SetAssignedSlot(HTMLSlotElement* aSlot)
-{
-  nsDataSlots *slots = DataSlots();
-  slots->mAssignedSlot = aSlot;
 }
 
 nsXBLBinding *
 nsGenericDOMDataNode::DoGetXBLBinding() const
 {
   return nullptr;
-}
-
-void
-nsGenericDOMDataNode::SetXBLBinding(nsXBLBinding* aBinding,
-                                    nsBindingManager* aOldBindingManager)
-{
-}
-
-nsIContent *
-nsGenericDOMDataNode::GetXBLInsertionPoint() const
-{
-  if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
-    nsDataSlots *slots = GetExistingDataSlots();
-    if (slots) {
-      return slots->mXBLInsertionPoint;
-    }
-  }
-
-  return nullptr;
-}
-
-void
-nsGenericDOMDataNode::SetXBLInsertionPoint(nsIContent* aContent)
-{
-  if (aContent) {
-    nsDataSlots *slots = DataSlots();
-    SetFlags(NODE_MAY_BE_IN_BINDING_MNGR);
-    slots->mXBLInsertionPoint = aContent;
-  } else {
-    nsDataSlots *slots = GetExistingDataSlots();
-    if (slots) {
-      slots->mXBLInsertionPoint = nullptr;
-    }
-  }
 }
 
 bool
@@ -790,38 +712,6 @@ nsGenericDOMDataNode::IsLink(nsIURI** aURI) const
 {
   *aURI = nullptr;
   return false;
-}
-
-nsINode::nsSlots*
-nsGenericDOMDataNode::CreateSlots()
-{
-  return new nsDataSlots();
-}
-
-nsGenericDOMDataNode::nsDataSlots::nsDataSlots()
-  : nsINode::nsSlots(), mBindingParent(nullptr)
-{
-}
-
-void
-nsGenericDOMDataNode::nsDataSlots::Traverse(nsCycleCollectionTraversalCallback &cb)
-{
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mXBLInsertionPoint");
-  cb.NoteXPCOMChild(mXBLInsertionPoint.get());
-
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mContainingShadow");
-  cb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIContent*, mContainingShadow));
-
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mAssignedSlot");
-  cb.NoteXPCOMChild(NS_ISUPPORTS_CAST(nsIContent*, mAssignedSlot.get()));
-}
-
-void
-nsGenericDOMDataNode::nsDataSlots::Unlink()
-{
-  mXBLInsertionPoint = nullptr;
-  mContainingShadow = nullptr;
-  mAssignedSlot = nullptr;
 }
 
 //----------------------------------------------------------------------
@@ -873,11 +763,11 @@ nsGenericDOMDataNode::SplitData(uint32_t aOffset, nsIContent** aReturn,
 
   nsCOMPtr<nsINode> parent = GetParentNode();
   if (parent) {
-    int32_t insertionIndex = parent->IndexOf(this);
+    nsCOMPtr<nsIContent> beforeNode = this;
     if (aCloneAfterOriginal) {
-      ++insertionIndex;
+      beforeNode = beforeNode->GetNextSibling();
     }
-    parent->InsertChildAt(newContent, insertionIndex, true);
+    parent->InsertChildBefore(newContent, beforeNode, true);
   }
 
   newContent.swap(*aReturn);
@@ -895,29 +785,39 @@ nsGenericDOMDataNode::SplitText(uint32_t aOffset, nsIDOMText** aReturn)
   return rv;
 }
 
-/* static */ int32_t
-nsGenericDOMDataNode::FirstLogicallyAdjacentTextNode(nsIContent* aParent,
-                                                     int32_t aIndex)
+static nsIContent*
+FirstLogicallyAdjacentTextNode(nsIContent* aNode)
 {
-  while (aIndex-- > 0) {
-    nsIContent* sibling = aParent->GetChildAt(aIndex);
-    if (!sibling->IsNodeOfType(nsINode::eTEXT))
-      return aIndex + 1;
+  nsCOMPtr<nsIContent> parent = aNode->GetParent();
+
+  while (aNode) {
+    nsIContent* sibling = aNode->GetPreviousSibling();
+    if (!sibling || !sibling->IsNodeOfType(nsINode::eTEXT)) {
+      return aNode;
+    }
+    aNode = sibling;
   }
-  return 0;
+
+  return parent->GetFirstChild();
 }
 
-/* static */ int32_t
-nsGenericDOMDataNode::LastLogicallyAdjacentTextNode(nsIContent* aParent,
-                                                    int32_t aIndex,
-                                                    uint32_t aCount)
+static nsIContent*
+LastLogicallyAdjacentTextNode(nsIContent* aNode)
 {
-  while (++aIndex < int32_t(aCount)) {
-    nsIContent* sibling = aParent->GetChildAt(aIndex);
-    if (!sibling->IsNodeOfType(nsINode::eTEXT))
-      return aIndex - 1;
+  nsCOMPtr<nsIContent> parent = aNode->GetParent();
+
+  while (aNode) {
+    nsIContent* sibling = aNode->GetNextSibling();
+    if (!sibling) break;
+
+    if (!sibling->IsNodeOfType(nsINode::eTEXT)) {
+      return aNode;
+    }
+
+    aNode = sibling;
   }
-  return aCount - 1;
+
+  return parent->GetLastChild();
 }
 
 nsresult
@@ -929,25 +829,30 @@ nsGenericDOMDataNode::GetWholeText(nsAString& aWholeText)
   if (!parent)
     return GetData(aWholeText);
 
-  int32_t index = parent->IndexOf(this);
+  int32_t index = parent->ComputeIndexOf(this);
   NS_WARNING_ASSERTION(index >= 0,
                        "Trying to use .wholeText with an anonymous"
                        "text node child of a binding parent?");
   NS_ENSURE_TRUE(index >= 0, NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-  int32_t first =
-    FirstLogicallyAdjacentTextNode(parent, index);
-  int32_t last =
-    LastLogicallyAdjacentTextNode(parent, index, parent->GetChildCount());
+  nsCOMPtr<nsIContent> first = FirstLogicallyAdjacentTextNode(this);
+  nsCOMPtr<nsIContent> last = LastLogicallyAdjacentTextNode(this);
 
   aWholeText.Truncate();
 
   nsCOMPtr<nsIDOMText> node;
   nsAutoString tmp;
-  do {
-    node = do_QueryInterface(parent->GetChildAt(first));
+
+  while (true) {
+    node = do_QueryInterface(first);
     node->GetData(tmp);
     aWholeText.Append(tmp);
-  } while (first++ < last);
+
+    if (first == last) {
+      break;
+    }
+
+    first = first->GetNextSibling();
+  }
 
   return NS_OK;
 }

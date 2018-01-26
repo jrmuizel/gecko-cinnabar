@@ -812,14 +812,11 @@ gfxTextRun::AccumulatePartialLigatureMetrics(gfxFont *aFont, Range aRange,
     // Where we are going to start "drawing" relative to our left baseline origin
     gfxFloat origin = IsRightToLeft() ? metrics.mAdvanceWidth - data.mPartAdvance : 0;
     ClipPartialLigature(this, &bboxLeft, &bboxRight, origin, &data);
-    metrics.mBoundingBox.x = bboxLeft;
-    metrics.mBoundingBox.width = bboxRight - bboxLeft;
+    metrics.mBoundingBox.SetBoxX(bboxLeft, bboxRight);
 
     // mBoundingBox is now relative to the left baseline origin for the entire
     // ligature. Shift it left.
-    metrics.mBoundingBox.x -=
-        IsRightToLeft() ? metrics.mAdvanceWidth - (data.mPartAdvance + data.mPartWidth)
-            : data.mPartAdvance;
+    metrics.mBoundingBox.MoveByX(-(IsRightToLeft() ? metrics.mAdvanceWidth - (data.mPartAdvance + data.mPartWidth) : data.mPartAdvance));
     metrics.mAdvanceWidth = data.mPartWidth;
 
     aMetrics->CombineWith(metrics, IsRightToLeft());
@@ -3183,10 +3180,25 @@ void gfxFontGroup::ComputeRanges(nsTArray<gfxTextRange>& aRanges,
             // on a per-character basis using the UTR50 orientation property.
             switch (GetVerticalOrientation(ch)) {
             case VERTICAL_ORIENTATION_U:
-            case VERTICAL_ORIENTATION_Tr:
             case VERTICAL_ORIENTATION_Tu:
                 orient = ShapedTextFlags::TEXT_ORIENT_VERTICAL_UPRIGHT;
                 break;
+            case VERTICAL_ORIENTATION_Tr: {
+                // We check for a vertical presentation form first as that's
+                // likely to be cheaper than inspecting lookups to see if the
+                // 'vert' feature is going to handle this character, and if the
+                // presentation form is available then it will be used as
+                // fallback if needed, so it's OK if the feature is missing.
+                uint32_t v = gfxHarfBuzzShaper::GetVerticalPresentationForm(ch);
+                orient = (!font ||
+                          (v && font->HasCharacter(v)) ||
+                          font->FeatureWillHandleChar(aRunScript,
+                                                      HB_TAG('v','e','r','t'),
+                                                      ch))
+                         ? ShapedTextFlags::TEXT_ORIENT_VERTICAL_UPRIGHT
+                         : ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
+                break;
+            }
             case VERTICAL_ORIENTATION_R:
                 orient = ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT;
                 break;

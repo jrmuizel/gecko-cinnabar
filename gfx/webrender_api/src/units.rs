@@ -12,7 +12,8 @@
 //! The terms "layer" and "stacking context" can be used interchangeably
 //! in the context of coordinate systems.
 
-use euclid::{Length, TypedRect, TypedSize2D, TypedTransform3D};
+use app_units::Au;
+use euclid::{Length, TypedRect, TypedScale, TypedSize2D, TypedTransform3D};
 use euclid::{TypedPoint2D, TypedPoint3D, TypedVector2D, TypedVector3D};
 
 /// Geometry in the coordinate system of the render target (screen or intermediate
@@ -87,6 +88,12 @@ pub type WorldVector3D = TypedVector3D<f32, WorldPixel>;
 pub struct Tiles;
 pub type TileOffset = TypedPoint2D<u16, Tiles>;
 
+/// Scaling ratio from world pixels to device pixels.
+pub type DevicePixelScale = TypedScale<f32, WorldPixel, DevicePixel>;
+/// Scaling ratio from layer to world. Used for cases where we know the layer
+/// is in world space, or specifically want to treat it this way.
+pub type LayerToWorldScale = TypedScale<f32, LayerPixel, WorldPixel>;
+
 pub type LayoutTransform = TypedTransform3D<f32, LayoutPixel, LayoutPixel>;
 pub type LayerTransform = TypedTransform3D<f32, LayerPixel, LayerPixel>;
 pub type LayerToScrollTransform = TypedTransform3D<f32, LayerPixel, ScrollLayerPixel>;
@@ -95,10 +102,10 @@ pub type LayerToWorldTransform = TypedTransform3D<f32, LayerPixel, WorldPixel>;
 pub type WorldToLayerTransform = TypedTransform3D<f32, WorldPixel, LayerPixel>;
 pub type ScrollToWorldTransform = TypedTransform3D<f32, ScrollLayerPixel, WorldPixel>;
 
-
-pub fn device_length(value: f32, device_pixel_ratio: f32) -> DeviceIntLength {
-    DeviceIntLength::new((value * device_pixel_ratio).round() as i32)
-}
+// Fixed position coordinates, to avoid float precision errors.
+pub type LayerPointAu = TypedPoint2D<Au, LayerPixel>;
+pub type LayerRectAu = TypedRect<Au, LayerPixel>;
+pub type LayerSizeAu = TypedSize2D<Au, LayerPixel>;
 
 pub fn as_scroll_parent_rect(rect: &LayerRect) -> ScrollLayerRect {
     ScrollLayerRect::from_untyped(&rect.to_untyped())
@@ -106,4 +113,31 @@ pub fn as_scroll_parent_rect(rect: &LayerRect) -> ScrollLayerRect {
 
 pub fn as_scroll_parent_vector(vector: &LayerVector2D) -> ScrollLayerVector2D {
     ScrollLayerVector2D::from_untyped(&vector.to_untyped())
+}
+
+/// Stores two coordinates in texel space. The coordinates
+/// are stored in texel coordinates because the texture atlas
+/// may grow. Storing them as texel coords and normalizing
+/// the UVs in the vertex shader means nothing needs to be
+/// updated on the CPU when the texture size changes.
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+pub struct TexelRect {
+    pub uv0: DevicePoint,
+    pub uv1: DevicePoint,
+}
+
+impl TexelRect {
+    pub fn new(u0: f32, v0: f32, u1: f32, v1: f32) -> Self {
+        TexelRect {
+            uv0: DevicePoint::new(u0, v0),
+            uv1: DevicePoint::new(u1, v1),
+        }
+    }
+
+    pub fn invalid() -> Self {
+        TexelRect {
+            uv0: DevicePoint::new(-1.0, -1.0),
+            uv1: DevicePoint::new(-1.0, -1.0),
+        }
+    }
 }

@@ -13,10 +13,30 @@
 #include "mozilla/layers/IpcResourceUpdateQueue.h"
 #include "mozilla/layers/SharedSurfacesChild.h"
 #include "nsDisplayListInvalidation.h"
+#include "nsIFrame.h"
 #include "WebRenderCanvasRenderer.h"
 
 namespace mozilla {
 namespace layers {
+
+/* static */ bool
+WebRenderUserData::SupportsAsyncUpdate(nsIFrame* aFrame)
+{
+  if (!aFrame ||
+      !aFrame->HasProperty(nsIFrame::WebRenderUserDataProperty())) {
+    return false;
+  }
+  RefPtr<WebRenderUserData> data;
+  nsIFrame::WebRenderUserDataTable* userDataTable =
+    aFrame->GetProperty(nsIFrame::WebRenderUserDataProperty());
+
+  userDataTable->Get(static_cast<uint32_t>(DisplayItemType::TYPE_VIDEO), getter_AddRefs(data));
+  if (data && data->AsImageData()) {
+    return data->AsImageData()->IsAsync();
+  }
+
+  return false;
+}
 
 WebRenderUserData::WebRenderUserData(WebRenderLayerManager* aWRManager, nsDisplayItem* aItem)
   : mWRManager(aWRManager)
@@ -57,7 +77,7 @@ WebRenderImageData::WebRenderImageData(WebRenderLayerManager* aWRManager, nsDisp
 
 WebRenderImageData::~WebRenderImageData()
 {
-  ClearCachedResources();
+  DoClearCachedResources();
 }
 
 void
@@ -77,6 +97,12 @@ WebRenderImageData::ClearImageKey()
 void
 WebRenderImageData::ClearCachedResources()
 {
+  DoClearCachedResources();
+}
+
+void
+WebRenderImageData::DoClearCachedResources()
+{
   ClearImageKey();
 
   if (mExternalImageId) {
@@ -87,6 +113,10 @@ WebRenderImageData::ClearCachedResources()
   if (mPipelineId) {
     WrBridge()->RemovePipelineIdForCompositable(mPipelineId.ref());
     mPipelineId.reset();
+  }
+
+  if (mImageClient) {
+    mImageClient = nullptr;
   }
 }
 
@@ -185,11 +215,20 @@ WebRenderImageData::CreateAsyncImageWebRenderCommands(mozilla::wr::DisplayListBu
                                                       bool aIsBackfaceVisible)
 {
   MOZ_ASSERT(aContainer->IsAsync());
+
+  if (mPipelineId.isSome() && mContainer != aContainer) {
+    // In this case, we need to remove the existed pipeline and create new one
+    // because the ImageContainer is changed.
+    WrBridge()->RemovePipelineIdForCompositable(mPipelineId.ref());
+    mPipelineId.reset();
+  }
+
   if (!mPipelineId) {
     // Alloc async image pipeline id.
     mPipelineId = Some(WrBridge()->GetCompositorBridgeChild()->GetNextPipelineId());
     WrBridge()->AddPipelineIdForAsyncCompositable(mPipelineId.ref(),
                                                   aContainer->GetAsyncContainerHandle());
+    mContainer = aContainer;
   }
   MOZ_ASSERT(!mImageClient);
   MOZ_ASSERT(!mExternalImageId);
@@ -246,6 +285,14 @@ WebRenderFallbackData::~WebRenderFallbackData()
 {
 }
 
+void
+WebRenderFallbackData::ClearCachedResources()
+{
+  WebRenderImageData::ClearCachedResources();
+  mBasicLayerManager = nullptr;
+  mInvalid = true;
+}
+
 nsDisplayItemGeometry*
 WebRenderFallbackData::GetGeometry()
 {
@@ -283,11 +330,17 @@ WebRenderCanvasData::WebRenderCanvasData(WebRenderLayerManager* aWRManager, nsDi
 
 WebRenderCanvasData::~WebRenderCanvasData()
 {
-  ClearCachedResources();
+  DoClearCachedResources();
 }
 
 void
 WebRenderCanvasData::ClearCachedResources()
+{
+  DoClearCachedResources();
+}
+
+void
+WebRenderCanvasData::DoClearCachedResources()
 {
   if (mCanvasRenderer) {
     mCanvasRenderer->ClearCachedResources();

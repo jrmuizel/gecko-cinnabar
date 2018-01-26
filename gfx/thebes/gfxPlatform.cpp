@@ -611,6 +611,8 @@ WebRenderDebugPrefChangeCallback(const char* aPrefName, void*)
   GFX_WEBRENDER_DEBUG(".gpu-time-queries",   1 << 4)
   GFX_WEBRENDER_DEBUG(".gpu-sample-queries", 1 << 5)
   GFX_WEBRENDER_DEBUG(".disable-batching",   1 << 6)
+  GFX_WEBRENDER_DEBUG(".epochs",             1 << 7)
+  GFX_WEBRENDER_DEBUG(".compact-profiler",   1 << 8)
 #undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags);
@@ -2458,10 +2460,23 @@ gfxPlatform::InitCompositorAccelerationPrefs()
   }
 }
 
+/*static*/ bool
+gfxPlatform::WebRenderPrefEnabled()
+{
+  return gfxPrefs::WebRenderAll() || gfxPrefs::WebRenderEnabledDoNotUseDirectly();
+}
+
+/*static*/ bool
+gfxPlatform::WebRenderEnvvarEnabled()
+{
+  const char* env = PR_GetEnv("MOZ_WEBRENDER");
+  return (env && *env == '1');
+}
+
 void
 gfxPlatform::InitWebRenderConfig()
 {
-  bool prefEnabled = Preferences::GetBool("gfx.webrender.enabled", false);
+  bool prefEnabled = WebRenderPrefEnabled();
 
   ScopedGfxFeatureReporter reporter("WR", prefEnabled);
   if (!XRE_IsParentProcess()) {
@@ -2483,11 +2498,8 @@ gfxPlatform::InitWebRenderConfig()
 
   if (prefEnabled) {
     featureWebRender.UserEnable("Enabled by pref");
-  } else {
-    const char* env = PR_GetEnv("MOZ_WEBRENDER");
-    if (env && *env == '1') {
-      featureWebRender.UserEnable("Enabled by envvar");
-    }
+  } else if (WebRenderEnvvarEnabled()) {
+    featureWebRender.UserEnable("Enabled by envvar");
   }
 
   // HW_COMPOSITING being disabled implies interfacing with the GPU might break
@@ -2564,13 +2576,14 @@ gfxPlatform::InitOMTPConfig()
   ScopedGfxFeatureReporter reporter("OMTP");
 
   FeatureState& omtp = gfxConfig::GetFeature(Feature::OMTP);
+  int32_t paintWorkerCount = PaintThread::CalculatePaintWorkerCount();
 
   if (!XRE_IsParentProcess()) {
     // The parent process runs through all the real decision-making code
     // later in this function. For other processes we still want to report
     // the state of the feature for crash reports.
     if (gfxVars::UseOMTP()) {
-      reporter.SetSuccessful();
+      reporter.SetSuccessful(paintWorkerCount);
     }
     return;
   }
@@ -2588,14 +2601,14 @@ gfxPlatform::InitOMTPConfig()
   if (InSafeMode()) {
     omtp.ForceDisable(FeatureStatus::Blocked, "OMTP blocked by safe-mode",
                       NS_LITERAL_CSTRING("FEATURE_FAILURE_COMP_SAFEMODE"));
-  } else if (gfxPrefs::LayersTilesEnabled()) {
-    omtp.ForceDisable(FeatureStatus::Blocked, "OMTP does not yet support tiling",
+  } else if (gfxPlatform::UsesTiling() && gfxPrefs::TileEdgePaddingEnabled()) {
+    omtp.ForceDisable(FeatureStatus::Blocked, "OMTP does not yet support tiling with edge padding",
                       NS_LITERAL_CSTRING("FEATURE_FAILURE_OMTP_TILING"));
   }
 
   if (omtp.IsEnabled()) {
     gfxVars::SetUseOMTP(true);
-    reporter.SetSuccessful();
+    reporter.SetSuccessful(paintWorkerCount);
   }
 }
 
@@ -2658,6 +2671,12 @@ gfxPlatform::UsesOffMainThreadCompositing()
   }
 
   return result;
+}
+
+bool
+gfxPlatform::UsesTiling() const
+{
+  return gfxPrefs::LayersTilesEnabled();
 }
 
 /***

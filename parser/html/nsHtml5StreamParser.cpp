@@ -16,6 +16,7 @@
 #include "nsHtml5AtomTable.h"
 #include "nsHtml5Module.h"
 #include "nsHtml5StreamParserPtr.h"
+#include "nsIDocShell.h"
 #include "nsIScriptError.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/SystemGroup.h"
@@ -878,7 +879,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsJSContext::MaybeRunNextCollectorSlice(mDocShell, JS::gcreason::HTML_PARSER);
     return NS_OK;

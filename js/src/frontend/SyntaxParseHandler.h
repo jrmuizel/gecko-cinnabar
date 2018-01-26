@@ -15,6 +15,7 @@
 #include "jscntxt.h"
 
 #include "frontend/ParseNode.h"
+#include "js/GCAnnotations.h"
 
 namespace js {
 
@@ -35,6 +36,18 @@ class SyntaxParseHandler
     // Remember the last encountered name or string literal during syntax parses.
     JSAtom* lastAtom;
     TokenPos lastStringPos;
+
+    // WARNING: Be careful about adding fields to this function, that might be
+    //          GC things (like JSAtom*).  The JS_HAZ_ROOTED causes the GC
+    //          analysis to *ignore* anything that might be a rooting hazard in
+    //          this class.  The |lastAtom| field above is safe because
+    //          SyntaxParseHandler only appears as a field in
+    //          PerHandlerParser<SyntaxParseHandler>, and that class inherits
+    //          from ParserBase which contains an AutoKeepAtoms field that
+    //          prevents atoms from being moved around while the AutoKeepAtoms
+    //          lives -- which is as long as ParserBase lives, which is longer
+    //          than the PerHandlerParser<SyntaxParseHandler> that inherits
+    //          from it will live.
 
   public:
     enum Node {
@@ -318,8 +331,8 @@ class SyntaxParseHandler
     }
     Node newDebuggerStatement(const TokenPos& pos) { return NodeGeneric; }
 
-    Node newPropertyAccess(Node pn, PropertyName* name, uint32_t end) {
-        lastAtom = name;
+    Node newPropertyAccess(Node expr, PropertyName* key, uint32_t end) {
+        lastAtom = key;
         return NodeDottedProperty;
     }
 
@@ -348,7 +361,7 @@ class SyntaxParseHandler
         return node == NodeFunctionExpressionClosure;
     }
 
-    void setFunctionFormalParametersAndBody(Node pn, Node kid) {}
+    void setFunctionFormalParametersAndBody(Node funcNode, Node kid) {}
     void setFunctionBody(Node pn, Node kid) {}
     void setFunctionBox(Node pn, FunctionBox* funbox) {}
     void addFunctionFormalParameter(Node pn, Node argpn) {}
@@ -383,9 +396,9 @@ class SyntaxParseHandler
     }
 
     Node newList(ParseNodeKind kind, const TokenPos& pos) {
-        MOZ_ASSERT(kind != PNK_VAR);
-        MOZ_ASSERT(kind != PNK_LET);
-        MOZ_ASSERT(kind != PNK_CONST);
+        MOZ_ASSERT(kind != ParseNodeKind::Var);
+        MOZ_ASSERT(kind != ParseNodeKind::Let);
+        MOZ_ASSERT(kind != ParseNodeKind::Const);
         return NodeGeneric;
     }
 
@@ -394,9 +407,9 @@ class SyntaxParseHandler
     }
 
     Node newDeclarationList(ParseNodeKind kind, const TokenPos& pos) {
-        if (kind == PNK_VAR)
+        if (kind == ParseNodeKind::Var)
             return NodeVarDeclaration;
-        MOZ_ASSERT(kind == PNK_LET || kind == PNK_CONST);
+        MOZ_ASSERT(kind == ParseNodeKind::Let || kind == ParseNodeKind::Const);
         return NodeLexicalDeclaration;
     }
 
@@ -425,7 +438,7 @@ class SyntaxParseHandler
     }
 
     Node newAssignment(ParseNodeKind kind, Node lhs, Node rhs) {
-        return kind == PNK_ASSIGN ? NodeUnparenthesizedAssignment : NodeGeneric;
+        return kind == ParseNodeKind::Assign ? NodeUnparenthesizedAssignment : NodeGeneric;
     }
 
     bool isUnparenthesizedAssignment(Node node) {
@@ -536,7 +549,7 @@ class SyntaxParseHandler
     }
 
     void adjustGetToSet(Node node) {}
-};
+} JS_HAZ_ROOTED; // See the top of SyntaxParseHandler for why this is safe.
 
 } // namespace frontend
 } // namespace js

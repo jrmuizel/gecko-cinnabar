@@ -560,14 +560,19 @@ typedef bool
                                 JS::HandleObject allocationSite, JS::HandleObject incumbentGlobal,
                                 void* data);
 
+namespace JS {
+
 enum class PromiseRejectionHandlingState {
     Unhandled,
     Handled
 };
 
+} /* namespace JS */
+
 typedef void
 (* JSPromiseRejectionTrackerCallback)(JSContext* cx, JS::HandleObject promise,
-                                      PromiseRejectionHandlingState state, void* data);
+                                      JS::PromiseRejectionHandlingState state,
+                                      void* data);
 
 typedef void
 (* JSProcessPromiseCallback)(JSContext* cx, JS::HandleObject promise);
@@ -679,6 +684,18 @@ typedef void
  */
 using JSExternalStringSizeofCallback =
     size_t (*)(JSString* str, mozilla::MallocSizeOf mallocSizeOf);
+
+/**
+ * Callback used to intercept JavaScript errors.
+ */
+struct JSErrorInterceptor {
+    /**
+     * This method is called whenever an error has been raised from JS code.
+     *
+     * This method MUST be infallible.
+     */
+    virtual void interceptError(JSContext* cx, const JS::Value& error) = 0;
+};
 
 /************************************************************************/
 
@@ -1096,7 +1113,6 @@ class JS_PUBLIC_API(ContextOptions) {
         werror_(false),
         strictMode_(false),
         extraWarnings_(false),
-        forEachStatement_(false),
         streams_(false)
 #ifdef FUZZING
         , fuzzing_(false)
@@ -1248,12 +1264,6 @@ class JS_PUBLIC_API(ContextOptions) {
         return *this;
     }
 
-    bool forEachStatement() const { return forEachStatement_; }
-    ContextOptions& setForEachStatement(bool flag) {
-        forEachStatement_ = flag;
-        return *this;
-    }
-
 #ifdef FUZZING
     bool fuzzing() const { return fuzzing_; }
     ContextOptions& setFuzzing(bool flag) {
@@ -1288,7 +1298,6 @@ class JS_PUBLIC_API(ContextOptions) {
     bool werror_ : 1;
     bool strictMode_ : 1;
     bool extraWarnings_ : 1;
-    bool forEachStatement_: 1;
     bool streams_: 1;
 #ifdef FUZZING
     bool fuzzing_ : 1;
@@ -1334,6 +1343,33 @@ JS_SetWrapObjectCallbacks(JSContext* cx, const JSWrapObjectCallbacks* callbacks)
 
 extern JS_PUBLIC_API(void)
 JS_SetExternalStringSizeofCallback(JSContext* cx, JSExternalStringSizeofCallback callback);
+
+#if defined(NIGHTLY_BUILD)
+
+// Set a callback that will be called whenever an error
+// is thrown in this runtime. This is designed as a mechanism
+// for logging errors. Note that the VM makes no attempt to sanitize
+// the contents of the error (so it may contain private data)
+// or to sort out among errors (so it may not be the error you
+// are interested in or for the component in which you are
+// interested).
+//
+// If the callback sets a new error, this new error
+// will replace the original error.
+//
+// May be `nullptr`.
+extern JS_PUBLIC_API(void)
+JS_SetErrorInterceptorCallback(JSRuntime*, JSErrorInterceptor* callback);
+
+extern JS_PUBLIC_API(JSErrorInterceptor*)
+JS_GetErrorInterceptorCallback(JSRuntime*);
+
+// Examine a value to determine if it is one of the built-in Error types.
+// If so, return the error type.
+extern JS_PUBLIC_API(mozilla::Maybe<JSExnType>)
+JS_GetErrorType(const JS::Value& val);
+
+#endif // defined(NIGHTLY_BUILD)
 
 extern JS_PUBLIC_API(void)
 JS_SetCompartmentPrivate(JSCompartment* compartment, void* data);
@@ -3632,7 +3668,6 @@ class JS_FRIEND_API(TransitiveCompileOptions)
         canLazilyParse(true),
         strictOption(false),
         extraWarningsOption(false),
-        forEachStatementOption(false),
         werrorOption(false),
         asmJSOption(AsmJSOption::Disabled),
         throwOnAsmJSValidationFailureOption(false),
@@ -3667,7 +3702,6 @@ class JS_FRIEND_API(TransitiveCompileOptions)
     bool canLazilyParse;
     bool strictOption;
     bool extraWarningsOption;
-    bool forEachStatementOption;
     bool werrorOption;
     AsmJSOption asmJSOption;
     bool throwOnAsmJSValidationFailureOption;
@@ -3706,6 +3740,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
         column(0),
         scriptSourceOffset(0),
         isRunOnce(false),
+        nonSyntacticScope(false),
         noScriptRval(false)
     { }
 
@@ -3720,9 +3755,9 @@ class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
     const char* filename() const { return filename_; }
     const char* introducerFilename() const { return introducerFilename_; }
     const char16_t* sourceMapURL() const { return sourceMapURL_; }
-    virtual JSObject* element() const = 0;
-    virtual JSString* elementAttributeName() const = 0;
-    virtual JSScript* introductionScript() const = 0;
+    virtual JSObject* element() const override = 0;
+    virtual JSString* elementAttributeName() const override = 0;
+    virtual JSScript* introductionScript() const override = 0;
 
     // POD options.
     unsigned lineno;
@@ -3741,6 +3776,7 @@ class JS_FRIEND_API(ReadOnlyCompileOptions) : public TransitiveCompileOptions
     unsigned scriptSourceOffset;
     // isRunOnce only applies to non-function scripts.
     bool isRunOnce;
+    bool nonSyntacticScope;
     bool noScriptRval;
 
   private:
@@ -3810,6 +3846,7 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
     OwningCompileOptions& setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     OwningCompileOptions& setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
     OwningCompileOptions& setSourceIsLazy(bool l) { sourceIsLazy = l; return *this; }
+    OwningCompileOptions& setNonSyntacticScope(bool n) { nonSyntacticScope = n; return *this; }
     OwningCompileOptions& setIntroductionType(const char* t) { introductionType = t; return *this; }
     bool setIntroductionInfo(JSContext* cx, const char* introducerFn, const char* intro,
                              unsigned line, JSScript* script, uint32_t offset)
@@ -3902,6 +3939,7 @@ class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) final : public ReadOnlyCompi
     CompileOptions& setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
     CompileOptions& setCanLazilyParse(bool clp) { canLazilyParse = clp; return *this; }
     CompileOptions& setSourceIsLazy(bool l) { sourceIsLazy = l; return *this; }
+    CompileOptions& setNonSyntacticScope(bool n) { nonSyntacticScope = n; return *this; }
     CompileOptions& setIntroductionType(const char* t) { introductionType = t; return *this; }
     CompileOptions& setIntroductionInfo(const char* introducerFn, const char* intro,
                                         unsigned line, JSScript* script, uint32_t offset)
@@ -4557,6 +4595,11 @@ class JS_PUBLIC_API(StreamConsumer)
     // contract described above.
     enum CloseReason { EndOfFile, Error };
     virtual void streamClosed(CloseReason reason) = 0;
+
+    // Provides optional stream attributes such as base or source mapping URLs.
+    // Necessarily called before consumeChunk() or streamClosed(). The caller
+    // retains ownership of the given strings.
+    virtual void noteResponseURLs(const char* maybeUrl, const char* maybeSourceMapUrl) = 0;
 };
 
 enum class MimeType { Wasm };
@@ -5777,6 +5820,7 @@ JS_DropExceptionState(JSContext* cx, JSExceptionState* state);
 extern JS_PUBLIC_API(JSErrorReport*)
 JS_ErrorFromException(JSContext* cx, JS::HandleObject obj);
 
+namespace JS {
 /**
  * If the given object is an exception object (or an unwrappable
  * cross-compartment wrapper for one), return the stack for that exception, if
@@ -5786,6 +5830,8 @@ JS_ErrorFromException(JSContext* cx, JS::HandleObject obj);
  */
 extern JS_PUBLIC_API(JSObject*)
 ExceptionStackOrNull(JS::HandleObject obj);
+
+} /* namespace JS */
 
 /**
  * A JS context always has an "owner thread". The owner thread is set when the
@@ -5844,6 +5890,7 @@ JS_SetOffthreadIonCompilationEnabled(JSContext* cx, bool enabled);
     Register(FULL_DEBUG_CHECKS, "jit.full-debug-checks")                    \
     Register(JUMP_THRESHOLD, "jump-threshold")                              \
     Register(SIMULATOR_ALWAYS_INTERRUPT, "simulator.always-interrupt")      \
+    Register(SPECTRE_INDEX_MASKING, "spectre.index-masking")                \
     Register(ASMJS_ATOMICS_ENABLE, "asmjs.atomics.enable")                  \
     Register(WASM_FOLD_OFFSETS, "wasm.fold-offsets")
 

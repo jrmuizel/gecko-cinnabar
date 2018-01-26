@@ -4,13 +4,7 @@
 # Skip the folder with tests for the scripts
 skip include test/jstests.list
 
-skip script ecma_6/String/normalize-generateddata-input.js # input data for other test
-
-# Skip intl402 tests when Intl isn't available.
-skip-if(!this.hasOwnProperty('Intl')) include test262/intl402/jstests.list
-
-# Skip built-ins/Simd tests when SIMD isn't available.
-skip-if(!this.hasOwnProperty('SIMD')) include test262/built-ins/Simd/jstests.list
+skip script non262/String/normalize-generateddata-input.js # input data for other test
 
 # Times out on arm and cgc builds.
 slow script test262/built-ins/decodeURI/S15.1.3.1_A2.5_T1.js
@@ -41,6 +35,23 @@ skip-if(!this.hasOwnProperty("Intl")) script test262/built-ins/String/prototype/
 skip-if(!this.hasOwnProperty("Intl")) script test262/built-ins/String/prototype/toLocaleLowerCase/Final_Sigma_U180E.js
 skip-if(!this.hasOwnProperty("Intl")) script test262/built-ins/String/prototype/toLocaleLowerCase/special_casing_conditional.js
 
+# Skip intl402 tests when Intl isn't available.
+skip-if(!this.hasOwnProperty("Intl")) include test262/intl402/jstests.list
+
+# Skip built-ins/Simd tests when SIMD isn't available.
+skip-if(!this.hasOwnProperty("SIMD")) include test262/built-ins/Simd/jstests.list
+
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1415303
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) script non262/SIMD/load-sab-buffer-compat.js
+skip-if(!this.hasOwnProperty("Atomics")) include test262/built-ins/Atomics/jstests.list
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) include test262/built-ins/SharedArrayBuffer/jstests.list
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) script test262/built-ins/ArrayBuffer/prototype/byteLength/this-is-sharedarraybuffer.js
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) script test262/built-ins/ArrayBuffer/prototype/slice/this-is-sharedarraybuffer.js
+skip-if(!this.hasOwnProperty("SharedArrayBuffer")) script test262/built-ins/TypedArrays/internals/Get/indexed-value-sab.js
+
+# flatMap and flatten are Nightly-only
+skip-if(!Array.prototype.flatMap) include test262/built-ins/Array/prototype/flatMap/jstests.list
+skip-if(!Array.prototype.flatten) include test262/built-ins/Array/prototype/flatten/jstests.list
 
 #####################################
 # Test262 tests disabled on browser #
@@ -75,17 +86,6 @@ skip-if(!xulRuntime.shell) script test262/language/global-code/script-decl-func-
 skip-if(!xulRuntime.shell) script test262/language/global-code/script-decl-lex.js
 skip-if(!xulRuntime.shell) script test262/language/global-code/script-decl-var-err.js
 
-# Defines a restricted property on the WindowProxy object.
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-354-13.js
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-360-7.js
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-531-13.js
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-531-17.js
-skip-if(!xulRuntime.shell) script test262/built-ins/Object/defineProperty/15.2.3.6-4-538-7.js
-
-# Fails because window has a "name" property on WindowProxy.
-skip-if(!xulRuntime.shell) script test262/language/expressions/object/method-definition/generator-name-prop-symbol.js
-skip-if(!xulRuntime.shell) script test262/language/expressions/object/method-definition/name-name-prop-symbol.js
-
 
 ##################################################
 # Test262 tests skipped due to SpiderMonkey bugs #
@@ -116,14 +116,19 @@ skip script test262/built-ins/TypedArray/prototype/reduce/callbackfn-detachbuffe
 skip script test262/built-ins/TypedArray/prototype/some/callbackfn-detachbuffer.js
 skip script test262/built-ins/TypedArrays/internals/DefineOwnProperty/detached-buffer-realm.js
 skip script test262/built-ins/TypedArrays/internals/DefineOwnProperty/detached-buffer.js
+skip script test262/built-ins/TypedArrays/internals/DefineOwnProperty/tonumber-value-detached-buffer.js
 skip script test262/built-ins/TypedArrays/internals/Get/detached-buffer-realm.js
 skip script test262/built-ins/TypedArrays/internals/Get/detached-buffer.js
+skip script test262/built-ins/TypedArrays/internals/Get/infinity-detached-buffer.js
 skip script test262/built-ins/TypedArrays/internals/GetOwnProperty/detached-buffer-realm.js
 skip script test262/built-ins/TypedArrays/internals/GetOwnProperty/detached-buffer.js
+skip script test262/built-ins/TypedArrays/internals/GetOwnProperty/enumerate-detached-buffer.js
 skip script test262/built-ins/TypedArrays/internals/HasProperty/detached-buffer-realm.js
 skip script test262/built-ins/TypedArrays/internals/HasProperty/detached-buffer.js
+skip script test262/built-ins/TypedArrays/internals/HasProperty/infinity-with-detached-buffer.js
 skip script test262/built-ins/TypedArrays/internals/Set/detached-buffer-realm.js
 skip script test262/built-ins/TypedArrays/internals/Set/detached-buffer.js
+skip script test262/built-ins/TypedArrays/internals/Set/tonumber-value-detached-buffer.js
 
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1129202
 skip script test262/built-ins/TypedArrays/internals/DefineOwnProperty/key-is-greater-than-last-index.js
@@ -250,7 +255,6 @@ skip script test262/built-ins/Proxy/set/trap-is-not-callable-realm.js
 skip script test262/built-ins/Proxy/setPrototypeOf/trap-is-not-callable-realm.js
 
 # Erros thrown from wrong realm, similar to 1225839, 1288457, and 1297179.
-skip script test262/language/expressions/new/non-ctor-err-realm.js
 skip script test262/built-ins/Array/length/define-own-prop-length-overflow-realm.js
 skip script test262/built-ins/Function/internals/Construct/derived-return-val-realm.js
 skip script test262/built-ins/Function/internals/Construct/derived-this-uninitialized-realm.js
@@ -425,19 +429,12 @@ skip-if(!xulRuntime.shell) script test262/built-ins/Atomics/wake/wake-one.js
 skip-if(!xulRuntime.shell) script test262/built-ins/Atomics/wake/wake-all-on-loc.js
 
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1346081
-skip script test262/intl402/NumberFormat/prototype/format/11.3.2_TRP.js
-skip script test262/intl402/NumberFormat/prototype/format/11.3.2_TRF.js
-
-# https://bugzilla.mozilla.org/show_bug.cgi?id=1340304
-skip-if(!xulRuntime.shell) script test262/language/module-code/instn-iee-err-circular.js
-skip-if(!xulRuntime.shell) script test262/language/module-code/instn-iee-err-circular-as.js
+skip script test262/intl402/NumberFormat/prototype/format/format-fraction-digits.js
+skip script test262/intl402/NumberFormat/prototype/format/format-significant-digits.js
 
 # Hoisted block-level function named "arguments" not initialized with undefined per B.3.3.1
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1339123
 skip script test262/annexB/language/function-code/block-decl-func-skip-arguments.js
-
-# https://bugzilla.mozilla.org/show_bug.cgi?id=1386146
-skip script test262/intl402/DateTimeFormat/prototype/resolvedOptions/hourCycle.js
 
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1407587
 skip script test262/language/expressions/assignment/destructuring/keyed-destructuring-property-reference-target-evaluation-order.js
@@ -462,6 +459,9 @@ skip script test262/language/expressions/object/method-definition/async-gen-yiel
 skip script test262/language/expressions/class/async-gen-method-yield-star-sync-next.js
 skip script test262/language/expressions/class/async-gen-method-static-yield-star-sync-next.js
 
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1321616
+skip script test262/annexB/built-ins/Function/createdynfn-html-close-comment-params.js
+
 
 ###########################################################
 # Tests disabled due to issues in test262 importer script #
@@ -475,5 +475,5 @@ skip script test262/harness/detachArrayBuffer.js
 # Tests disabled due to invalid test expectations  #
 ####################################################
 
-# https://github.com/tc39/test262/issues/1312
-skip script test262/built-ins/BigInt/prototype/toString/string-is-code-units-of-decimal-digits-only.js
+# assert.compareArray doesn't perform deep-equality comparison.
+skip script test262/built-ins/Array/prototype/flatMap/depth-always-one.js

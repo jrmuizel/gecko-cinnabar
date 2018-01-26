@@ -305,7 +305,7 @@ public:
       return mContentBackend;
     }
 
-    mozilla::gfx::BackendType GetPreferredCanvasBackend() {
+    virtual mozilla::gfx::BackendType GetPreferredCanvasBackend() {
       return mPreferredCanvasBackend;
     }
     mozilla::gfx::BackendType GetFallbackCanvasBackend() {
@@ -580,6 +580,8 @@ public:
     virtual gfxImageFormat GetOffscreenFormat()
     { return mozilla::gfx::SurfaceFormat::X8R8G8B8_UINT32; }
 
+    virtual bool UsesTiling() const;
+
     /**
      * Returns a logger if one is available and logging is enabled
      */
@@ -709,6 +711,11 @@ public:
     virtual FT_Library GetFTLibrary() {
       return nullptr;
     }
+
+    // you probably want to use gfxVars::UseWebRender() instead of this
+    static bool WebRenderPrefEnabled();
+    // you probably want to use gfxVars::UseWebRender() instead of this
+    static bool WebRenderEnvvarEnabled();
 
 protected:
     gfxPlatform();

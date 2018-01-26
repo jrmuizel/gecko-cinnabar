@@ -93,7 +93,6 @@ pub enum FontRenderMode {
     Mono = 0,
     Alpha,
     Subpixel,
-    Bitmap,
 }
 
 #[repr(u32)]
@@ -130,7 +129,6 @@ impl FontRenderMode {
     // Combine two font render modes such that the lesser amount of AA limits the AA of the result.
     pub fn limit_by(self, other: FontRenderMode) -> FontRenderMode {
         match (self, other) {
-            (FontRenderMode::Bitmap, _) | (_, FontRenderMode::Bitmap) => FontRenderMode::Bitmap,
             (FontRenderMode::Subpixel, _) | (_, FontRenderMode::Mono) => other,
             _ => self,
         }
@@ -141,7 +139,7 @@ impl SubpixelDirection {
     // Limit the subpixel direction to what is supported by the render mode.
     pub fn limit_by(self, render_mode: FontRenderMode) -> SubpixelDirection {
         match render_mode {
-            FontRenderMode::Mono | FontRenderMode::Bitmap => SubpixelDirection::None,
+            FontRenderMode::Mono => SubpixelDirection::None,
             FontRenderMode::Alpha | FontRenderMode::Subpixel => self,
         }
     }
@@ -201,6 +199,16 @@ impl Hash for FontVariation {
 #[derive(Clone, Copy, Debug, Deserialize, Hash, Eq, PartialEq, PartialOrd, Ord, Serialize)]
 pub struct GlyphOptions {
     pub render_mode: FontRenderMode,
+    pub flags: FontInstanceFlags,
+}
+
+impl Default for GlyphOptions {
+    fn default() -> GlyphOptions {
+        GlyphOptions {
+            render_mode: FontRenderMode::Subpixel,
+            flags: FontInstanceFlags::empty(),
+        }
+    }
 }
 
 bitflags! {
@@ -212,6 +220,9 @@ bitflags! {
         const SYNTHETIC_BOLD    = 1 << 1;
         const EMBEDDED_BITMAPS  = 1 << 2;
         const SUBPIXEL_BGR      = 1 << 3;
+        const TRANSPOSE         = 1 << 4;
+        const FLIP_X            = 1 << 5;
+        const FLIP_Y            = 1 << 6;
 
         // Windows flags
         const FORCE_GDI         = 1 << 16;

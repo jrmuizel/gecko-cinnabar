@@ -804,7 +804,7 @@ class Schedules(object):
         self._inclusive = TypedList(Enum(*schedules.INCLUSIVE_COMPONENTS))()
         self._exclusive = ImmutableStrictOrderingOnAppendList(schedules.EXCLUSIVE_COMPONENTS)
 
-    # inclusive is mutable cannot be assigned to (+= only)
+    # inclusive is mutable but cannot be assigned to (+= only)
     @property
     def inclusive(self):
         return self._inclusive
@@ -815,9 +815,9 @@ class Schedules(object):
             raise AttributeError("Cannot assign to this value - use += instead")
         unexpected = [v for v in value if v not in schedules.INCLUSIVE_COMPONENTS]
         if unexpected:
-            raise Exception("unexpected exclusive component(s) " + ', '.join(unexpected))
+            raise Exception("unexpected inclusive component(s) " + ', '.join(unexpected))
 
-    # exclusive is immuntable but can be set (= only)
+    # exclusive is immutable but can be set (= only)
     @property
     def exclusive(self):
         return self._exclusive
@@ -835,6 +835,24 @@ class Schedules(object):
     @property
     def components(self):
         return list(sorted(set(self._inclusive) | set(self._exclusive)))
+
+    # The `Files` context uses | to combine SCHEDULES from multiple levels; at this
+    # point the immutability is no longer needed so we use plain lists
+    def __or__(self, other):
+        rv = Schedules()
+        rv._inclusive = self._inclusive + other._inclusive
+        if other._exclusive == self._exclusive:
+            rv._exclusive = self._exclusive
+        elif self._exclusive == schedules.EXCLUSIVE_COMPONENTS:
+            rv._exclusive = other._exclusive
+        elif other._exclusive == schedules.EXCLUSIVE_COMPONENTS:
+            rv._exclusive = self._exclusive
+        else:
+            # in a case where two SCHEDULES.exclusive set different values, take
+            # the later one; this acts the way we expect assignment to work.
+            rv._exclusive = other._exclusive
+        return rv
+
 
 @memoize
 def ContextDerivedTypedHierarchicalStringList(type):
@@ -1084,6 +1102,10 @@ class Files(SubContext):
                                        for e in v.files)
                 self.test_tags |= set(v.tags)
                 self.test_flavors |= set(v.flavors)
+                continue
+
+            if k == 'SCHEDULES' and 'SCHEDULES' in self:
+                self['SCHEDULES'] = self['SCHEDULES'] | v
                 continue
 
             # Ignore updates to finalized flags.
@@ -1656,20 +1678,6 @@ VARIABLES = {
         them correctly.
         """),
 
-    'BRANDING_FILES': (ContextDerivedTypedHierarchicalStringList(Path), list,
-        """List of files to be installed into the branding directory.
-
-        ``BRANDING_FILES`` will copy (or symlink, if the platform supports it)
-        the contents of its files to the ``dist/branding`` directory. Files that
-        are destined for a subdirectory can be specified by accessing a field.
-        For example, to export ``foo.png`` to the top-level directory and
-        ``bar.png`` to the directory ``images/subdir``, append to
-        ``BRANDING_FILES`` like so::
-
-           BRANDING_FILES += ['foo.png']
-           BRANDING_FILES.images.subdir += ['bar.png']
-        """),
-
     'SIMPLE_PROGRAMS': (StrictOrderingOnAppendList, list,
         """Compile a list of executable names.
 
@@ -2040,6 +2048,24 @@ VARIABLES = {
                 (...)
             }
             (...)
+        """),
+
+    'GN_DIRS': (StrictOrderingOnAppendListWithFlagsFactory({
+            'variables': dict,
+            'sandbox_vars': dict,
+            'non_unified_sources': StrictOrderingOnAppendList,
+            'mozilla_flags': list,
+        }), list,
+        """List of dirs containing gn files describing targets to build. Attributes:
+            - variables, a dictionary containing variables and values to pass
+              to `gn gen`.
+            - sandbox_vars, a dictionary containing variables and values to
+              pass to the mozbuild processor on top of those derived from gn.
+            - non_unified_sources, a list containing sources files, relative to
+              the current moz.build, that should be excluded from source file
+              unification.
+            - mozilla_flags, a set of flags that if present in the gn config
+              will be mirrored to the resulting mozbuild configuration.
         """),
 
     'SPHINX_TREES': (dict, dict,

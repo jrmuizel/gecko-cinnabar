@@ -52,12 +52,15 @@ JAVA_CLASSPATH += \
     $(ANDROID_PALETTE_V7_AAR_LIB) \
     $(NULL)
 
-# If native devices are enabled, add Google Play Services and some of the v7
-# compat libraries.
-ifdef MOZ_NATIVE_DEVICES
+ifdef MOZ_ANDROID_GOOGLE_PLAY_SERVICES
     JAVA_CLASSPATH += \
         $(ANDROID_PLAY_SERVICES_BASE_AAR_LIB) \
         $(ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB) \
+        $(NULL)
+endif
+
+ifdef MOZ_NATIVE_DEVICES
+    JAVA_CLASSPATH += \
         $(ANDROID_PLAY_SERVICES_CAST_AAR_LIB) \
         $(ANDROID_MEDIAROUTER_V7_AAR_LIB) \
         $(ANDROID_MEDIAROUTER_V7_AAR_INTERNAL_LIB) \
@@ -80,7 +83,7 @@ ifdef MOZ_INSTALL_TRACKING
         $(NULL)
 endif
 
-# MOZ_ANDROID_MMA requires MOZ_ANDROID_GCM and MOZ_NATIVE_DEVICES,
+# MOZ_ANDROID_MMA requires MOZ_ANDROID_GCM and MOZ_ANDROID_GOOGLE_PLAY_SERVICES,
 # which take care of the Play Services requirements in JAVA_CLASSPATH.
 # Based on the import of
 # `com.google.android.gms.ads.identifier.AdvertisingIdClient` in
@@ -107,6 +110,13 @@ java_bundled_libs := \
     $(ANDROID_PALETTE_V7_AAR_LIB) \
     $(NULL)
 
+ifdef MOZ_ANDROID_GOOGLE_PLAY_SERVICES
+    java_bundled_libs += \
+        $(ANDROID_PLAY_SERVICES_BASE_AAR_LIB) \
+        $(ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB) \
+        $(NULL)
+endif
+
 ifdef MOZ_NATIVE_DEVICES
     java_bundled_libs += \
         $(ANDROID_PLAY_SERVICES_BASE_AAR_LIB) \
@@ -133,7 +143,7 @@ ifdef MOZ_INSTALL_TRACKING
         $(NULL)
 endif
 
-# MOZ_ANDROID_MMA requires MOZ_ANDROID_GCM and MOZ_NATIVE_DEVICES,
+# MOZ_ANDROID_MMA requires MOZ_ANDROID_GCM and MOZ_ANDROID_GOOGLE_PLAY_SERVICES,
 # which take care of the Play Services requirements in
 # java_bundled_libs.  See the note above.
 
@@ -236,12 +246,7 @@ ifdef MOZ_BUILD_MOBILE_ANDROID_WITH_GRADLE
 define gradle_command
 $(1): $(2)
 	@$$(TOUCH) $$@
-	$$(topsrcdir)/mach gradle \
-		geckoview:generateJNIWrappersForGeneratedRelease \
-		app:generateJNIWrappersForFennecOfficialPhotonDebug \
-		app:assembleOfficialPhotonDebug \
-		app:assembleOfficialPhotonDebugAndroidTest \
-		-x lint
+	$$(topsrcdir)/mach android assemble-app
 endef
 
 # .gradle.deps: .aapt.deps FORCE
@@ -278,19 +283,6 @@ endif
 
 proguard_config_dir=$(topsrcdir)/mobile/android/config/proguard
 
-# This stanza ensures that the set of GeckoView classes does not depend on too
-# much of Fennec, where "too much" is defined as the set of potentially
-# non-GeckoView classes that GeckoView already depended on at a certain point in
-# time.  The idea is to set a high-water mark that is not to be crossed.
-classycle_jar := $(topsrcdir)/mobile/android/build/classycle/classycle-1.4.1.jar
-.geckoview.deps: geckoview.ddf $(classycle_jar) $(ALL_JARS)
-	$(JAVA) -cp $(classycle_jar) \
-		classycle.dependency.DependencyChecker \
-		-mergeInnerClasses \
-		-dependencies=@$< \
-		$(ALL_JARS)
-	@$(TOUCH) $@
-
 # First, we delete debugging information from libraries. Having line-number
 # information for libraries for which we lack the source isn't useful, so this
 # saves us a bit of space. Importantly, Proguard has a bug causing it to
@@ -317,7 +309,7 @@ classycle_jar := $(topsrcdir)/mobile/android/build/classycle/classycle-1.4.1.jar
 # outputs are fresher than the target, preventing a subsequent
 # invocation from thinking Proguard's outputs are stale.  This is safe
 # because Make removes the target file if any recipe command fails.
-.proguard.deps: .geckoview.deps .bundled.proguard.deps $(ALL_JARS) $(proguard_config_dir)/proguard.cfg $(PROGUARD_JAR)
+.proguard.deps: .bundled.proguard.deps $(ALL_JARS) $(proguard_config_dir)/proguard.cfg $(PROGUARD_JAR)
 	$(REPORT_BUILD)
 	@$(TOUCH) $@
 	$(JAVA) \
@@ -508,7 +500,7 @@ $(eval $(call gradle_command,.gradle.nodeps,AndroidManifest.xml $(constants_PP_J
 
 .aapt.nodeps: .gradle.nodeps FORCE
 	@$(TOUCH) $@
-	cp $(gradle_dir)/app/outputs/apk/app-official-photon-debug.apk gecko-nodeps.ap_
+	cp $(GRADLE_ANDROID_APP_APK) gecko-nodeps.ap_
 	cp $(gradle_dir)/app/intermediates/transforms/dex/officialPhoton/debug/folders/1000/1f/main/classes.dex classes.dex
 else
 # .aapt.nodeps: AndroidManifest.xml FORCE
@@ -574,7 +566,12 @@ endif
 # List of build flags used by auto-generated JNI bindings (through the
 # @BuildFlag annotation in Java). For example, add a "MOZ_FOO \" line to this
 # list to support @BuildFlag(MOZ_FOO).
+#
+# Be sure that the given BUILD_FLAG is exposed to the generated JNI
+# wrapper compilation environment!  This might mean adding a local
+# DEFINE in /widget/android and/or /widget/android/fennec.
 BINDING_BUILD_FLAGS = \
+  MOZ_NATIVE_DEVICES \
   $(NULL)
 
 # Preprocess a JNI binding file using the build flags defined above.

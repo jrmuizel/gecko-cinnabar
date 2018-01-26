@@ -27,6 +27,7 @@
 #include "jsutil.h"
 #include "jswrapper.h"
 
+#include "gc/FreeOp.h"
 #include "gc/Marking.h"
 #include "js/CharacterEncoding.h"
 #include "vm/ErrorObject.h"
@@ -423,7 +424,7 @@ js::ErrorFromException(JSContext* cx, HandleObject objArg)
 }
 
 JS_PUBLIC_API(JSObject*)
-ExceptionStackOrNull(HandleObject objArg)
+JS::ExceptionStackOrNull(HandleObject objArg)
 {
     JSObject* obj = CheckedUnwrap(objArg);
     if (!obj || !obj->is<ErrorObject>()) {

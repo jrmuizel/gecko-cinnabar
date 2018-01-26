@@ -225,12 +225,12 @@ WebAuthnManager::MakeCredential(const MakePublicKeyCredentialOptions& aOptions,
     return promise.forget();
   }
 
-  // Enforce 4.4.3 User Account Parameters for Credential Generation
-  if (aOptions.mUser.mId.WasPassed()) {
-    // When we add UX, we'll want to do more with this value, but for now
-    // we just have to verify its correctness.
+  // Enforce 5.4.3 User Account Parameters for Credential Generation
+  // When we add UX, we'll want to do more with this value, but for now
+  // we just have to verify its correctness.
+  {
     CryptoBuffer userId;
-    userId.Assign(aOptions.mUser.mId.Value());
+    userId.Assign(aOptions.mUser.mId);
     if (userId.Length() > 64) {
       promise->MaybeReject(NS_ERROR_DOM_TYPE_ERR);
       return promise.forget();
@@ -361,9 +361,9 @@ WebAuthnManager::MakeCredential(const MakePublicKeyCredentialOptions& aOptions,
     return promise.forget();
   }
 
-  nsTArray<WebAuthnScopedCredentialDescriptor> excludeList;
+  nsTArray<WebAuthnScopedCredential> excludeList;
   for (const auto& s: aOptions.mExcludeCredentials) {
-    WebAuthnScopedCredentialDescriptor c;
+    WebAuthnScopedCredential c;
     CryptoBuffer cb;
     cb.Assign(s.mId);
     c.id() = cb;
@@ -380,6 +380,7 @@ WebAuthnManager::MakeCredential(const MakePublicKeyCredentialOptions& aOptions,
 
   const auto& selection = aOptions.mAuthenticatorSelection;
   const auto& attachment = selection.mAuthenticatorAttachment;
+  const AttestationConveyancePreference& attestation = aOptions.mAttestation;
 
   // Does the RP require attachment == "platform"?
   bool requirePlatformAttachment =
@@ -388,6 +389,15 @@ WebAuthnManager::MakeCredential(const MakePublicKeyCredentialOptions& aOptions,
   // Does the RP require user verification?
   bool requireUserVerification =
     selection.mUserVerification == UserVerificationRequirement::Required;
+
+  // Does the RP desire direct attestation? Indirect attestation is not
+  // implemented, and thus is equivilent to None.
+  bool requestDirectAttestation =
+    attestation == AttestationConveyancePreference::Direct;
+
+  // In Bug 1430150, if requestDirectAttestation is true, we will need to prompt
+  // the user for permission to proceed. For now, we ignore it.
+  Unused << requestDirectAttestation;
 
   // Create and forward authenticator selection criteria.
   WebAuthnAuthenticatorSelection authSelection(selection.mRequireResidentKey,
@@ -533,19 +543,43 @@ WebAuthnManager::GetAssertion(const PublicKeyCredentialRequestOptions& aOptions,
     return promise.forget();
   }
 
-  nsTArray<WebAuthnScopedCredentialDescriptor> allowList;
+  nsTArray<WebAuthnScopedCredential> allowList;
   for (const auto& s: aOptions.mAllowCredentials) {
-    WebAuthnScopedCredentialDescriptor c;
-    CryptoBuffer cb;
-    cb.Assign(s.mId);
-    c.id() = cb;
-    allowList.AppendElement(c);
+    if (s.mType == PublicKeyCredentialType::Public_key) {
+      WebAuthnScopedCredential c;
+      CryptoBuffer cb;
+      cb.Assign(s.mId);
+      c.id() = cb;
+
+      // Serialize transports.
+      if (s.mTransports.WasPassed()) {
+        uint8_t transports = 0;
+        for (const auto& t: s.mTransports.Value()) {
+          if (t == AuthenticatorTransport::Usb) {
+            transports |= U2F_AUTHENTICATOR_TRANSPORT_USB;
+          }
+          if (t == AuthenticatorTransport::Nfc) {
+            transports |= U2F_AUTHENTICATOR_TRANSPORT_NFC;
+          }
+          if (t == AuthenticatorTransport::Ble) {
+            transports |= U2F_AUTHENTICATOR_TRANSPORT_BLE;
+          }
+        }
+        c.transports() = transports;
+      }
+
+      allowList.AppendElement(c);
+    }
   }
 
   if (!MaybeCreateBackgroundActor()) {
     promise->MaybeReject(NS_ERROR_DOM_OPERATION_ERR);
     return promise.forget();
   }
+
+  // Does the RP require user verification?
+  bool requireUserVerification =
+    aOptions.mUserVerification == UserVerificationRequirement::Required;
 
   // TODO: Add extension list building
   // If extensions was specified, process any extensions supported by this
@@ -559,6 +593,7 @@ WebAuthnManager::GetAssertion(const PublicKeyCredentialRequestOptions& aOptions,
                                 clientDataHash,
                                 adjustedTimeout,
                                 allowList,
+                                requireUserVerification,
                                 extensions);
 
   ListenForVisibilityEvents();

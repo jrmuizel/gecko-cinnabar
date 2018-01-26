@@ -37,6 +37,9 @@
 
 namespace mozilla {
 
+typedef ContentEventHandler::NodePosition NodePosition;
+typedef ContentEventHandler::NodePositionBefore NodePositionBefore;
+
 using namespace widget;
 
 LazyLogModule sIMECOLog("IMEContentObserver");
@@ -188,7 +191,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IMEContentObserver)
  NS_INTERFACE_MAP_ENTRY(nsIReflowObserver)
  NS_INTERFACE_MAP_ENTRY(nsIScrollObserver)
  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
- NS_INTERFACE_MAP_ENTRY(nsIEditorObserver)
  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsISelectionListener)
 NS_INTERFACE_MAP_END
 
@@ -470,7 +472,7 @@ IMEContentObserver::ObserveEditableNode()
 
   mIsObserving = true;
   if (mEditorBase) {
-    mEditorBase->AddEditorObserver(this);
+    mEditorBase->SetIMEContentObserver(this);
   }
 
   if (!WasInitializedWithPlugin()) {
@@ -547,7 +549,7 @@ IMEContentObserver::UnregisterObservers()
   mIsObserving = false;
 
   if (mEditorBase) {
-    mEditorBase->RemoveEditorObserver(this);
+    mEditorBase->SetIMEContentObserver(nullptr);
   }
 
   if (mSelection) {
@@ -942,7 +944,8 @@ IMEContentObserver::CharacterDataWillChange(nsIDocument* aDocument,
              "CharacterDataChanged() should've reset "
              "mPreCharacterDataChangeLength");
 
-  if (!NeedsTextChangeNotification()) {
+  if (!NeedsTextChangeNotification() ||
+      !nsContentUtils::IsInSameAnonymousTree(mRootContent, aContent)) {
     return;
   }
 
@@ -971,7 +974,8 @@ IMEContentObserver::CharacterDataChanged(nsIDocument* aDocument,
   NS_ASSERTION(aContent->IsNodeOfType(nsINode::eTEXT),
                "character data changed for non-text node");
 
-  if (!NeedsTextChangeNotification()) {
+  if (!NeedsTextChangeNotification() ||
+      !nsContentUtils::IsInSameAnonymousTree(mRootContent, aContent)) {
     return;
   }
 
@@ -1017,7 +1021,8 @@ IMEContentObserver::NotifyContentAdded(nsINode* aContainer,
                                        nsIContent* aFirstContent,
                                        nsIContent* aLastContent)
 {
-  if (!NeedsTextChangeNotification()) {
+  if (!NeedsTextChangeNotification() ||
+      !nsContentUtils::IsInSameAnonymousTree(mRootContent, aFirstContent)) {
     return;
   }
 
@@ -1135,7 +1140,8 @@ IMEContentObserver::ContentRemoved(nsIDocument* aDocument,
                                    nsIContent* aChild,
                                    nsIContent* aPreviousSibling)
 {
-  if (!NeedsTextChangeNotification()) {
+  if (!NeedsTextChangeNotification() ||
+      !nsContentUtils::IsInSameAnonymousTree(mRootContent, aChild)) {
     return;
   }
 
@@ -1257,23 +1263,6 @@ IMEContentObserver::ClearAddedNodesDuringDocumentChange()
   MOZ_LOG(sIMECOLog, LogLevel::Debug,
     ("0x%p IMEContentObserver::ClearAddedNodesDuringDocumentChange()"
      ", finished storing consecutive nodes", this));
-}
-
-// static
-nsIContent*
-IMEContentObserver::GetChildNode(nsINode* aParent, int32_t aOffset)
-{
-  if (!aParent->HasChildren() || aOffset < 0 ||
-      aOffset >= static_cast<int32_t>(aParent->Length())) {
-    return nullptr;
-  }
-  if (!aOffset) {
-    return aParent->GetFirstChild();
-  }
-  if (aOffset == static_cast<int32_t>(aParent->Length() - 1)) {
-    return aParent->GetLastChild();
-  }
-  return aParent->GetChildAt(aOffset);
 }
 
 bool
@@ -1419,8 +1408,8 @@ IMEContentObserver::UnsuppressNotifyingIME()
   FlushMergeableNotifications();
 }
 
-NS_IMETHODIMP
-IMEContentObserver::EditAction()
+void
+IMEContentObserver::OnEditActionHandled()
 {
   MOZ_LOG(sIMECOLog, LogLevel::Debug,
     ("0x%p IMEContentObserver::EditAction()", this));
@@ -1428,10 +1417,9 @@ IMEContentObserver::EditAction()
   mEndOfAddedTextCache.Clear();
   mStartOfRemovingTextRangeCache.Clear();
   FlushMergeableNotifications();
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 IMEContentObserver::BeforeEditAction()
 {
   MOZ_LOG(sIMECOLog, LogLevel::Debug,
@@ -1439,10 +1427,9 @@ IMEContentObserver::BeforeEditAction()
 
   mEndOfAddedTextCache.Clear();
   mStartOfRemovingTextRangeCache.Clear();
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 IMEContentObserver::CancelEditAction()
 {
   MOZ_LOG(sIMECOLog, LogLevel::Debug,
@@ -1451,7 +1438,6 @@ IMEContentObserver::CancelEditAction()
   mEndOfAddedTextCache.Clear();
   mStartOfRemovingTextRangeCache.Clear();
   FlushMergeableNotifications();
-  return NS_OK;
 }
 
 void

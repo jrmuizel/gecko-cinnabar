@@ -11,6 +11,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/DoublyLinkedList.h"
 #include "mozilla/LinkedList.h"
+#include "mozilla/MaybeOneOf.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Scoped.h"
@@ -22,9 +23,6 @@
 #include "jsatom.h"
 #include "jsscript.h"
 
-#ifdef XP_DARWIN
-# include "wasm/WasmSignalHandlers.h"
-#endif
 #include "builtin/AtomicsObject.h"
 #include "builtin/Intl.h"
 #include "builtin/Promise.h"
@@ -52,6 +50,7 @@
 #include "vm/Stack.h"
 #include "vm/Stopwatch.h"
 #include "vm/Symbol.h"
+#include "wasm/WasmSignalHandlers.h"
 
 #ifdef _MSC_VER
 #pragma warning(push)
@@ -138,52 +137,6 @@ class Simulator;
 //   activities do not cause observable changes in script behaviors. Activity
 //   on helper threads may be referred to as happening 'off thread' or on a
 //   background thread in some parts of the VM.
-
-/*
- * A FreeOp can do one thing: free memory. For convenience, it has delete_
- * convenience methods that also call destructors.
- *
- * FreeOp is passed to finalizers and other sweep-phase hooks so that we do not
- * need to pass a JSContext to those hooks.
- */
-class FreeOp : public JSFreeOp
-{
-    Vector<void*, 0, SystemAllocPolicy> freeLaterList;
-    jit::JitPoisonRangeVector jitPoisonRanges;
-
-  public:
-    static FreeOp* get(JSFreeOp* fop) {
-        return static_cast<FreeOp*>(fop);
-    }
-
-    explicit FreeOp(JSRuntime* maybeRuntime);
-    ~FreeOp();
-
-    bool onActiveCooperatingThread() const {
-        return runtime_ != nullptr;
-    }
-
-    bool maybeOnHelperThread() const {
-        // Sometimes background finalization happens on the active thread so
-        // runtime_ being null doesn't always mean we are off thread.
-        return !runtime_;
-    }
-
-    bool isDefaultFreeOp() const;
-
-    inline void free_(void* p);
-    inline void freeLater(void* p);
-
-    inline bool appendJitPoisonRange(const jit::JitPoisonRange& range);
-
-    template <class T>
-    inline void delete_(T* p) {
-        if (p) {
-            p->~T();
-            free_(p);
-        }
-    }
-};
 
 } /* namespace js */
 
@@ -1052,66 +1005,45 @@ struct JSRuntime : public js::MallocProvider<JSRuntime>
   public:
     js::RuntimeCaches& caches() { return caches_.ref(); }
 
-  private:
-    // When wasm is interrupted, the pc at which we should return if the
-    // interrupt hasn't stopped execution of the current running code. Since
-    // this is used only by the interrupt handler and the latter is not
-    // reentrant, this value can't be clobbered so there is at most one
-    // resume PC at a time.
-    js::ActiveThreadData<void*> wasmResumePC_;
+    // When wasm traps or is interrupted, the signal handler records some data
+    // for unwinding purposes. Wasm code can't interrupt or trap reentrantly.
+    js::ActiveThreadData<
+        mozilla::MaybeOneOf<js::wasm::TrapData, js::wasm::InterruptData>
+    > wasmUnwindData;
 
-    // To ensure a consistent state of fp/pc, the unwound pc might be
-    // different from the resumePC, especially at call boundaries.
-    js::ActiveThreadData<void*> wasmUnwindPC_;
+    js::wasm::TrapData& wasmTrapData() {
+        return wasmUnwindData.ref().ref<js::wasm::TrapData>();
+    }
+    js::wasm::InterruptData& wasmInterruptData() {
+        return wasmUnwindData.ref().ref<js::wasm::InterruptData>();
+    }
 
   public:
-    void startWasmInterrupt(void* resumePC, void* unwindPC) {
-        MOZ_ASSERT(resumePC && unwindPC);
-        wasmResumePC_ = resumePC;
-        wasmUnwindPC_ = unwindPC;
-    }
-    void finishWasmInterrupt() {
-        MOZ_ASSERT(wasmResumePC_ && wasmUnwindPC_);
-        wasmResumePC_ = nullptr;
-        wasmUnwindPC_ = nullptr;
-    }
-    void* wasmResumePC() const {
-        return wasmResumePC_;
-    }
-    void* wasmUnwindPC() const {
-        return wasmUnwindPC_;
-    }
+#if defined(NIGHTLY_BUILD)
+    // Support for informing the embedding of any error thrown.
+    // This mechanism is designed to let the embedding
+    // log/report/fail in case certain errors are thrown
+    // (e.g. SyntaxError, ReferenceError or TypeError
+    // in critical code).
+    struct ErrorInterceptionSupport {
+        ErrorInterceptionSupport()
+          : isExecuting(false)
+          , interceptor(nullptr)
+        { }
+
+        // true if the error interceptor is currently executing,
+        // false otherwise. Used to avoid infinite loops.
+        bool isExecuting;
+
+        // if non-null, any call to `setPendingException`
+        // in this runtime will trigger the call to `interceptor`
+        JSErrorInterceptor* interceptor;
+    };
+    ErrorInterceptionSupport errorInterception;
+#endif // defined(NIGHTLY_BUILD)
 };
 
 namespace js {
-
-inline void
-FreeOp::free_(void* p)
-{
-    js_free(p);
-}
-
-inline void
-FreeOp::freeLater(void* p)
-{
-    // FreeOps other than the defaultFreeOp() are constructed on the stack,
-    // and won't hold onto the pointers to free indefinitely.
-    MOZ_ASSERT(!isDefaultFreeOp());
-
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-    if (!freeLaterList.append(p))
-        oomUnsafe.crash("FreeOp::freeLater");
-}
-
-inline bool
-FreeOp::appendJitPoisonRange(const jit::JitPoisonRange& range)
-{
-    // FreeOps other than the defaultFreeOp() are constructed on the stack,
-    // and won't hold onto the pointers to free indefinitely.
-    MOZ_ASSERT(!isDefaultFreeOp());
-
-    return jitPoisonRanges.append(range);
-}
 
 /*
  * RAII class that takes the GC lock while it is live.

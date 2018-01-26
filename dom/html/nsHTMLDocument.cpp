@@ -32,7 +32,6 @@
 #include "nsIIOService.h"
 #include "nsNetUtil.h"
 #include "nsIPrivateBrowsingChannel.h"
-#include "nsIContentViewerContainer.h"
 #include "nsIContentViewer.h"
 #include "nsDocShell.h"
 #include "nsDocShellLoadTypes.h"
@@ -1598,6 +1597,18 @@ nsHTMLDocument::Open(JSContext* cx,
         nsCOMPtr<nsIDocument> ret = this;
         return ret.forget();
       }
+
+      // Now double-check that our invariants still hold.
+      if (!mScriptGlobalObject) {
+        nsCOMPtr<nsIDocument> ret = this;
+        return ret.forget();
+      }
+
+      nsPIDOMWindowOuter* outer = GetWindow();
+      if (!outer || (GetInnerWindow() != outer->GetCurrentInnerWindow())) {
+        nsCOMPtr<nsIDocument> ret = this;
+        return ret.forget();
+      }
     }
 
     nsCOMPtr<nsIWebNavigation> webnav(do_QueryInterface(shell));
@@ -1619,6 +1630,7 @@ nsHTMLDocument::Open(JSContext* cx,
                          callerDoc,
                          nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL,
                          nsIContentPolicy::TYPE_OTHER,
+                         nullptr, // PerformanceStorage
                          group);
 
   if (aError.Failed()) {

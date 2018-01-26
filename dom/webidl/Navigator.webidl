@@ -14,6 +14,7 @@
  * http://www.w3.org/TR/beacon/#sec-beacon-method
  * https://html.spec.whatwg.org/#navigatorconcurrenthardware
  * http://wicg.github.io/netinfo/#extensions-to-the-navigator-interface
+ * https://w3c.github.io/webappsec-credential-management/#framework-credential-management
  *
  * © Copyright 2004-2011 Apple Computer, Inc., Mozilla Foundation, and
  * Opera Software ASA. You are granted a license to use, reproduce
@@ -36,7 +37,7 @@ Navigator implements NavigatorStorage;
 [NoInterfaceObject, Exposed=(Window,Worker)]
 interface NavigatorID {
   // WebKit/Blink/Trident/Presto support this (hardcoded "Mozilla").
-  [Constant, Cached]
+  [Constant, Cached, Throws]
   readonly attribute DOMString appCodeName; // constant "Mozilla"
   [Constant, Cached, NeedsCallerType]
   readonly attribute DOMString appName;
@@ -78,7 +79,7 @@ interface NavigatorContentUtils {
   // content handler registration
   [Throws]
   void registerProtocolHandler(DOMString scheme, DOMString url, DOMString title);
-  [Throws]
+  [Pref="dom.registerContentHandler.enabled", Throws]
   void registerContentHandler(DOMString mimeType, DOMString url, DOMString title);
   // NOT IMPLEMENTED
   //DOMString isProtocolHandlerRegistered(DOMString scheme, DOMString url);
@@ -89,7 +90,7 @@ interface NavigatorContentUtils {
 
 [SecureContext, NoInterfaceObject, Exposed=(Window,Worker)]
 interface NavigatorStorage {
-  [Func="mozilla::dom::StorageManager::PrefEnabled"]
+  [Func="mozilla::dom::DOMPrefs::StorageManagerEnabled"]
   readonly attribute StorageManager storage;
 };
 
@@ -168,7 +169,6 @@ callback interface MozIdleObserver {
   void onactive();
 };
 
-// nsIDOMNavigator
 partial interface Navigator {
   [Throws, Constant, Cached, NeedsCallerType]
   readonly attribute DOMString oscpu;
@@ -198,12 +198,6 @@ partial interface Navigator {
    */
   [Throws, ChromeOnly]
   void removeIdleObserver(MozIdleObserver aIdleObserver);
-};
-
-// nsIDOMNavigatorDesktopNotification
-partial interface Navigator {
-  [Throws, Pref="notification.feature.enabled", UnsafeInPrerendering]
-  readonly attribute DesktopNotificationCenter mozNotification;
 };
 
 // NetworkInformation
@@ -243,7 +237,7 @@ partial interface Navigator {
 #ifdef MOZ_TIME_MANAGER
 // nsIDOMMozNavigatorTime
 partial interface Navigator {
-  [Throws, ChromeOnly, UnsafeInPrerendering]
+  [Throws, ChromeOnly]
   readonly attribute MozTimeManager mozTime;
 };
 #endif // MOZ_TIME_MANAGER
@@ -257,7 +251,7 @@ partial interface Navigator {
 
   // Deprecated. Use mediaDevices.getUserMedia instead.
   [Deprecated="NavigatorGetUserMedia", Throws,
-   Func="Navigator::HasUserMediaSupport", UnsafeInPrerendering,
+   Func="Navigator::HasUserMediaSupport",
    NeedsCallerType]
   void mozGetUserMedia(MediaStreamConstraints constraints,
                        NavigatorUserMediaSuccessCallback successCallback,
@@ -317,7 +311,8 @@ interface NavigatorConcurrentHardware {
   readonly attribute unsigned long long hardwareConcurrency;
 };
 
+// https://w3c.github.io/webappsec-credential-management/#framework-credential-management
 partial interface Navigator {
-  [Pref="security.webauth.webauthn", SameObject]
+  [Pref="security.webauth.webauthn", SecureContext, SameObject]
   readonly attribute CredentialsContainer credentials;
 };

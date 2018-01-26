@@ -345,7 +345,7 @@ MediaDrmCDMProxy::KeySystem() const
   return mKeySystem;
 }
 
-CDMCaps&
+DataMutex<CDMCaps>&
 MediaDrmCDMProxy::Capabilites()
 {
   return mCapabilites;
@@ -362,14 +362,6 @@ MediaDrmCDMProxy::OnKeyStatusesChange(const nsAString& aSessionId)
   if (session) {
     session->DispatchKeyStatusesChange();
   }
-}
-
-void
-MediaDrmCDMProxy::GetSessionIdsForKeyId(const nsTArray<uint8_t>& aKeyId,
-                                      nsTArray<nsCString>& aSessionIds)
-{
-  CDMCaps::AutoLock caps(Capabilites());
-  caps.GetSessionIdsForKeyId(aKeyId, aSessionIds);
 }
 
 void

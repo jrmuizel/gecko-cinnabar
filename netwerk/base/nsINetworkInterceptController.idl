@@ -14,7 +14,10 @@ interface nsIOutputStream;
 interface nsIURI;
 
 %{C++
+#include "nsContentUtils.h"
+#include "nsIChannel.h"
 #include "nsIConsoleReportCollector.h"
+#include "nsILoadInfo.h"
 namespace mozilla {
 class TimeStamp;
 
@@ -184,6 +187,42 @@ interface nsIInterceptedChannel : nsISupports
       GetConsoleReportCollector(getter_AddRefs(reporter));
       return reporter.forget();
     }
+
+    void
+    GetSubresourceTimeStampKey(nsIChannel* aChannel, nsACString& aKey)
+    {
+      if (!nsContentUtils::IsNonSubresourceRequest(aChannel)) {
+        nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
+        if (loadInfo) {
+          switch(loadInfo->InternalContentPolicyType()) {
+            case nsIContentPolicy::TYPE_SCRIPT:
+            case nsIContentPolicy::TYPE_INTERNAL_SCRIPT:
+            case nsIContentPolicy::TYPE_INTERNAL_SCRIPT_PRELOAD:
+            case nsIContentPolicy::TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS: {
+              aKey = NS_LITERAL_CSTRING("subresource-script");
+              break;
+            }
+            case nsIContentPolicy::TYPE_IMAGE:
+            case nsIContentPolicy::TYPE_INTERNAL_IMAGE:
+            case nsIContentPolicy::TYPE_INTERNAL_IMAGE_PRELOAD:
+            case nsIContentPolicy::TYPE_INTERNAL_IMAGE_FAVICON: {
+              aKey = NS_LITERAL_CSTRING("subresource-image");
+              break;
+            }
+            case nsIContentPolicy::TYPE_STYLESHEET:
+            case nsIContentPolicy::TYPE_INTERNAL_STYLESHEET:
+            case nsIContentPolicy::TYPE_INTERNAL_STYLESHEET_PRELOAD: {
+              aKey = NS_LITERAL_CSTRING("subresource-stylesheet");
+              break;
+            }
+            default: {
+              aKey = NS_LITERAL_CSTRING("subresource-other");
+              break;
+            }
+          }
+        }
+      }
+    }
 %}
 
     /**
@@ -208,10 +247,12 @@ interface nsINetworkInterceptController : nsISupports
      * Returns true if a channel should avoid initiating any network
      * requests until specifically instructed to do so.
      *
-     * @param aURI the URI being requested by a channel
-     * @param aIsNavigate True if the request is for a navigation, false for a fetch.
+     * @param aURI The URI to be loaded.  Note, this may differ from
+     *             the channel's current URL in some cases.
+     * @param aChannel The channel that may be intercepted.  It will
+     *                 be in the state prior to calling OnStartRequest().
      */
-    bool shouldPrepareForIntercept(in nsIURI aURI, in bool aIsNonSubresourceRequest);
+    bool shouldPrepareForIntercept(in nsIURI aURI, in nsIChannel aChannel);
 
     /**
      * Notification when a given intercepted channel is prepared to accept a synthesized

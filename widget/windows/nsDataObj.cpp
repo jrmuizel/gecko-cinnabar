@@ -34,6 +34,7 @@
 #include "nsIContentPolicy.h"
 #include "nsContentUtils.h"
 #include "nsIPrincipal.h"
+#include "nsNativeCharsetUtils.h"
 
 #include "WinUtils.h"
 #include "mozilla/LazyIdleThread.h"
@@ -76,6 +77,7 @@ nsresult nsDataObj::CStream::Init(nsIURI *pSourceURI,
                      aRequestingPrincipal,
                      nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
                      aContentPolicyType,
+                     nullptr,   // PerformanceStorage
                      nullptr,   // loadGroup
                      nullptr,   // aCallbacks
                      nsIRequest::LOAD_FROM_CACHE);

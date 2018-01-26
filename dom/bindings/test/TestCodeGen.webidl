@@ -182,12 +182,6 @@ interface TestInterface {
   [DependsOn=DeviceState, Affects=Nothing]
   byte returnDeviceStateDependentByte();
 
-  [UnsafeInPrerendering]
-  void unsafePrerenderMethod();
-  [UnsafeInPrerendering]
-  attribute long unsafePrerenderWritable;
-  [UnsafeInPrerendering]
-  readonly attribute long unsafePrerenderReadonly;
   readonly attribute short readonlyShort;
   attribute short writableShort;
   void passShort(short arg);
@@ -957,6 +951,8 @@ interface TestInterface {
   [NeedsSubjectPrincipal] attribute boolean needsSubjectPrincipalAttr;
   [NeedsCallerType] void needsCallerTypeMethod();
   [NeedsCallerType] attribute boolean needsCallerTypeAttr;
+  [NeedsSubjectPrincipal=NonSystem] void needsNonSystemSubjectPrincipalMethod();
+  [NeedsSubjectPrincipal=NonSystem] attribute boolean needsNonSystemSubjectPrincipalAttr;
   [CEReactions] void ceReactionsMethod();
   [CEReactions] void ceReactionsMethodOverload();
   [CEReactions] void ceReactionsMethodOverload(DOMString bar);
@@ -1303,6 +1299,8 @@ interface TestWorkerExposedInterface {
   [NeedsSubjectPrincipal] attribute boolean needsSubjectPrincipalAttr;
   [NeedsCallerType] void needsCallerTypeMethod();
   [NeedsCallerType] attribute boolean needsCallerTypeAttr;
+  [NeedsSubjectPrincipal=NonSystem] void needsNonSystemSubjectPrincipalMethod();
+  [NeedsSubjectPrincipal=NonSystem] attribute boolean needsNonSystemSubjectPrincipalAttr;
 };
 
 [HTMLConstructor]

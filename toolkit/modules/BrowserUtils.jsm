@@ -490,8 +490,6 @@ this.BrowserUtils = {
     let selectionStr = selection.toString();
     let fullText;
 
-    let collapsed = selection.isCollapsed;
-
     let url;
     let linkText;
 
@@ -501,9 +499,12 @@ this.BrowserUtils = {
       if (ChromeUtils.getClassName(focusedElement) === "HTMLTextAreaElement" ||
           (focusedElement instanceof Ci.nsIDOMHTMLInputElement &&
            focusedElement.mozIsTextField(true))) {
-        selectionStr = focusedElement.editor.selection.toString();
+        selection = focusedElement.editor.selection;
+        selectionStr = selection.toString();
       }
     }
+
+    let collapsed = selection.isCollapsed;
 
     if (selectionStr) {
       // Have some text, let's figure out if it looks like a URL that isn't
@@ -721,5 +722,71 @@ this.BrowserUtils = {
     }
 
     return this.promiseReflowed(doc, callback);
+  },
+
+  /**
+   * Generate a document fragment for a localized string that has DOM
+   * node replacements. This avoids using getFormattedString followed
+   * by assigning to innerHTML. Fluent can probably replace this when
+   * it is in use everywhere.
+   *
+   * @param {Document} doc
+   * @param {String}   msg
+   *                   The string to put replacements in. Fetch from
+   *                   a stringbundle using getString or GetStringFromName,
+   *                   or even an inserted dtd string.
+   * @param {Node|String} nodesOrStrings
+   *                   The replacement items. Can be a mix of Nodes
+   *                   and Strings. However, for correct behaviour, the
+   *                   number of items provided needs to exactly match
+   *                   the number of replacement strings in the l10n string.
+   * @returns {DocumentFragment}
+   *                   A document fragment. In the trivial case (no
+   *                   replacements), this will simply be a fragment with 1
+   *                   child, a text node containing the localized string.
+   */
+  getLocalizedFragment(doc, msg, ...nodesOrStrings) {
+    // Ensure replacement points are indexed:
+    for (let i = 1; i <= nodesOrStrings.length; i++) {
+      if (!msg.includes("%" + i + "$S")) {
+        msg = msg.replace(/%S/, "%" + i + "$S");
+      }
+    }
+    let numberOfInsertionPoints = msg.match(/%\d+\$S/g).length;
+    if (numberOfInsertionPoints != nodesOrStrings.length) {
+      Cu.reportError(`Message has ${numberOfInsertionPoints} insertion points, ` +
+                     `but got ${nodesOrStrings.length} replacement parameters!`);
+    }
+
+    let fragment = doc.createDocumentFragment();
+    let parts = [msg];
+    let insertionPoint = 1;
+    for (let replacement of nodesOrStrings) {
+      let insertionString = "%" + (insertionPoint++) + "$S";
+      let partIndex = parts.findIndex(part => typeof part == "string" && part.includes(insertionString));
+      if (partIndex == -1) {
+        fragment.appendChild(doc.createTextNode(msg));
+        return fragment;
+      }
+
+      if (typeof replacement == "string") {
+        parts[partIndex] = parts[partIndex].replace(insertionString, replacement);
+      } else {
+        let [firstBit, lastBit] = parts[partIndex].split(insertionString);
+        parts.splice(partIndex, 1, firstBit, replacement, lastBit);
+      }
+    }
+
+    // Put everything in a document fragment:
+    for (let part of parts) {
+      if (typeof part == "string") {
+        if (part) {
+          fragment.appendChild(doc.createTextNode(part));
+        }
+      } else {
+        fragment.appendChild(part);
+      }
+    }
+    return fragment;
   },
 };

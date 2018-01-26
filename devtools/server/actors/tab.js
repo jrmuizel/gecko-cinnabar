@@ -15,7 +15,6 @@
 var { Ci, Cu, Cr, Cc } = require("chrome");
 var Services = require("Services");
 var { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
-var promise = require("promise");
 var {
   ActorPool, createExtraActors, appendExtraActors
 } = require("devtools/server/actors/common");
@@ -238,9 +237,6 @@ function TabActor(connection) {
   this._onWorkerActorListChanged = this._onWorkerActorListChanged.bind(this);
 }
 
-// XXX (bug 710213): TabActor attach/detach/exit/destroy is a
-// *complete* mess, needs to be rethought asap.
-
 TabActor.prototype = {
   traits: null,
 
@@ -441,15 +437,6 @@ TabActor.prototype = {
       this._sources = new TabSources(this.threadActor, this._allowSource);
     }
     return this._sources;
-  },
-
-  /**
-   * This is called by BrowserTabList.getList for existing tab actors prior to
-   * calling |form| below.  It can be used to do any async work that may be
-   * needed to assemble the form.
-   */
-  update() {
-    return promise.resolve(this);
   },
 
   form() {
@@ -1636,7 +1623,11 @@ DebuggerProgressListener.prototype = {
     if (isWindow && isStop) {
       // Don't dispatch "navigate" event just yet when there is a redirect to
       // about:neterror page.
-      if (request.status != Cr.NS_OK) {
+      // Navigating to about:neterror will make `status` be something else than NS_OK.
+      // But for some error like NS_BINDING_ABORTED we don't want to emit any `navigate`
+      // event as the page load has been cancelled and the related page document is going
+      // to be a dead wrapper.
+      if (request.status != Cr.NS_OK && request.status != Cr.NS_BINDING_ABORTED) {
         // Instead, listen for DOMContentLoaded as about:neterror is loaded
         // with LOAD_BACKGROUND flags and never dispatches load event.
         // That may be the same reason why there is no onStateChange event
@@ -1644,7 +1635,7 @@ DebuggerProgressListener.prototype = {
         let handler = getDocShellChromeEventHandler(progress);
         let onLoad = evt => {
           // Ignore events from iframes
-          if (evt.target == window.document) {
+          if (evt.target === window.document) {
             handler.removeEventListener("DOMContentLoaded", onLoad, true);
             this._tabActor._navigate(window);
           }

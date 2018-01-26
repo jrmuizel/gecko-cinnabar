@@ -617,6 +617,37 @@ static const nsRoleMapEntry sWAIRoleMaps[] =
     eLandmark,
     kNoReqStates
   },
+  { // graphics-document
+    &nsGkAtoms::graphicsDocument,
+    roles::DOCUMENT,
+    kUseMapRole,
+    eNoValue,
+    eNoAction,
+    eNoLiveAttr,
+    kGenericAccType,
+    kNoReqStates,
+    eReadonlyUntilEditable
+  },
+  { // graphics-object
+    &nsGkAtoms::graphicsObject,
+    roles::GROUPING,
+    kUseMapRole,
+    eNoValue,
+    eNoAction,
+    eNoLiveAttr,
+    kGenericAccType,
+    kNoReqStates
+  },
+  { // graphics-symbol
+    &nsGkAtoms::graphicsSymbol,
+    roles::GRAPHIC,
+    kUseMapRole,
+    eNoValue,
+    eNoAction,
+    eNoLiveAttr,
+    kGenericAccType,
+    kNoReqStates
+  },
   { // grid
     &nsGkAtoms::grid,
     roles::TABLE,
@@ -1375,8 +1406,10 @@ aria::HasDefinedARIAHidden(nsIContent* aContent)
 {
   return aContent &&
     nsAccUtils::HasDefinedARIAToken(aContent, nsGkAtoms::aria_hidden) &&
-    !aContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::aria_hidden,
-                           nsGkAtoms::_false, eCaseMatters);
+    !aContent->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                        nsGkAtoms::aria_hidden,
+                                        nsGkAtoms::_false,
+                                        eCaseMatters);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -843,13 +843,13 @@ nsHTMLScrollFrame::IsXULCollapsed()
 
 // Return the <browser> if the scrollframe is for the root frame directly
 // inside a <browser>.
-static nsIContent*
+static Element*
 GetBrowserRoot(nsIContent* aContent)
 {
   if (aContent) {
     nsIDocument* doc = aContent->GetUncomposedDoc();
     if (nsPIDOMWindowOuter* win = doc->GetWindow()) {
-      nsCOMPtr<Element> frameElement = win->GetFrameElementInternal();
+      Element* frameElement = win->GetFrameElementInternal();
       if (frameElement &&
           frameElement->NodeInfo()->Equals(nsGkAtoms::browser, kNameSpaceID_XUL))
         return frameElement;
@@ -1033,7 +1033,7 @@ nsHTMLScrollFrame::Reflow(nsPresContext*           aPresContext,
   if (mHelper.mIsRoot) {
     mHelper.mCollapsedResizer = true;
 
-    nsIContent* browserRoot = GetBrowserRoot(mContent);
+    Element* browserRoot = GetBrowserRoot(mContent);
     if (browserRoot) {
       bool showResizer = browserRoot->HasAttr(kNameSpaceID_None, nsGkAtoms::showresizer);
       reflowScrollCorner = showResizer == mHelper.mCollapsedResizer;
@@ -2027,7 +2027,7 @@ public:
     AgeAllGenerations();
   }
 
-  virtual void NotifyExpired(ScrollFrameHelper *aObject) {
+  virtual void NotifyExpired(ScrollFrameHelper *aObject) override {
     RemoveObject(aObject);
     aObject->MarkNotRecentlyScrolled();
   }
@@ -2293,6 +2293,11 @@ ScrollFrameHelper::ScrollToWithOrigin(nsPoint aScrollPosition,
                                           const nsRect* aRange,
                                           nsIScrollbarMediator::ScrollSnapMode aSnap)
 {
+  if (aOrigin != nsGkAtoms::restore) {
+    // If we're doing a non-restore scroll, we don't want to later
+    // override it by restoring our saved scroll position.
+    mRestorePos.x = mRestorePos.y = -1;
+  }
 
   if (aSnap == nsIScrollableFrame::ENABLE_SNAP) {
     GetSnapPointForDestination(nsIScrollableFrame::DEVICE_PIXELS,
@@ -3031,9 +3036,9 @@ AppendInternalItemToTop(const nsDisplayListSet& aLists,
 {
   if (aZIndex >= 0) {
     aItem->SetOverrideZIndex(aZIndex);
-    aLists.PositionedDescendants()->AppendNewToTop(aItem);
+    aLists.PositionedDescendants()->AppendToTop(aItem);
   } else {
-    aLists.Content()->AppendNewToTop(aItem);
+    aLists.Content()->AppendToTop(aItem);
   }
 }
 
@@ -3077,25 +3082,25 @@ AppendToTop(nsDisplayListBuilder* aBuilder, const nsDisplayListSet& aLists,
     int32_t zIndex = MaxZIndexInList(aLists.PositionedDescendants(), aBuilder);
     AppendInternalItemToTop(aLists, newItem, zIndex);
   } else {
-    aLists.BorderBackground()->AppendNewToTop(newItem);
+    aLists.BorderBackground()->AppendToTop(newItem);
   }
 }
 
 struct HoveredStateComparator
 {
-  bool Equals(nsIFrame* A, nsIFrame* B) const {
-    bool aHovered = A->GetContent()->HasAttr(kNameSpaceID_None,
-                                             nsGkAtoms::hover);
-    bool bHovered = B->GetContent()->HasAttr(kNameSpaceID_None,
-                                             nsGkAtoms::hover);
-    return aHovered == bHovered;
+  static bool Hovered(const nsIFrame* aFrame)
+  {
+      return aFrame->GetContent()->IsElement() &&
+             aFrame->GetContent()->AsElement()->HasAttr(kNameSpaceID_None,
+                                                        nsGkAtoms::hover);
   }
+
+  bool Equals(nsIFrame* A, nsIFrame* B) const {
+    return Hovered(A) == Hovered(B);
+  }
+
   bool LessThan(nsIFrame* A, nsIFrame* B) const {
-    bool aHovered = A->GetContent()->HasAttr(kNameSpaceID_None,
-                                             nsGkAtoms::hover);
-    bool bHovered = B->GetContent()->HasAttr(kNameSpaceID_None,
-                                             nsGkAtoms::hover);
-    return !aHovered && bHovered;
+    return !Hovered(A) && Hovered(B);
   }
 };
 
@@ -3615,7 +3620,7 @@ ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                              dirtyRect + aBuilder->GetCurrentFrameOffsetToReferenceFrame(),
                                              NS_RGBA(0, 0, 255, 64), false);
         color->SetOverrideZIndex(INT32_MAX);
-        scrolledContent.PositionedDescendants()->AppendNewToTop(color);
+        scrolledContent.PositionedDescendants()->AppendToTop(color);
       }
     }
 
@@ -4367,6 +4372,8 @@ ScrollFrameHelper::ScrollToRestoredPosition()
           (mScrollPort.XMost() - scrollToPos.x - mScrolledFrame->GetRect().width);
       }
       AutoWeakFrame weakFrame(mOuter);
+      // It's very important to pass nsGkAtoms::restore here, so
+      // ScrollToWithOrigin won't clear out mRestorePos.
       ScrollToWithOrigin(scrollToPos, nsIScrollableFrame::INSTANT,
                          nsGkAtoms::restore, nullptr);
       if (!weakFrame.IsAlive()) {
@@ -4503,7 +4510,10 @@ ScrollFrameHelper::ReloadChildFrames()
       mScrolledFrame = frame;
     } else {
       nsAutoString value;
-      content->GetAttr(kNameSpaceID_None, nsGkAtoms::orient, value);
+      if (content->IsElement()) {
+        content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::orient,
+                                      value);
+      }
       if (!value.IsEmpty()) {
         // probably a scrollbar then
         if (value.LowerCaseEqualsLiteral("horizontal")) {
@@ -4674,7 +4684,7 @@ ScrollFrameHelper::CreateAnonymousContent(
     mResizerContent->SetAttr(kNameSpaceID_None, nsGkAtoms::dir, dir, false);
 
     if (mIsRoot) {
-      nsIContent* browserRoot = GetBrowserRoot(mOuter->GetContent());
+      Element* browserRoot = GetBrowserRoot(mOuter->GetContent());
       mCollapsedResizer = !(browserRoot &&
                             browserRoot->HasAttr(kNameSpaceID_None, nsGkAtoms::showresizer));
     }
@@ -4792,12 +4802,14 @@ ScrollFrameHelper::UpdateScrollbarPosition()
   mFrameIsUpdatingScrollbar = false;
 }
 
-void ScrollFrameHelper::CurPosAttributeChanged(nsIContent* aContent, bool aDoScroll)
+void ScrollFrameHelper::CurPosAttributeChanged(nsIContent* aContent,
+                                               bool aDoScroll)
 {
   NS_ASSERTION(aContent, "aContent must not be null");
   NS_ASSERTION((mHScrollbarBox && mHScrollbarBox->GetContent() == aContent) ||
                (mVScrollbarBox && mVScrollbarBox->GetContent() == aContent),
                "unexpected child");
+  MOZ_ASSERT(aContent->IsElement());
 
   // Attribute changes on the scrollbars happen in one of three ways:
   // 1) The scrollbar changed the attribute in response to some user event
@@ -4836,7 +4848,8 @@ void ScrollFrameHelper::CurPosAttributeChanged(nsIContent* aContent, bool aDoScr
     scrollbarActivity->ActivityOccurred();
   }
 
-  bool isSmooth = aContent->HasAttr(kNameSpaceID_None, nsGkAtoms::smooth);
+  const bool isSmooth =
+    aContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::smooth);
   if (isSmooth) {
     // Make sure an attribute-setting callback occurs even if the view
     // didn't actually move yet.  We need to make sure other listeners
@@ -5583,8 +5596,8 @@ ScrollFrameHelper::ReflowFinished()
   // maximization.)
   if (!mHScrollbarBox && !mVScrollbarBox)
     return false;
-  CurPosAttributeChanged(mVScrollbarBox ? mVScrollbarBox->GetContent()
-                                        : mHScrollbarBox->GetContent(),
+  CurPosAttributeChanged(mVScrollbarBox ? mVScrollbarBox->GetContent()->AsElement()
+                                        : mHScrollbarBox->GetContent()->AsElement(),
                          doScroll);
   return doScroll;
 }
@@ -6128,7 +6141,9 @@ ScrollFrameHelper::GetCoordAttribute(nsIFrame* aBox, nsAtom* aAtom,
     nsIContent* content = aBox->GetContent();
 
     nsAutoString value;
-    content->GetAttr(kNameSpaceID_None, aAtom, value);
+    if (content->IsElement()) {
+      content->AsElement()->GetAttr(kNameSpaceID_None, aAtom, value);
+    }
     if (!value.IsEmpty()) {
       nsresult error;
       // convert it to appunits

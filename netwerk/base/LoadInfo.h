@@ -24,6 +24,7 @@ class nsPIDOMWindowOuter;
 namespace mozilla {
 
 namespace dom {
+class PerformanceStorage;
 class XMLHttpRequestMainThread;
 }
 
@@ -56,7 +57,11 @@ public:
            nsIPrincipal* aTriggeringPrincipal,
            nsINode* aLoadingContext,
            nsSecurityFlags aSecurityFlags,
-           nsContentPolicyType aContentPolicyType);
+           nsContentPolicyType aContentPolicyType,
+           const Maybe<mozilla::dom::ClientInfo>& aLoadingClientInfo
+              = Maybe<mozilla::dom::ClientInfo>(),
+           const Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController
+              = Maybe<mozilla::dom::ServiceWorkerDescriptor>());
 
   // Constructor used for TYPE_DOCUMENT loads which have a different
   // loadingContext than other loads. This ContextForTopLevelLoad is
@@ -99,6 +104,10 @@ private:
            nsIPrincipal* aPrincipalToInherit,
            nsIPrincipal* aSandboxedLoadingPrincipal,
            nsIURI* aResultPrincipalURI,
+           const Maybe<mozilla::dom::ClientInfo>& aClientInfo,
+           const Maybe<mozilla::dom::ClientInfo>& aReservedClientInfo,
+           const Maybe<mozilla::dom::ClientInfo>& aInitialClientInfo,
+           const Maybe<mozilla::dom::ServiceWorkerDescriptor>& aController,
            nsSecurityFlags aSecurityFlags,
            nsContentPolicyType aContentPolicyType,
            LoadTainting aTainting,
@@ -115,6 +124,7 @@ private:
            bool aEnforceSecurity,
            bool aInitialSecurityCheckDone,
            bool aIsThirdPartyRequest,
+           bool aIsDocshellReload,
            const OriginAttributes& aOriginAttributes,
            RedirectHistoryArray& aRedirectChainIncludingInternalRedirects,
            RedirectHistoryArray& aRedirectChain,
@@ -124,11 +134,7 @@ private:
            bool aForcePreflight,
            bool aIsPreflight,
            bool aLoadTriggeredFromExternal,
-           bool aServiceWorkerTaintingSynthesized,
-           bool aForceHSTSPriming,
-           bool aMixedContentWouldBlock,
-           bool aIsHSTSPriming,
-           bool aIsHSTSPrimingUpgrade);
+           bool aServiceWorkerTaintingSynthesized);
   LoadInfo(const LoadInfo& rhs);
 
   NS_IMETHOD GetRedirects(JSContext* aCx, JS::MutableHandle<JS::Value> aRedirects,
@@ -161,6 +167,7 @@ private:
   Maybe<mozilla::dom::ClientInfo>               mReservedClientInfo;
   Maybe<mozilla::dom::ClientInfo>               mInitialClientInfo;
   Maybe<mozilla::dom::ServiceWorkerDescriptor>  mController;
+  RefPtr<mozilla::dom::PerformanceStorage>      mPerformanceStorage;
 
   nsWeakPtr                        mLoadingContext;
   nsWeakPtr                        mContextForTopLevelLoad;
@@ -171,6 +178,7 @@ private:
   bool                             mVerifySignedContent;
   bool                             mEnforceSRI;
   bool                             mForceAllowDataURI;
+  bool                             mOriginalFrameSrcLoad;
   bool                             mForceInheritPrincipalDropped;
   uint64_t                         mInnerWindowID;
   uint64_t                         mOuterWindowID;
@@ -180,6 +188,7 @@ private:
   bool                             mEnforceSecurity;
   bool                             mInitialSecurityCheckDone;
   bool                             mIsThirdPartyContext;
+  bool                             mIsDocshellReload;
   OriginAttributes                 mOriginAttributes;
   RedirectHistoryArray             mRedirectChainIncludingInternalRedirects;
   RedirectHistoryArray             mRedirectChain;
@@ -190,11 +199,6 @@ private:
   bool                             mIsPreflight;
   bool                             mLoadTriggeredFromExternal;
   bool                             mServiceWorkerTaintingSynthesized;
-
-  bool                             mForceHSTSPriming : 1;
-  bool                             mMixedContentWouldBlock : 1;
-  bool                             mIsHSTSPriming: 1;
-  bool                             mIsHSTSPrimingUpgrade: 1;
 };
 
 } // namespace net

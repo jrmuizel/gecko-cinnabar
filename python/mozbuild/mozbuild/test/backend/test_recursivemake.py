@@ -509,18 +509,6 @@ class TestRecursiveMakeBackend(BackendTester):
         self.assertIn('res/tests/test.manifest', m)
         self.assertIn('res/tests/extra.manifest', m)
 
-    def test_branding_files(self):
-        """Ensure BRANDING_FILES is handled properly."""
-        env = self._consume('branding-files', RecursiveMakeBackend)
-
-        #BRANDING_FILES should appear in the dist_branding install manifest.
-        m = InstallManifest(path=os.path.join(env.topobjdir,
-            '_build_manifests', 'install', 'dist_branding'))
-        self.assertEqual(len(m), 3)
-        self.assertIn('bar.ico', m)
-        self.assertIn('quux.png', m)
-        self.assertIn('icons/foo.ico', m)
-
     def test_test_manifests_files_written(self):
         """Ensure test manifests get turned into files."""
         env = self._consume('test-manifests-written', RecursiveMakeBackend)
@@ -669,10 +657,16 @@ class TestRecursiveMakeBackend(BackendTester):
 
     def test_ipdl_sources(self):
         """Test that PREPROCESSED_IPDL_SOURCES and IPDL_SOURCES are written to ipdlsrcs.mk correctly."""
-        env = self._consume('ipdl_sources', RecursiveMakeBackend)
+        env = self._get_environment('ipdl_sources')
 
-        manifest_path = mozpath.join(env.topobjdir,
-            'ipc', 'ipdl', 'ipdlsrcs.mk')
+        # Make substs writable so we can set the value of IPDL_ROOT to reflect
+        # the correct objdir.
+        env.substs = dict(env.substs)
+        env.substs['IPDL_ROOT'] = env.topobjdir
+
+        self._consume('ipdl_sources', RecursiveMakeBackend, env)
+
+        manifest_path = mozpath.join(env.topobjdir, 'ipdlsrcs.mk')
         lines = [l.strip() for l in open(manifest_path, 'rt').readlines()]
 
         # Handle Windows paths correctly
@@ -681,7 +675,7 @@ class TestRecursiveMakeBackend(BackendTester):
         expected = [
             "ALL_IPDLSRCS := bar1.ipdl foo1.ipdl %s/bar/bar.ipdl %s/bar/bar2.ipdlh %s/foo/foo.ipdl %s/foo/foo2.ipdlh" % tuple([topsrcdir] * 4),
             "CPPSRCS := UnifiedProtocols0.cpp",
-            "IPDLDIRS := %s/ipc/ipdl %s/bar %s/foo" % (env.topobjdir, topsrcdir, topsrcdir),
+            "IPDLDIRS := %s %s/bar %s/foo" % (env.topobjdir, topsrcdir, topsrcdir),
         ]
 
         found = [str for str in lines if str.startswith(('ALL_IPDLSRCS',

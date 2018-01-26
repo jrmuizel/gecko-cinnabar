@@ -487,14 +487,12 @@ PeerConnectionMedia::UpdateMediaPipelines()
   for (RefPtr<TransceiverImpl>& transceiver : mTransceivers) {
     nsresult rv = transceiver->UpdateConduit();
     if (NS_FAILED(rv)) {
-      MOZ_CRASH();
       return rv;
     }
 
     if (!transceiver->IsVideo()) {
       rv = transceiver->SyncWithMatchingVideoConduits(mTransceivers);
       if (NS_FAILED(rv)) {
-        MOZ_CRASH();
         return rv;
       }
       // TODO: If there is no audio, we should probably de-sync. However, this
@@ -1131,7 +1129,7 @@ PeerConnectionMedia::ShutdownMediaTransport_s()
 nsresult
 PeerConnectionMedia::AddTransceiver(
     JsepTransceiver* aJsepTransceiver,
-    DOMMediaStream& aReceiveStream,
+    dom::MediaStreamTrack& aReceiveTrack,
     dom::MediaStreamTrack* aSendTrack,
     RefPtr<TransceiverImpl>* aTransceiverImpl)
 {
@@ -1144,7 +1142,7 @@ PeerConnectionMedia::AddTransceiver(
       aJsepTransceiver,
       mMainThread.get(),
       mSTSThread.get(),
-      aReceiveStream,
+      &aReceiveTrack,
       aSendTrack,
       mCall.get());
 
@@ -1503,7 +1501,7 @@ PeerConnectionMedia::UpdateRemoteStreamPrincipals_m(nsIPrincipal* aPrincipal)
 }
 
 void
-PeerConnectionMedia::UpdateSinkIdentity_m(MediaStreamTrack* aTrack,
+PeerConnectionMedia::UpdateSinkIdentity_m(const MediaStreamTrack* aTrack,
                                           nsIPrincipal* aPrincipal,
                                           const PeerIdentity* aSinkIdentity)
 {

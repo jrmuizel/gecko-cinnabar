@@ -178,7 +178,6 @@
 #include "nsQueryObject.h"
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/layers/InputAPZContext.h"
-#include "mozilla/layers/ScrollInputMethods.h"
 #include "mozilla/layers/FocusTarget.h"
 #include "nsStyleSet.h"
 #include "mozilla/StyleSetHandle.h"
@@ -545,6 +544,47 @@ private:
   nsCOMPtr<nsIDocument> mDocument;
 };
 
+// This is a helper class to track whether the targeted frame is destroyed after
+// dispatching pointer events. In that case, we need the original targeted
+// content so that we can dispatch the mouse events to it.
+class MOZ_STACK_CLASS AutoPointerEventTargetUpdater final
+{
+public:
+  AutoPointerEventTargetUpdater(PresShell* aShell,
+                                WidgetEvent* aEvent,
+                                nsIFrame* aFrame,
+                                nsIContent** aTargetContent)
+  {
+    MOZ_ASSERT(aEvent);
+    if (!aTargetContent || aEvent->mClass != ePointerEventClass) {
+      return;
+    }
+    MOZ_ASSERT(aShell);
+    MOZ_ASSERT(aFrame);
+    MOZ_ASSERT(!aFrame->GetContent() ||
+               aShell->GetDocument() == aFrame->GetContent()->OwnerDoc());
+
+    MOZ_ASSERT(PointerEventHandler::IsPointerEventEnabled());
+    mShell = aShell;
+    mWeakFrame = aFrame;
+    mTargetContent = aTargetContent;
+    aShell->mPointerEventTarget = aFrame->GetContent();
+  }
+
+  ~AutoPointerEventTargetUpdater()
+  {
+    if (!mTargetContent || !mShell || mWeakFrame.IsAlive()) {
+      return;
+    }
+    mShell->mPointerEventTarget.swap(*mTargetContent);
+  }
+
+private:
+  RefPtr<PresShell> mShell;
+  AutoWeakFrame mWeakFrame;
+  nsIContent** mTargetContent;
+};
+
 bool PresShell::sDisableNonTestMouseEvents = false;
 
 mozilla::LazyLogModule PresShell::gLog("PresShell");
@@ -746,6 +786,8 @@ nsIPresShell::nsIPresShell()
     , mDidInitialize(false)
     , mIsDestroying(false)
     , mIsReflowing(false)
+    , mIsObservingDocument(false)
+    , mIsDocumentGone(false)
     , mPaintingSuppressed(false)
     , mIsActive(false)
     , mFrozen(false)
@@ -793,10 +835,8 @@ PresShell::PresShell()
   , mLastRootReflowHadUnconstrainedBSize(false)
   , mNoDelayedMouseEvents(false)
   , mNoDelayedKeyEvents(false)
-  , mIsDocumentGone(false)
   , mShouldUnsuppressPainting(false)
-  , mAsyncResizeTimerIsActive(false)
-  , mInResize(false)
+  , mResizeEventPending(false)
   , mApproximateFrameVisibilityVisited(false)
   , mNextPaintCompressed(false)
   , mHasCSSBackgroundColor(false)
@@ -919,7 +959,7 @@ PresShell::Init(nsIDocument* aDocument,
   // calling Init, since various subroutines need to find the style set off
   // the PresContext during initialization.
   mStyleSet = aStyleSet;
-  mStyleSet->Init(aPresContext, mDocument->BindingManager());
+  mStyleSet->Init(aPresContext);
 
   // Notify our prescontext that it now has a compatibility mode.  Note that
   // this MUST happen after we set up our style set but before we create any
@@ -1329,16 +1369,13 @@ PresShell::Destroy()
   // Revoke any pending events.  We need to do this and cancel pending reflows
   // before we destroy the frame manager, since apparently frame destruction
   // sometimes spins the event queue when plug-ins are involved(!).
+  if (mResizeEventPending) {
+    rd->RemoveResizeEventFlushObserver(this);
+  }
   rd->RemoveLayoutFlushObserver(this);
 
   if (rd->GetPresContext() == GetPresContext()) {
     rd->RevokeViewManagerFlush();
-  }
-
-  mResizeEvent.Revoke();
-  if (mAsyncResizeTimerIsActive) {
-    mAsyncResizeEventTimer->Cancel();
-    mAsyncResizeTimerIsActive = false;
   }
 
   CancelAllPendingReflows();
@@ -1641,10 +1678,10 @@ PresShell::RepaintSelection(RawSelectionType aRawSelectionType)
 
 // Make shell be a document observer
 void
-PresShell::BeginObservingDocument()
+nsIPresShell::BeginObservingDocument()
 {
   if (mDocument && !mIsDestroying) {
-    mDocument->AddObserver(this);
+    mIsObservingDocument = true;
     if (mIsDocumentGone) {
       NS_WARNING("Adding a presshell that was disconnected from the document "
                  "as a document observer?  Sounds wrong...");
@@ -1655,14 +1692,12 @@ PresShell::BeginObservingDocument()
 
 // Make shell stop being a document observer
 void
-PresShell::EndObservingDocument()
+nsIPresShell::EndObservingDocument()
 {
   // XXXbz do we need to tell the frame constructor that the document
   // is gone, perhaps?  Except for printing it's NOT gone, sometimes.
   mIsDocumentGone = true;
-  if (mDocument) {
-    mDocument->RemoveObserver(this);
-  }
+  mIsObservingDocument = false;
 }
 
 #ifdef DEBUG_kipp
@@ -1737,10 +1772,8 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
 
   if (!rootFrame) {
     nsAutoScriptBlocker scriptBlocker;
-    mFrameConstructor->BeginUpdate();
     rootFrame = mFrameConstructor->ConstructRootFrame();
     mFrameConstructor->SetRootFrame(rootFrame);
-    mFrameConstructor->EndUpdate();
   }
 
   NS_ENSURE_STATE(!mHaveShutDown);
@@ -1776,8 +1809,6 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
   if (root) {
     {
       nsAutoCauseReflowNotifier reflowNotifier(this);
-      mFrameConstructor->BeginUpdate();
-
       // Have the style sheet processor construct frame for the root
       // content object down
       mFrameConstructor->ContentInserted(
@@ -1787,8 +1818,6 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
       // Something in mFrameConstructor->ContentInserted may have caused
       // Destroy() to get called, bug 337586.
       NS_ENSURE_STATE(!mHaveShutDown);
-
-      mFrameConstructor->EndUpdate();
     }
 
     // nsAutoCauseReflowNotifier (which sets up a script blocker) going out of
@@ -1871,12 +1900,6 @@ PresShell::sPaintSuppressionCallback(nsITimer *aTimer, void* aPresShell)
     self->UnsuppressPainting();
 }
 
-void
-PresShell::AsyncResizeEventCallback(nsITimer* aTimer, void* aPresShell)
-{
-  static_cast<PresShell*>(aPresShell)->FireResizeEvent();
-}
-
 nsresult
 PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight, nscoord aOldWidth,
                         nscoord aOldHeight, ResizeReflowOptions aOptions)
@@ -1925,13 +1948,11 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
 
   WritingMode wm = rootFrame->GetWritingMode();
   const bool shrinkToFit = aOptions == ResizeReflowOptions::eBSizeLimit;
-  NS_PRECONDITION(shrinkToFit ||
-                  (wm.IsVertical() ? aWidth : aHeight) !=
-                    NS_UNCONSTRAINEDSIZE,
-                  "unconstrained bsize only usable with eBSizeLimit");
-  NS_PRECONDITION((wm.IsVertical() ? aHeight : aWidth) !=
-                    NS_UNCONSTRAINEDSIZE,
-                  "unconstrained isize not allowed");
+  MOZ_ASSERT(shrinkToFit ||
+             (wm.IsVertical() ? aWidth : aHeight) != NS_UNCONSTRAINEDSIZE,
+             "unconstrained bsize only usable with eBSizeLimit");
+  MOZ_ASSERT((wm.IsVertical() ? aHeight : aWidth) != NS_UNCONSTRAINEDSIZE,
+             "unconstrained isize not allowed");
   bool isBSizeChanging = wm.IsVertical() ? aOldWidth != aWidth
                                          : aOldHeight != aHeight;
   nscoord targetWidth = aWidth;
@@ -1946,20 +1967,36 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
     isBSizeChanging = true;
   }
 
-  mPresContext->SetVisibleArea(nsRect(0, 0, targetWidth, targetHeight));
+  const bool suppressingResizeReflow =
+    GetPresContext()->SuppressingResizeReflow();
 
   RefPtr<nsViewManager> viewManager = mViewManager;
   nsCOMPtr<nsIPresShell> kungFuDeathGrip(this);
 
-  if (!GetPresContext()->SuppressingResizeReflow()) {
-    // Have to make sure that the content notifications are flushed before we
-    // start messing with the frame model; otherwise we can get content doubling.
-    mDocument->FlushPendingNotifications(FlushType::ContentAndNotify);
+  if (!suppressingResizeReflow && shrinkToFit) {
+    // Make sure that style is flushed before setting the pres context
+    // VisibleArea if we're shrinking to fit.
+    //
+    // Otherwise we may end up with bogus viewport units resolved against the
+    // unconstrained bsize, or restyling the whole document resolving viewport
+    // units against targetWidth, which may end up doing wasteful work.
+    mDocument->FlushPendingNotifications(FlushType::Frames);
+  }
 
-    // Make sure style is up to date
-    {
-      nsAutoScriptBlocker scriptBlocker;
-      mPresContext->RestyleManager()->ProcessPendingRestyles();
+  if (!mIsDestroying) {
+    mPresContext->SetVisibleArea(nsRect(0, 0, targetWidth, targetHeight));
+  }
+
+  if (!mIsDestroying && !suppressingResizeReflow) {
+    if (!shrinkToFit) {
+      // Flush styles _now_ (with the correct visible area) if not computing the
+      // shrink-to-fit size.
+      //
+      // We've asserted above that sizes are not unconstrained, so this is going
+      // to be the final size, which means that we'll get the (correct) final
+      // styles now, and avoid a further potentially-wasteful full recascade on
+      // the next flush.
+      mDocument->FlushPendingNotifications(FlushType::Frames);
     }
 
     rootFrame = mFrameConstructor->GetRootFrame();
@@ -2031,32 +2068,9 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
     }
   }
 
-  if (!mIsDestroying && !mResizeEvent.IsPending() &&
-      !mAsyncResizeTimerIsActive) {
-    if (mInResize) {
-      if (!mAsyncResizeEventTimer) {
-        mAsyncResizeEventTimer = NS_NewTimer();
-      }
-      if (mAsyncResizeEventTimer) {
-        mAsyncResizeTimerIsActive = true;
-        mAsyncResizeEventTimer->SetTarget(
-            mDocument->EventTargetFor(TaskCategory::Other));
-        mAsyncResizeEventTimer->InitWithNamedFuncCallback(AsyncResizeEventCallback,
-                                                          this, 15,
-                                                          nsITimer::TYPE_ONE_SHOT,
-                                                          "AsyncResizeEventCallback");
-      }
-    } else if (mPresContext->ShouldFireResizeEvent()) {
-      RefPtr<nsRunnableMethod<PresShell>> event = NewRunnableMethod(
-        "PresShell::FireResizeEvent", this, &PresShell::FireResizeEvent);
-      nsresult rv = mDocument->Dispatch(TaskCategory::Other,
-                                        do_AddRef(event));
-      if (NS_SUCCEEDED(rv)) {
-        mResizeEvent = Move(event);
-        SetNeedStyleFlush();
-        mPresContext->WillFireResizeEvent();
-      }
-    }
+  if (!mIsDestroying && !mResizeEventPending) {
+    mResizeEventPending = true;
+    GetPresContext()->RefreshDriver()->AddResizeEventFlushObserver(this);
   }
 
   return NS_OK; //XXX this needs to be real. MMP
@@ -2065,24 +2079,18 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
 void
 PresShell::FireResizeEvent()
 {
-  if (mAsyncResizeTimerIsActive) {
-    mAsyncResizeTimerIsActive = false;
-    mAsyncResizeEventTimer->Cancel();
-  }
-  mResizeEvent.Revoke();
-
-  if (mIsDocumentGone)
+  if (mIsDocumentGone) {
     return;
+  }
+
+  mResizeEventPending = false;
 
   //Send resize event from here.
   WidgetEvent event(true, mozilla::eResize);
   nsEventStatus status = nsEventStatus_eIgnore;
 
   if (nsPIDOMWindowOuter* window = mDocument->GetWindow()) {
-    nsCOMPtr<nsIPresShell> kungFuDeathGrip(this);
-    mInResize = true;
     EventDispatcher::Dispatch(window, mPresContext, &event, nullptr, &status);
-    mInResize = false;
   }
 }
 
@@ -2326,8 +2334,6 @@ PresShell::ScrollPage(bool aForward)
   nsIScrollableFrame* scrollFrame =
     GetScrollableFrameToScroll(nsIPresShell::eVertical);
   if (scrollFrame) {
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-        (uint32_t) ScrollInputMethod::MainThreadScrollPage);
     scrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
                           nsIScrollableFrame::PAGES,
                           nsIScrollableFrame::SMOOTH,
@@ -2344,9 +2350,6 @@ PresShell::ScrollLine(bool aForward)
   nsIScrollableFrame* scrollFrame =
     GetScrollableFrameToScroll(nsIPresShell::eVertical);
   if (scrollFrame) {
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-        (uint32_t) ScrollInputMethod::MainThreadScrollLine);
-
     int32_t lineCount = Preferences::GetInt("toolkit.scrollbox.verticalScrollDistance",
                                             NS_DEFAULT_VERTICAL_SCROLL_DISTANCE);
     scrollFrame->ScrollBy(nsIntPoint(0, aForward ? lineCount : -lineCount),
@@ -2365,8 +2368,6 @@ PresShell::ScrollCharacter(bool aRight)
   nsIScrollableFrame* scrollFrame =
     GetScrollableFrameToScroll(nsIPresShell::eHorizontal);
   if (scrollFrame) {
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-        (uint32_t) ScrollInputMethod::MainThreadScrollCharacter);
     int32_t h = Preferences::GetInt("toolkit.scrollbox.horizontalScrollDistance",
                                     NS_DEFAULT_HORIZONTAL_SCROLL_DISTANCE);
     scrollFrame->ScrollBy(nsIntPoint(aRight ? h : -h, 0),
@@ -2385,8 +2386,6 @@ PresShell::CompleteScroll(bool aForward)
   nsIScrollableFrame* scrollFrame =
     GetScrollableFrameToScroll(nsIPresShell::eVertical);
   if (scrollFrame) {
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-        (uint32_t) ScrollInputMethod::MainThreadCompleteScroll);
     scrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
                           nsIScrollableFrame::WHOLE,
                           nsIScrollableFrame::SMOOTH,
@@ -2530,8 +2529,6 @@ PresShell::BeginUpdate(nsIDocument *aDocument, nsUpdateType aUpdateType)
 #ifdef DEBUG
   mUpdateCount++;
 #endif
-  mFrameConstructor->BeginUpdate();
-
   if (aUpdateType & UPDATE_STYLE)
     mStyleSet->BeginUpdate();
 }
@@ -2550,8 +2547,6 @@ PresShell::EndUpdate(nsIDocument *aDocument, nsUpdateType aUpdateType)
       RestyleForCSSRuleChanges();
     }
   }
-
-  mFrameConstructor->EndUpdate();
 }
 
 void
@@ -2945,11 +2940,7 @@ PresShell::DestroyFramesForAndRestyle(Element* aElement)
   // Mark ourselves as not safe to flush while we're doing frame destruction.
   ++mChangeNestCount;
 
-  nsCSSFrameConstructor* fc = FrameConstructor();
-  fc->BeginUpdate();
-  bool didReconstruct = fc->DestroyFramesFor(aElement);
-  fc->EndUpdate();
-
+  const bool didReconstruct = FrameConstructor()->DestroyFramesFor(aElement);
   if (aElement->IsStyledByServo()) {
     if (aElement->GetFlattenedTreeParentNode()) {
       // The element is still in the flat tree, but their children may not be
@@ -4071,8 +4062,9 @@ PresShell::HandlePostedReflowCallbacks(bool aInterruptible)
 bool
 nsIPresShell::IsSafeToFlush() const
 {
-  // Not safe if we are reflowing or in the middle of frame construction
-  if (mIsReflowing || mChangeNestCount) {
+  // Not safe if we are getting torn down, reflowing, or in the middle of frame
+  // construction.
+  if (mIsReflowing || mChangeNestCount || mIsDestroying) {
     return false;
   }
 
@@ -4132,10 +4124,10 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
                                    GRAPHICS, flushTypeNames[flushType]);
 #endif
 
+
 #ifdef ACCESSIBILITY
 #ifdef DEBUG
-  nsAccessibilityService* accService = GetAccService();
-  if (accService) {
+  if (nsAccessibilityService* accService = GetAccService()) {
     NS_ASSERTION(!accService->IsProcessingRefreshDriverNotification(),
                  "Flush during accessible tree update!");
   }
@@ -4160,12 +4152,16 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     isSafeToFlush = isSafeToFlush && nsContentUtils::IsSafeToRunScript();
   }
 
-  NS_ASSERTION(!isSafeToFlush || mViewManager, "Must have view manager");
+  MOZ_DIAGNOSTIC_ASSERT(!mIsDestroying || !isSafeToFlush);
+  MOZ_DIAGNOSTIC_ASSERT(mIsDestroying || mViewManager);
+  MOZ_DIAGNOSTIC_ASSERT(mIsDestroying || mDocument->HasShellOrBFCacheEntry());
+  MOZ_DIAGNOSTIC_ASSERT(mIsDestroying || mDocument->GetShell() == this);
+
   // Make sure the view manager stays alive.
   RefPtr<nsViewManager> viewManager = mViewManager;
   bool didStyleFlush = false;
   bool didLayoutFlush = false;
-  if (isSafeToFlush && viewManager) {
+  if (isSafeToFlush) {
     // Record that we are in a flush, so that our optimization in
     // nsDocument::FlushPendingNotifications doesn't skip any re-entrant
     // calls to us.  Otherwise, we might miss some needed flushes, since
@@ -4173,13 +4169,6 @@ PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush)
     // the function but we might not have done the work yet.
     AutoRestore<bool> guard(mInFlush);
     mInFlush = true;
-
-    if (mResizeEvent.IsPending()) {
-      FireResizeEvent();
-      if (mIsDestroying) {
-        return;
-      }
-    }
 
     // We need to make sure external resource documents are flushed too (for
     // example, svg filters that reference a filter in an external document
@@ -4354,35 +4343,30 @@ PresShell::ContentStateChanged(nsIDocument* aDocument,
 }
 
 void
-PresShell::DocumentStatesChanged(nsIDocument* aDocument,
-                                 EventStates aStateMask)
+PresShell::DocumentStatesChanged(nsIDocument* aDocument, EventStates aStateMask)
 {
   NS_PRECONDITION(!mIsDocumentGone, "Unexpected DocumentStatesChanged");
   NS_PRECONDITION(aDocument == mDocument, "Unexpected aDocument");
+  MOZ_ASSERT(!aStateMask.IsEmpty());
 
   if (mDidInitialize) {
-    Element* rootElement = aDocument->GetRootElement();
-    bool needRestyle = false;
     if (mStyleSet->IsServo()) {
-      needRestyle = rootElement &&
-        (mStyleSet->AsServo()->HasDocumentStateDependency(aStateMask) ||
-         aDocument->BindingManager()->
-           AnyBindingHasDocumentStateDependency(aStateMask));
-    } else {
-      needRestyle = mStyleSet->AsGecko()->
-        HasDocumentStateDependentStyle(rootElement, aStateMask);
-    }
-    if (needRestyle) {
-      mPresContext->RestyleManager()->PostRestyleEvent(rootElement,
-                                                       eRestyle_Subtree,
-                                                       nsChangeHint(0));
-      VERIFY_STYLE_TREE;
+      mStyleSet->AsServo()->InvalidateStyleForDocumentStateChanges(aStateMask);
+    } else if (Element* rootElement = aDocument->GetRootElement()) {
+      const bool needRestyle =
+        mStyleSet->AsGecko()->HasDocumentStateDependentStyle(
+          rootElement, aStateMask);
+      if (needRestyle) {
+        mPresContext->RestyleManager()->PostRestyleEvent(rootElement,
+                                                         eRestyle_Subtree,
+                                                         nsChangeHint(0));
+        VERIFY_STYLE_TREE;
+      }
     }
   }
 
   if (aStateMask.HasState(NS_DOCUMENT_STATE_WINDOW_INACTIVE)) {
-    nsIFrame* root = mFrameConstructor->GetRootFrame();
-    if (root) {
+    if (nsIFrame* root = mFrameConstructor->GetRootFrame()) {
       root->SchedulePaint();
     }
   }
@@ -4563,9 +4547,7 @@ void
 PresShell::NotifyCounterStylesAreDirty()
 {
   nsAutoCauseReflowNotifier reflowNotifier(this);
-  mFrameConstructor->BeginUpdate();
   mFrameConstructor->NotifyCounterStylesAreDirty();
-  mFrameConstructor->EndUpdate();
 }
 
 void
@@ -4592,10 +4574,8 @@ PresShell::ReconstructFrames()
   }
 
   nsAutoCauseReflowNotifier crNotifier(this);
-  mFrameConstructor->BeginUpdate();
   mFrameConstructor->ReconstructDocElementHierarchy(nsCSSFrameConstructor::InsertionKind::Sync);
   VERIFY_STYLE_TREE;
-  mFrameConstructor->EndUpdate();
 }
 
 void
@@ -5021,7 +5001,7 @@ PresShell::PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems
   // use the rectangle to create the surface
   nsIntRect pixelArea = aArea.ToOutsidePixels(pc->AppUnitsPerDevPixel());
 
-  // if the image should not be resized, the scale, relative to the original image, must be 1
+  // if the image should not be resized, scale must be 1
   float scale = 1.0;
   nsIntRect rootScreenRect =
     GetRootFrame()->GetScreenRectInAppUnits().ToNearestPixels(
@@ -5043,21 +5023,23 @@ PresShell::PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems
       // get best height/width relative to screensize
       float bestHeight = float(maxHeight)*RELATIVE_SCALEFACTOR;
       float bestWidth = float(maxWidth)*RELATIVE_SCALEFACTOR;
-      // get scalefactor to reach bestWidth
-      scale = bestWidth / float(pixelArea.width);
+      // calculate scale for bestWidth
+      float adjustedScale = bestWidth / float(pixelArea.width);
       // get the worst height (height when width is perfect)
-      float worstHeight = float(pixelArea.height)*scale;
+      float worstHeight = float(pixelArea.height)*adjustedScale;
       // get the difference of best and worst height
       float difference = bestHeight - worstHeight;
-      // half the difference and add it to worstHeight,
-      // then get scalefactor to reach this
-      scale = (worstHeight + difference / 2) / float(pixelArea.height);
+      // halve the difference and add it to worstHeight to get
+      // the best compromise between bestHeight and bestWidth,
+      // then calculate the corresponding scale factor
+      adjustedScale = (worstHeight + difference / 2) / float(pixelArea.height);
+      // prevent upscaling
+      scale = std::min(scale, adjustedScale);
     } else {
       // get half of max screensize
       nscoord maxWidth = pc->AppUnitsToDevPixels(maxSize.width >> 1);
       nscoord maxHeight = pc->AppUnitsToDevPixels(maxSize.height >> 1);
       if (pixelArea.width > maxWidth || pixelArea.height > maxHeight) {
-        scale = 1.0;
         // divide the maximum size by the image size in both directions. Whichever
         // direction produces the smallest result determines how much should be
         // scaled.
@@ -5249,7 +5231,7 @@ PresShell::AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
                                          nsIFrame*             aFrame,
                                          const nsRect&         aBounds)
 {
-  aList.AppendNewToBottom(new (&aBuilder)
+  aList.AppendToBottom(new (&aBuilder)
     nsDisplaySolidColor(&aBuilder, aFrame, aBounds, NS_RGB(115, 115, 115)));
 }
 
@@ -5333,7 +5315,7 @@ PresShell::AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
   }
 
   if (!addedScrollingBackgroundColor || forceUnscrolledItem) {
-    aList.AppendNewToBottom(
+    aList.AppendToBottom(
       new (&aBuilder) nsDisplaySolidColor(&aBuilder, aFrame, aBounds, bgcolor));
   }
 }
@@ -6833,12 +6815,71 @@ PresShell::CanDispatchEvent(const WidgetGUIEvent* aEvent) const
   return rv;
 }
 
+/* static */ PresShell*
+PresShell::GetShellForEventTarget(nsIFrame* aFrame, nsIContent* aContent)
+{
+  if (aFrame) {
+    return static_cast<PresShell*>(aFrame->PresShell());
+  }
+  if (aContent) {
+    nsIDocument* doc = aContent->GetComposedDoc();
+    if (!doc) {
+      return nullptr;
+    }
+    return static_cast<PresShell*>(doc->GetShell());
+  }
+  return nullptr;
+}
+
+/* static */ PresShell*
+PresShell::GetShellForTouchEvent(WidgetGUIEvent* aEvent)
+{
+  PresShell* shell = nullptr;
+  switch (aEvent->mMessage) {
+  case eTouchMove:
+  case eTouchCancel:
+  case eTouchEnd: {
+    // get the correct shell to dispatch to
+    WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
+    for (dom::Touch* touch : touchEvent->mTouches) {
+      if (!touch) {
+        break;
+      }
+
+      RefPtr<dom::Touch> oldTouch =
+        TouchManager::GetCapturedTouch(touch->Identifier());
+      if (!oldTouch) {
+        break;
+      }
+
+      nsCOMPtr<nsIContent> content = do_QueryInterface(oldTouch->GetTarget());
+      if (!content) {
+        break;
+      }
+
+      nsIFrame* contentFrame = content->GetPrimaryFrame();
+      if (!contentFrame) {
+        break;
+      }
+
+      shell = static_cast<PresShell*>(contentFrame->PresContext()->PresShell());
+      if (shell) {
+        break;
+      }
+    }
+    break;
+  }
+  default:
+    break;
+  }
+  return shell;
+}
+
 nsresult
 PresShell::HandleEvent(nsIFrame* aFrame,
                        WidgetGUIEvent* aEvent,
                        bool aDontRetargetEvents,
-                       nsEventStatus* aEventStatus,
-                       nsIContent** aTargetContent)
+                       nsEventStatus* aEventStatus)
 {
 #ifdef MOZ_TASK_TRACER
   Maybe<AutoSourceEvent> taskTracerEvent;
@@ -6860,33 +6901,10 @@ PresShell::HandleEvent(nsIFrame* aFrame,
 
   NS_ASSERTION(aFrame, "aFrame should be not null");
 
-  // Update the latest focus sequence number with this new sequence number
+  // Update the latest focus sequence number with this new sequence number;
+  // the next transasction that gets sent to the compositor will carry this over
   if (mAPZFocusSequenceNumber < aEvent->mFocusSequenceNumber) {
     mAPZFocusSequenceNumber = aEvent->mFocusSequenceNumber;
-
-    // Schedule an empty transaction to transmit this focus update
-    aFrame->SchedulePaint(nsIFrame::PAINT_COMPOSITE_ONLY, false);
-  }
-
-  if (PointerEventHandler::IsPointerEventEnabled()) {
-    AutoWeakFrame weakFrame(aFrame);
-    nsCOMPtr<nsIContent> targetContent;
-    PointerEventHandler::DispatchPointerFromMouseOrTouch(
-                           this, aFrame, aEvent, aDontRetargetEvents,
-                           aEventStatus, getter_AddRefs(targetContent));
-    if (!weakFrame.IsAlive()) {
-      if (targetContent) {
-        aFrame = targetContent->GetPrimaryFrame();
-        if (!aFrame) {
-          PushCurrentEventInfo(aFrame, targetContent);
-          nsresult rv = HandleEventInternal(aEvent, aEventStatus, true);
-          PopCurrentEventInfo();
-          return rv;
-        }
-      } else {
-        return NS_OK;
-      }
-    }
   }
 
   if (mIsDestroying ||
@@ -7131,9 +7149,56 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       }
     }
 
-    // all touch events except for touchstart use a captured target
-    if (aEvent->mClass == eTouchEventClass && aEvent->mMessage != eTouchStart) {
-      captureRetarget = true;
+    // The order to generate pointer event is
+    // 1. check pending pointer capture.
+    // 2. check if there is a capturing content.
+    // 3. hit test
+    // 4. dispatch pointer events
+    // 5. check whether the targets of all Touch instances are in the same
+    //    document and suppress invalid instances.
+    // 6. dispatch mouse or touch events.
+
+    // Try to keep frame for following check, because frame can be damaged
+    // during MaybeProcessPointerCapture.
+    {
+      AutoWeakFrame frameKeeper(frame);
+      PointerEventHandler::MaybeProcessPointerCapture(aEvent);
+      // Prevent application crashes, in case damaged frame.
+      if (!frameKeeper.IsAlive()) {
+        NS_WARNING("Nothing to handle this event!");
+        return NS_OK;
+      }
+    }
+
+    // Only capture mouse events and pointer events.
+    nsIContent* pointerCapturingContent =
+      PointerEventHandler::GetPointerCapturingContent(aEvent);
+
+    if (pointerCapturingContent) {
+      nsIFrame* pointerCapturingFrame =
+        pointerCapturingContent->GetPrimaryFrame();
+
+      if (!pointerCapturingFrame) {
+        // Dispatch events to the capturing content even it's frame is
+        // destroyed.
+        PointerEventHandler::DispatchPointerFromMouseOrTouch(
+          this, nullptr, pointerCapturingContent, aEvent, false, aEventStatus,
+          nullptr);
+
+        PresShell* shell = GetShellForEventTarget(nullptr,
+                                                  pointerCapturingContent);
+
+        if (!shell) {
+          // The capturing element could be changed when dispatch pointer
+          // events.
+          return NS_OK;
+        }
+        return shell->HandleEventWithTarget(aEvent, nullptr,
+                                            pointerCapturingContent,
+                                            aEventStatus, true);
+      } else {
+        frame = pointerCapturingFrame;
+      }
     }
 
     WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
@@ -7145,101 +7210,24 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     // be used instead below. Also keep using the root frame if we're dealing
     // with a window-level mouse exit event since we want to start sending
     // mouse out events at the root EventStateManager.
-    if (!captureRetarget && !isWindowLevelMouseExit) {
-      nsPoint eventPoint;
-      uint32_t flags = 0;
-      if (aEvent->mMessage == eTouchStart) {
-        if (gfxPrefs::APZAllowZooming()) {
-          // Setting this flag will skip the scrollbars on the root frame from
-          // participating in hit-testing, and we only want that to happen on
-          // zoomable platforms (for now).
+    if (!captureRetarget && !isWindowLevelMouseExit &&
+        !pointerCapturingContent) {
+      if (aEvent->mClass == eTouchEventClass) {
+        frame = TouchManager::SetupTarget(aEvent->AsTouchEvent(), frame);
+      } else {
+        uint32_t flags = 0;
+        nsPoint eventPoint =
+          nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, frame);
+
+        if (mouseEvent && mouseEvent->mClass == eMouseEventClass &&
+            mouseEvent->mIgnoreRootScrollFrame) {
           flags |= INPUT_IGNORE_ROOT_SCROLL_FRAME;
         }
-        WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
-        // if this is a continuing session, ensure that all these events are
-        // in the same document by taking the target of the events already in
-        // the capture list
-        nsCOMPtr<nsIContent> anyTarget;
-        if (touchEvent->mTouches.Length() > 1) {
-          anyTarget = TouchManager::GetAnyCapturedTouchTarget();
+        nsIFrame* target =
+          FindFrameTargetedByInputEvent(aEvent, frame, eventPoint, flags);
+        if (target) {
+          frame = target;
         }
-
-        for (int32_t i = touchEvent->mTouches.Length(); i; ) {
-          --i;
-          dom::Touch* touch = touchEvent->mTouches[i];
-
-          int32_t id = touch->Identifier();
-          if (!TouchManager::HasCapturedTouch(id)) {
-            // find the target for this touch
-            eventPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
-                                                              touch->mRefPoint,
-                                                              frame);
-            nsIFrame* target = FindFrameTargetedByInputEvent(aEvent,
-                                                             frame,
-                                                             eventPoint,
-                                                             flags);
-            if (target && !anyTarget) {
-              target->GetContentForEvent(aEvent, getter_AddRefs(anyTarget));
-              while (anyTarget && !anyTarget->IsElement()) {
-                anyTarget = anyTarget->GetParent();
-              }
-              touch->SetTarget(anyTarget);
-            } else {
-              nsIFrame* newTargetFrame = nullptr;
-              for (nsIFrame* f = target; f;
-                   f = nsLayoutUtils::GetParentOrPlaceholderForCrossDoc(f)) {
-                if (f->PresContext()->Document() == anyTarget->OwnerDoc()) {
-                  newTargetFrame = f;
-                  break;
-                }
-                // We must be in a subdocument so jump directly to the root frame.
-                // GetParentOrPlaceholderForCrossDoc gets called immediately to
-                // jump up to the containing document.
-                f = f->PresContext()->GetPresShell()->GetRootFrame();
-              }
-
-              // if we couldn't find a target frame in the same document as
-              // anyTarget, remove the touch from the capture touch list, as
-              // well as the event->mTouches array. touchmove events that aren't
-              // in the captured touch list will be discarded
-              if (!newTargetFrame) {
-                touchEvent->mTouches.RemoveElementAt(i);
-              } else {
-                target = newTargetFrame;
-                nsCOMPtr<nsIContent> targetContent;
-                target->GetContentForEvent(aEvent, getter_AddRefs(targetContent));
-                while (targetContent && !targetContent->IsElement()) {
-                  targetContent = targetContent->GetParent();
-                }
-                touch->SetTarget(targetContent);
-              }
-            }
-            if (target) {
-              frame = target;
-            }
-          } else {
-            // This touch is an old touch, we need to ensure that is not
-            // marked as changed and set its target correctly
-            touch->mChanged = false;
-            int32_t id = touch->Identifier();
-
-            RefPtr<dom::Touch> oldTouch = TouchManager::GetCapturedTouch(id);
-            if (oldTouch) {
-              touch->SetTarget(oldTouch->mTarget);
-            }
-          }
-        }
-      } else {
-        eventPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent, frame);
-      }
-      if (mouseEvent && mouseEvent->mClass == eMouseEventClass &&
-          mouseEvent->mIgnoreRootScrollFrame) {
-        flags |= INPUT_IGNORE_ROOT_SCROLL_FRAME;
-      }
-      nsIFrame* target =
-        FindFrameTargetedByInputEvent(aEvent, frame, eventPoint, flags);
-      if (target) {
-        frame = target;
       }
     }
 
@@ -7247,7 +7235,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     // retargeted at the capturing content instead. This will be the case when
     // capture retargeting is being used, no frame was found or the frame's
     // content is not a descendant of the capturing content.
-    if (capturingContent &&
+    if (capturingContent && !pointerCapturingContent &&
         (gCaptureInfo.mRetargetToElement || !frame->GetContent() ||
          !nsContentUtils::ContentIsCrossDocDescendantOf(frame->GetContent(),
                                                         capturingContent))) {
@@ -7260,19 +7248,6 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         frame = capturingFrame;
       }
     }
-
-    // Try to keep frame for following check, because frame can be damaged
-    // during CheckPointerCaptureState.
-    {
-      AutoWeakFrame frameKeeper(frame);
-      PointerEventHandler::CheckPointerCaptureState(aEvent->AsPointerEvent());
-      // Prevent application crashes, in case damaged frame.
-      if (!frameKeeper.IsAlive()) {
-        frame = nullptr;
-      }
-    }
-
-    frame = PointerEventHandler::GetPointerCapturingFrame(frame, aEvent);
 
     // Suppress mouse event if it's being targeted at an element inside
     // a document which needs events suppressed
@@ -7298,45 +7273,6 @@ PresShell::HandleEvent(nsIFrame* aFrame,
     }
 
     PresShell* shell = static_cast<PresShell*>(frame->PresShell());
-    switch (aEvent->mMessage) {
-      case eTouchMove:
-      case eTouchCancel:
-      case eTouchEnd: {
-        // get the correct shell to dispatch to
-        WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
-        for (dom::Touch* touch : touchEvent->mTouches) {
-          if (!touch) {
-            break;
-          }
-
-          RefPtr<dom::Touch> oldTouch =
-            TouchManager::GetCapturedTouch(touch->Identifier());
-          if (!oldTouch) {
-            break;
-          }
-
-          nsCOMPtr<nsIContent> content =
-            do_QueryInterface(oldTouch->GetTarget());
-          if (!content) {
-            break;
-          }
-
-          nsIFrame* contentFrame = content->GetPrimaryFrame();
-          if (!contentFrame) {
-            break;
-          }
-
-          shell = static_cast<PresShell*>(contentFrame->PresShell());
-          if (shell) {
-            break;
-          }
-        }
-        break;
-      }
-    default:
-      break;
-    }
-
     // Check if we have an active EventStateManager which isn't the
     // EventStateManager of the current PresContext.
     // If that is the case, and mouse is over some ancestor document,
@@ -7362,40 +7298,107 @@ PresShell::HandleEvent(nsIFrame* aFrame,
       }
     }
 
-    // Before HandlePositionedEvent we should save mPointerEventTarget in some
-    // cases
-    AutoWeakFrame weakFrame;
-    if (aTargetContent && ePointerEventClass == aEvent->mClass) {
-      MOZ_ASSERT(PointerEventHandler::IsPointerEventEnabled());
-      weakFrame = frame;
-      shell->mPointerEventTarget = frame->GetContent();
-      MOZ_ASSERT(!frame->GetContent() ||
-                 shell->GetDocument() == frame->GetContent()->OwnerDoc());
+    if (!frame) {
+      NS_WARNING("Nothing to handle this event!");
+      return NS_OK;
     }
 
-    // Prevent deletion until we're done with event handling (bug 336582) and
-    // swap mPointerEventTarget to *aTargetContent
-    nsCOMPtr<nsIPresShell> kungFuDeathGrip(shell);
-    nsresult rv;
-    if (shell != this) {
-      // Handle the event in the correct shell.
-      // We pass the subshell's root frame as the frame to start from. This is
-      // the only correct alternative; if the event was captured then it
-      // must have been captured by us or some ancestor shell and we
-      // now ask the subshell to dispatch it normally.
-      rv = shell->HandlePositionedEvent(frame, aEvent, aEventStatus);
-    } else {
-      rv = HandlePositionedEvent(frame, aEvent, aEventStatus);
-    }
+    nsCOMPtr<nsIContent> targetElement;
+    frame->GetContentForEvent(aEvent, getter_AddRefs(targetElement));
 
-    // After HandlePositionedEvent we should reestablish
-    // content (which still live in tree) in some cases
-    if (aTargetContent && ePointerEventClass == aEvent->mClass) {
-      if (!weakFrame.IsAlive()) {
-        shell->mPointerEventTarget.swap(*aTargetContent);
+    // If there is no content for this frame, target it anyway.  Some
+    // frames can be targeted but do not have content, particularly
+    // windows with scrolling off.
+    if (targetElement) {
+      // Bug 103055, bug 185889: mouse events apply to *elements*, not all
+      // nodes.  Thus we get the nearest element parent here.
+      // XXX we leave the frame the same even if we find an element
+      // parent, so that the text frame will receive the event (selection
+      // and friends are the ones who care about that anyway)
+      //
+      // We use weak pointers because during this tight loop, the node
+      // will *not* go away.  And this happens on every mousemove.
+      while (targetElement && !targetElement->IsElement()) {
+        targetElement = targetElement->GetFlattenedTreeParent();
+      }
+
+      // If we found an element, target it.  Otherwise, target *nothing*.
+      if (!targetElement) {
+        return NS_OK;
       }
     }
 
+    if (PointerEventHandler::IsPointerEventEnabled()) {
+      // Dispatch pointer events from the mouse or touch events. Regarding
+      // pointer events from mouse, we should dispatch those pointer events to
+      // the same target as the source mouse events. We pass the frame found
+      // in hit test to PointerEventHandler and dispatch pointer events to it.
+      //
+      // Regarding pointer events from touch, the behavior is different. Touch
+      // events are dispatched to the same target as the target of touchstart.
+      // Multiple touch points must be dispatched to the same document. Pointer
+      // events from touch can be dispatched to different documents. We Pass the
+      // original frame to PointerEventHandler, reentry PresShell::HandleEvent,
+      // and do hit test for each point.
+      nsIFrame* targetFrame =
+        aEvent->mClass == eTouchEventClass ? aFrame : frame;
+
+      AutoWeakFrame weakFrame(targetFrame);
+      nsCOMPtr<nsIContent> targetContent;
+      PointerEventHandler::DispatchPointerFromMouseOrTouch(
+                             shell, targetFrame, targetElement, aEvent,
+                             aDontRetargetEvents, aEventStatus,
+                             getter_AddRefs(targetContent));
+
+      if (!weakFrame.IsAlive() && aEvent->mClass == eMouseEventClass) {
+        // Spec only defines that mouse events must be dispatched to the same
+        // target as the pointer event. If the target is no longer participating
+        // in its ownerDocument's tree, fire the event at the original target's
+        // nearest ancestor node
+        if (!targetContent) {
+          return NS_OK;
+        }
+        frame = targetContent->GetPrimaryFrame();
+        shell = GetShellForEventTarget(frame, targetContent);
+        if (!shell) {
+          return NS_OK;
+        }
+      }
+    }
+
+    // frame could be null after dispatching pointer events.
+    if (aEvent->mClass == eTouchEventClass) {
+      if (aEvent->mMessage == eTouchStart) {
+        WidgetTouchEvent* touchEvent = aEvent->AsTouchEvent();
+        if (nsIFrame* newFrame =
+              TouchManager::SuppressInvalidPointsAndGetTargetedFrame(
+                touchEvent)) {
+          frame = newFrame;
+          frame->GetContentForEvent(aEvent, getter_AddRefs(targetElement));
+          shell = static_cast<PresShell*>(frame->PresContext()->PresShell());
+        }
+      } else if (PresShell* newShell = GetShellForTouchEvent(aEvent)) {
+        // Touch events (except touchstart) are dispatching to the captured
+        // element. Get correct shell from it.
+        shell = newShell;
+      }
+    }
+
+    // Prevent deletion until we're done with event handling (bug 336582)
+    nsCOMPtr<nsIPresShell> kungFuDeathGrip(shell);
+    nsresult rv;
+
+    // Handle the event in the correct shell.
+    // We pass the subshell's root frame as the frame to start from. This is
+    // the only correct alternative; if the event was captured then it
+    // must have been captured by us or some ancestor shell and we
+    // now ask the subshell to dispatch it normally.
+    shell->PushCurrentEventInfo(frame, targetElement);
+    rv = shell->HandleEventInternal(aEvent, aEventStatus, true);
+#ifdef DEBUG
+    shell->ShowEventTargetDebug();
+#endif
+    shell->PopCurrentEventInfo();
     return rv;
   }
 
@@ -7545,61 +7548,10 @@ PresShell::ShowEventTargetDebug()
 #endif
 
 nsresult
-PresShell::HandlePositionedEvent(nsIFrame* aTargetFrame,
-                                 WidgetGUIEvent* aEvent,
-                                 nsEventStatus* aEventStatus)
-{
-  nsresult rv = NS_OK;
-
-  PushCurrentEventInfo(nullptr, nullptr);
-
-  mCurrentEventFrame = aTargetFrame;
-
-  if (mCurrentEventFrame) {
-    nsCOMPtr<nsIContent> targetElement;
-    mCurrentEventFrame->GetContentForEvent(aEvent,
-                                           getter_AddRefs(targetElement));
-
-    // If there is no content for this frame, target it anyway.  Some
-    // frames can be targeted but do not have content, particularly
-    // windows with scrolling off.
-    if (targetElement) {
-      // Bug 103055, bug 185889: mouse events apply to *elements*, not all
-      // nodes.  Thus we get the nearest element parent here.
-      // XXX we leave the frame the same even if we find an element
-      // parent, so that the text frame will receive the event (selection
-      // and friends are the ones who care about that anyway)
-      //
-      // We use weak pointers because during this tight loop, the node
-      // will *not* go away.  And this happens on every mousemove.
-      while (targetElement && !targetElement->IsElement()) {
-        targetElement = targetElement->GetFlattenedTreeParent();
-      }
-
-      // If we found an element, target it.  Otherwise, target *nothing*.
-      if (!targetElement) {
-        mCurrentEventContent = nullptr;
-        mCurrentEventFrame = nullptr;
-      } else if (targetElement != mCurrentEventContent) {
-        mCurrentEventContent = targetElement;
-      }
-    }
-  }
-
-  if (GetCurrentEventFrame()) {
-    rv = HandleEventInternal(aEvent, aEventStatus, true);
-  }
-
-#ifdef DEBUG
-  ShowEventTargetDebug();
-#endif
-  PopCurrentEventInfo();
-  return rv;
-}
-
-nsresult
 PresShell::HandleEventWithTarget(WidgetEvent* aEvent, nsIFrame* aFrame,
-                                 nsIContent* aContent, nsEventStatus* aStatus)
+                                 nsIContent* aContent, nsEventStatus* aStatus,
+                                 bool aIsHandlingNativeEvent,
+                                 nsIContent** aTargetContent)
 {
 #if DEBUG
   MOZ_ASSERT(!aFrame || aFrame->PresContext()->GetPresShell() == this,
@@ -7612,7 +7564,7 @@ PresShell::HandleEventWithTarget(WidgetEvent* aEvent, nsIFrame* aFrame,
   }
 #endif
   NS_ENSURE_STATE(!aContent || aContent->GetComposedDoc() == mDocument);
-
+  AutoPointerEventTargetUpdater updater(this, aEvent, aFrame, aTargetContent);
   PushCurrentEventInfo(aFrame, aContent);
   nsresult rv = HandleEventInternal(aEvent, aStatus, false);
   PopCurrentEventInfo();
@@ -8024,6 +7976,10 @@ PresShell::DispatchEventToDOM(WidgetEvent* aEvent,
     }
   }
   if (eventTarget) {
+    if (aEvent->IsBlockedForFingerprintingResistance()) {
+      aEvent->mFlags.mOnlySystemGroupDispatchInContent = true;
+    }
+
     if (aEvent->mClass == eCompositionEventClass) {
       IMEStateManager::DispatchCompositionEvent(eventTarget, mPresContext,
                                                 aEvent->AsCompositionEvent(),
@@ -8054,6 +8010,10 @@ PresShell::DispatchTouchEventToDOM(WidgetEvent* aEvent,
 
   // loop over all touches and dispatch events on any that have changed
   for (dom::Touch* touch : touchEvent->mTouches) {
+    // We should remove all suppressed touch instances in
+    // TouchManager::PreHandleEvent.
+    MOZ_ASSERT(!touch->mIsTouchEventSuppressed);
+
     if (!touch || !touch->mChanged) {
       continue;
     }
@@ -8835,16 +8795,12 @@ PresShell::WillDoReflow()
 
   mPresContext->FlushFontFeatureValues();
 
-  mFrameConstructor->BeginUpdate();
-
   mLastReflowStart = GetPerformanceNow();
 }
 
 void
 PresShell::DidDoReflow(bool aInterruptible)
 {
-  mFrameConstructor->EndUpdate();
-
   HandlePostedReflowCallbacks(aInterruptible);
 
   nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell();
@@ -9051,7 +9007,7 @@ PresShell::DoReflow(nsIFrame* target, bool aInterruptible)
                                          target->GetView(), rcx,
                                          nsContainerFrame::SET_ASYNC);
 
-  target->DidReflow(mPresContext, nullptr, nsDidReflowStatus::FINISHED);
+  target->DidReflow(mPresContext, nullptr);
   if (target == rootFrame && size.BSize(wm) == NS_UNCONSTRAINEDSIZE) {
     mPresContext->SetVisibleArea(boundsRelativeToTarget);
   }

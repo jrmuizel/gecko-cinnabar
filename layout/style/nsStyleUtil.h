@@ -204,7 +204,7 @@ public:
    *  @return
    *      Does CSP allow application of the specified inline style?
    */
-  static bool CSPAllowsInlineStyle(nsIContent* aContent,
+  static bool CSPAllowsInlineStyle(mozilla::dom::Element* aContent,
                                    nsIPrincipal* aPrincipal,
                                    nsIPrincipal* aTriggeringPrincipal,
                                    nsIURI* aSourceURI,
@@ -216,7 +216,7 @@ public:
   static bool MatchesLanguagePrefix(const char16_t* aLang, size_t aLen,
                                     const char16_t (&aPrefix)[N])
   {
-    return !nsCRT::strncmp(aLang, aPrefix, N - 1) &&
+    return !NS_strncmp(aLang, aPrefix, N - 1) &&
            (aLen == N - 1 || aLang[N - 1] == '-');
   }
 

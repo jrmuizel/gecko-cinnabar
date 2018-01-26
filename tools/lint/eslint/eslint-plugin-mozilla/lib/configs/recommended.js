@@ -34,7 +34,6 @@ module.exports = {
     "MatchPatternSet": false,
     "MenuBoxObject": false,
     // Specific to Firefox (Chrome code only).
-    "MozSelfSupport": false,
     "SharedArrayBuffer": false,
     "SimpleGestureEvent": false,
     // Note: StopIteration will likely be removed as part of removing legacy
@@ -62,6 +61,21 @@ module.exports = {
     "files": "**/*.xml",
     "rules": {
       "mozilla/use-services": "off"
+    }
+  }, {
+    // Turn off browser env for all *.jsm files, and turn on the jsm environment.
+    "env": {
+      "browser": false,
+      "mozilla/jsm": true
+    },
+    "files": "**/*.jsm",
+    "rules": {
+      "mozilla/mark-exported-symbols-as-used": "error"
+      // "no-unused-vars": ["error", {
+      //   "args": "none",
+      //   "vars": "all",
+      //   "varsIgnorePattern": "^Cc|Ci|Cu|Cr|EXPORTED_SYMBOLS"
+      // }]
     }
   }],
 
@@ -165,6 +179,7 @@ module.exports = {
     // Use [] instead of Array()
     "no-array-constructor": "error",
 
+    // Disallow use of arguments.caller or arguments.callee.
     "no-caller": "error",
 
     // Disallow modifying variables of class declarations.
@@ -248,8 +263,8 @@ module.exports = {
     // No single if block inside an else block
     "no-lonely-if": "error",
 
-    // No mixing spaces and tabs in indent
-    "no-mixed-spaces-and-tabs": ["error", "smart-tabs"],
+    // no-tabs disallows tabs completely.
+    // "no-mixed-spaces-and-tabs": "error",
 
     // No unnecessary spacing
     "no-multi-spaces": ["error", { exceptions: {

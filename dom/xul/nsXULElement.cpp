@@ -10,7 +10,6 @@
 #include "nsIDOMEvent.h"
 #include "nsAtom.h"
 #include "nsIBaseWindow.h"
-#include "nsIDOMAttr.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMEventListener.h"
@@ -33,9 +32,6 @@
 #include "nsIObjectOutputStream.h"
 #include "nsIPresShell.h"
 #include "nsIPrincipal.h"
-#include "nsIRDFCompositeDataSource.h"
-#include "nsIRDFNode.h"
-#include "nsIRDFService.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
@@ -45,11 +41,9 @@
 #include "nsViewManager.h"
 #include "nsIWidget.h"
 #include "nsIXULDocument.h"
-#include "nsIXULTemplateBuilder.h"
 #include "nsLayoutCID.h"
 #include "nsContentCID.h"
 #include "mozilla/dom/Event.h"
-#include "nsRDFCID.h"
 #include "nsStyleConsts.h"
 #include "nsString.h"
 #include "nsXULControllers.h"
@@ -58,7 +52,6 @@
 #include "XULDocument.h"
 #include "nsXULPopupListener.h"
 #include "nsRuleWalker.h"
-#include "nsIDOMCSSStyleDeclaration.h"
 #include "nsCSSParser.h"
 #include "ListBoxObject.h"
 #include "nsContentUtils.h"
@@ -70,11 +63,9 @@
 #include "nsJSPrincipals.h"
 #include "nsDOMAttributeMap.h"
 #include "nsGkAtoms.h"
-#include "nsXULContentUtils.h"
 #include "nsNodeUtils.h"
 #include "nsFrameLoader.h"
 #include "mozilla/Logging.h"
-#include "rdf.h"
 #include "nsIControllers.h"
 #include "nsAttrValueOrString.h"
 #include "nsAttrValueInlines.h"
@@ -331,11 +322,6 @@ nsXULElement::Clone(mozilla::dom::NodeInfo *aNodeInfo, nsINode **aResult,
     nsresult rv = element->mAttrsAndChildren.EnsureCapacityToClone(mAttrsAndChildren,
                                                                    aPreallocateChildren);
     NS_ENSURE_SUCCESS(rv, rv);
-
-    // XXX TODO: set up RDF generic builder n' stuff if there is a
-    // 'datasources' attribute? This is really kind of tricky,
-    // because then we'd need to -selectively- copy children that
-    // -weren't- generated from RDF. Ugh. Forget it.
 
     // Note that we're _not_ copying mControllers.
 
@@ -729,29 +715,6 @@ IsInVideoControls(nsXULElement* aElement)
   }
   return false;
 }
-
-/**
- * Returns true if aElement is an element created by the <binding
- * id="feedreaderUI"> binding or one of the bindings bound to such an element.
- * element in one of the binding for such an element. Only
- * subscribe.xhtml#feedSubscribeLine pulls in the feedreaderUI binding. This
- * binding creates lots of different types of XUL elements.
- */
-bool
-IsInFeedSubscribeLine(nsXULElement* aElement)
-{
-  nsIContent* bindingParent = aElement->GetBindingParent();
-  if (bindingParent) {
-    while (bindingParent->GetBindingParent()) {
-      bindingParent = bindingParent->GetBindingParent();
-    }
-    nsAtom* idAtom = bindingParent->GetID();
-    if (idAtom && idAtom->Equals(NS_LITERAL_STRING("feedSubscribeLine"))) {
-      return true;
-    }
-  }
-  return false;
-}
 #endif
 
 class XULInContentErrorReporter : public Runnable
@@ -820,7 +783,7 @@ nsXULElement::BindToTree(nsIDocument* aDocument,
       // pulling in xul.css.
       // Note that add-ons may introduce bindings that cause this assertion to
       // fire.
-      NS_ASSERTION(IsInVideoControls(this) || IsInFeedSubscribeLine(this),
+      NS_ASSERTION(IsInVideoControls(this),
                    "Unexpected XUL element in non-XUL doc");
     }
   }
@@ -863,7 +826,7 @@ nsXULElement::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 void
-nsXULElement::RemoveChildAt(uint32_t aIndex, bool aNotify)
+nsXULElement::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
 {
     nsCOMPtr<nsIContent> oldKid = mAttrsAndChildren.GetSafeChildAt(aIndex);
     if (!oldKid) {
@@ -932,7 +895,102 @@ nsXULElement::RemoveChildAt(uint32_t aIndex, bool aNotify)
       }
     }
 
-    nsStyledElement::RemoveChildAt(aIndex, aNotify);
+    nsStyledElement::RemoveChildAt_Deprecated(aIndex, aNotify);
+
+    if (newCurrentIndex == -2) {
+        controlElement->SetCurrentItem(nullptr);
+    } else if (newCurrentIndex > -1) {
+        // Make sure the index is still valid
+        int32_t treeRows;
+        listBox->GetRowCount(&treeRows);
+        if (treeRows > 0) {
+            newCurrentIndex = std::min((treeRows - 1), newCurrentIndex);
+            nsCOMPtr<nsIDOMElement> newCurrentItem;
+            listBox->GetItemAtIndex(newCurrentIndex, getter_AddRefs(newCurrentItem));
+            nsCOMPtr<nsIDOMXULSelectControlItemElement> xulCurItem = do_QueryInterface(newCurrentItem);
+            if (xulCurItem)
+                controlElement->SetCurrentItem(xulCurItem);
+        } else {
+            controlElement->SetCurrentItem(nullptr);
+        }
+    }
+
+    nsIDocument* doc;
+    if (fireSelectionHandler && (doc = GetComposedDoc())) {
+      nsContentUtils::DispatchTrustedEvent(doc,
+                                           static_cast<nsIContent*>(this),
+                                           NS_LITERAL_STRING("select"),
+                                           false,
+                                           true);
+    }
+}
+
+void
+nsXULElement::RemoveChildNode(nsIContent* aKid, bool aNotify)
+{
+    // On the removal of a <treeitem>, <treechildren>, or <treecell> element,
+    // the possibility exists that some of the items in the removed subtree
+    // are selected (and therefore need to be deselected). We need to account for this.
+    nsCOMPtr<nsIDOMXULMultiSelectControlElement> controlElement;
+    nsCOMPtr<nsIListBoxObject> listBox;
+    bool fireSelectionHandler = false;
+
+    // -1 = do nothing, -2 = null out current item
+    // anything else = index to re-set as current
+    int32_t newCurrentIndex = -1;
+
+    if (aKid->NodeInfo()->Equals(nsGkAtoms::listitem, kNameSpaceID_XUL)) {
+      // This is the nasty case. We have (potentially) a slew of selected items
+      // and cells going away.
+      // First, retrieve the tree.
+      // Check first whether this element IS the tree
+      controlElement = do_QueryObject(this);
+
+      // If it's not, look at our parent
+      if (!controlElement)
+        GetParentTree(getter_AddRefs(controlElement));
+      nsCOMPtr<nsIContent> controlContent(do_QueryInterface(controlElement));
+      RefPtr<nsXULElement> xulElement = FromContentOrNull(controlContent);
+
+      nsCOMPtr<nsIDOMElement> oldKidElem = do_QueryInterface(aKid);
+      if (xulElement && oldKidElem) {
+        // Iterate over all of the items and find out if they are contained inside
+        // the removed subtree.
+        int32_t length;
+        controlElement->GetSelectedCount(&length);
+        for (int32_t i = 0; i < length; i++) {
+          nsCOMPtr<nsIDOMXULSelectControlItemElement> node;
+          controlElement->MultiGetSelectedItem(i, getter_AddRefs(node));
+          // we need to QI here to do an XPCOM-correct pointercompare
+          nsCOMPtr<nsIDOMElement> selElem = do_QueryInterface(node);
+          if (selElem == oldKidElem &&
+              NS_SUCCEEDED(controlElement->RemoveItemFromSelection(node))) {
+            length--;
+            i--;
+            fireSelectionHandler = true;
+          }
+        }
+
+        nsCOMPtr<nsIDOMXULSelectControlItemElement> curItem;
+        controlElement->GetCurrentItem(getter_AddRefs(curItem));
+        nsCOMPtr<nsIContent> curNode = do_QueryInterface(curItem);
+        if (curNode && nsContentUtils::ContentIsDescendantOf(curNode, aKid)) {
+            // Current item going away
+            IgnoredErrorResult ignored;
+            nsCOMPtr<nsIBoxObject> box = xulElement->GetBoxObject(ignored);
+            listBox = do_QueryInterface(box);
+            if (listBox && oldKidElem) {
+              listBox->GetIndexOfItem(oldKidElem, &newCurrentIndex);
+            }
+
+            // If any of this fails, we'll just set the current item to null
+            if (newCurrentIndex == -1)
+              newCurrentIndex = -2;
+        }
+      }
+    }
+
+    nsStyledElement::RemoveChildNode(aKid, aNotify);
 
     if (newCurrentIndex == -2) {
         controlElement->SetCurrentItem(nullptr);
@@ -972,19 +1030,20 @@ nsXULElement::UnregisterAccessKey(const nsAString& aOldValue)
         nsIPresShell *shell = doc->GetShell();
 
         if (shell) {
-            nsIContent *content = this;
+            Element* element = this;
 
             // find out what type of content node this is
             if (mNodeInfo->Equals(nsGkAtoms::label)) {
                 // For anonymous labels the unregistering must
                 // occur on the binding parent control.
                 // XXXldb: And what if the binding parent is null?
-                content = GetBindingParent();
+                nsIContent* bindingParent = GetBindingParent();
+                element = bindingParent ? bindingParent->AsElement() : nullptr;
             }
 
-            if (content) {
+            if (element) {
                 shell->GetPresContext()->EventStateManager()->
-                    UnregisterAccessKey(content, aOldValue.First());
+                    UnregisterAccessKey(element, aOldValue.First());
             }
         }
     }
@@ -1291,7 +1350,7 @@ nsXULElement::GetEventTargetParent(EventChainPreVisitor& aVisitor)
     if (IsEventStoppedFromAnonymousScrollbar(aVisitor.mEvent->mMessage)) {
         // Don't propagate these events from native anonymous scrollbar.
         aVisitor.mCanHandle = true;
-        aVisitor.mParentTarget = nullptr;
+        aVisitor.SetParentTarget(nullptr, false);
         return NS_OK;
     }
     if (aVisitor.mEvent->mMessage == eXULCommand &&
@@ -1333,54 +1392,6 @@ nsXULElement::PreHandleEvent(EventChainVisitor& aVisitor)
         return DispatchXULCommand(aVisitor, command);
     }
     return nsStyledElement::PreHandleEvent(aVisitor);
-}
-
-// XXX This _should_ be an implementation method, _not_ publicly exposed :-(
-already_AddRefed<nsIRDFResource>
-nsXULElement::GetResource(ErrorResult& rv)
-{
-    nsAutoString id;
-    GetAttr(kNameSpaceID_None, nsGkAtoms::ref, id);
-    if (id.IsEmpty()) {
-        GetAttr(kNameSpaceID_None, nsGkAtoms::id, id);
-    }
-
-    if (id.IsEmpty()) {
-        return nullptr;
-    }
-
-    nsCOMPtr<nsIRDFResource> resource;
-    rv = nsXULContentUtils::RDFService()->
-        GetUnicodeResource(id, getter_AddRefs(resource));
-    return resource.forget();
-}
-
-already_AddRefed<nsIRDFCompositeDataSource>
-nsXULElement::GetDatabase()
-{
-    nsCOMPtr<nsIXULTemplateBuilder> builder = GetBuilder();
-    if (!builder) {
-        return nullptr;
-    }
-
-    nsCOMPtr<nsIRDFCompositeDataSource> database;
-    builder->GetDatabase(getter_AddRefs(database));
-    return database.forget();
-}
-
-
-already_AddRefed<nsIXULTemplateBuilder>
-nsXULElement::GetBuilder()
-{
-    // XXX sXBL/XBL2 issue! Owner or current document?
-    nsCOMPtr<nsIXULDocument> xuldoc = do_QueryInterface(GetUncomposedDoc());
-    if (!xuldoc) {
-        return nullptr;
-    }
-
-    nsCOMPtr<nsIXULTemplateBuilder> builder;
-    xuldoc->GetTemplateBuilderFor(this, getter_AddRefs(builder));
-    return builder.forget();
 }
 
 //----------------------------------------------------------------------
@@ -1491,15 +1502,9 @@ nsXULElement::LoadSrc()
         (new AsyncEventDispatcher(this,
                                   NS_LITERAL_STRING("XULFrameLoaderCreated"),
                                   /* aBubbles */ true))->RunDOMEventWhenSafe();
-
-        if (AttrValueIs(kNameSpaceID_None, nsGkAtoms::prerendered,
-                        NS_LITERAL_STRING("true"), eIgnoreCase)) {
-            nsresult rv = frameLoader->SetIsPrerendered();
-            NS_ENSURE_SUCCESS(rv,rv);
-        }
     }
 
-    return frameLoader->LoadFrame();
+    return frameLoader->LoadFrame(false);
 }
 
 nsresult
@@ -1527,13 +1532,6 @@ nsXULElement::PresetOpenerWindow(mozIDOMWindowProxy* aWindow, ErrorResult& aRv)
     MOZ_ASSERT(!slots->mFrameLoaderOrOpener, "A frameLoader or opener is present when calling PresetOpenerWindow");
 
     slots->mFrameLoaderOrOpener = aWindow;
-}
-
-nsresult
-nsXULElement::SetIsPrerendered()
-{
-  return SetAttr(kNameSpaceID_None, nsGkAtoms::prerendered, nullptr,
-                 NS_LITERAL_STRING("true"), true);
 }
 
 void
@@ -1677,12 +1675,6 @@ nsXULElement::DoCommand()
     if (doc) {
         nsContentUtils::DispatchXULCommand(this, true);
     }
-}
-
-nsIContent *
-nsXULElement::GetBindingParent() const
-{
-    return mBindingParent;
 }
 
 bool

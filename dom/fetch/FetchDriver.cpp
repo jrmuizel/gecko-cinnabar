@@ -31,6 +31,7 @@
 #include "nsHttpChannel.h"
 
 #include "mozilla/dom/File.h"
+#include "mozilla/dom/PerformanceStorage.h"
 #include "mozilla/dom/workers/Workers.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
@@ -325,13 +326,17 @@ NS_IMPL_ISUPPORTS(FetchDriver,
                   nsIStreamListener, nsIChannelEventSink, nsIInterfaceRequestor,
                   nsIThreadRetargetableStreamListener)
 
-FetchDriver::FetchDriver(InternalRequest* aRequest, nsIPrincipal* aPrincipal,
-                         nsILoadGroup* aLoadGroup, nsIEventTarget* aMainThreadEventTarget,
+FetchDriver::FetchDriver(InternalRequest* aRequest,
+                         nsIPrincipal* aPrincipal,
+                         nsILoadGroup* aLoadGroup,
+                         nsIEventTarget* aMainThreadEventTarget,
+                         PerformanceStorage* aPerformanceStorage,
                          bool aIsTrackingFetch)
   : mPrincipal(aPrincipal)
   , mLoadGroup(aLoadGroup)
   , mRequest(aRequest)
   , mMainThreadEventTarget(aMainThreadEventTarget)
+  , mPerformanceStorage(aPerformanceStorage)
   , mNeedToObserveOnDataAvailable(false)
   , mIsTrackingFetch(aIsTrackingFetch)
 #ifdef DEBUG
@@ -516,6 +521,20 @@ FetchDriver::HttpFetch(const nsACString& aPreferredAlternativeDataType)
                        mDocument,
                        secFlags,
                        mRequest->ContentPolicyType(),
+                       nullptr, /* aPerformanceStorage */
+                       mLoadGroup,
+                       nullptr, /* aCallbacks */
+                       loadFlags,
+                       ios);
+  } else if (mClientInfo.isSome()) {
+    rv = NS_NewChannel(getter_AddRefs(chan),
+                       uri,
+                       mPrincipal,
+                       mClientInfo.ref(),
+                       mController,
+                       secFlags,
+                       mRequest->ContentPolicyType(),
+                       mPerformanceStorage,
                        mLoadGroup,
                        nullptr, /* aCallbacks */
                        loadFlags,
@@ -526,6 +545,7 @@ FetchDriver::HttpFetch(const nsACString& aPreferredAlternativeDataType)
                        mPrincipal,
                        secFlags,
                        mRequest->ContentPolicyType(),
+                       mPerformanceStorage,
                        mLoadGroup,
                        nullptr, /* aCallbacks */
                        loadFlags,
@@ -566,24 +586,23 @@ FetchDriver::HttpFetch(const nsACString& aPreferredAlternativeDataType)
     // Set the same headers.
     SetRequestHeaders(httpChan);
 
-    net::ReferrerPolicy net_referrerPolicy = mRequest->GetEnvironmentReferrerPolicy();
-    // Step 6 of
-    // https://fetch.spec.whatwg.org/#main-fetch
+    // Step 5 of https://fetch.spec.whatwg.org/#main-fetch
     // If request's referrer policy is the empty string and request's client is
     // non-null, then set request's referrer policy to request's client's
     // associated referrer policy.
     // Basically, "client" is not in our implementation, we use
     // EnvironmentReferrerPolicy of the worker or document context
+    net::ReferrerPolicy net_referrerPolicy = mRequest->GetEnvironmentReferrerPolicy();
     if (mRequest->ReferrerPolicy_() == ReferrerPolicy::_empty) {
       mRequest->SetReferrerPolicy(net_referrerPolicy);
     }
-    // Step 7 of
-    // https://fetch.spec.whatwg.org/#main-fetch
+    // Step 6 of https://fetch.spec.whatwg.org/#main-fetch
     // If request’s referrer policy is the empty string,
-    // then set request’s referrer policy to "no-referrer-when-downgrade".
+    // then set request’s referrer policy to the user-set default policy.
     if (mRequest->ReferrerPolicy_() == ReferrerPolicy::_empty) {
-      net::ReferrerPolicy referrerPolicy =
-        static_cast<net::ReferrerPolicy>(NS_GetDefaultReferrerPolicy());
+      nsCOMPtr<nsILoadInfo> loadInfo = httpChan->GetLoadInfo();
+      bool isPrivate = loadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+      net::ReferrerPolicy referrerPolicy = static_cast<net::ReferrerPolicy>(NS_GetDefaultReferrerPolicy(isPrivate));
       mRequest->SetReferrerPolicy(referrerPolicy);
     }
 
@@ -611,6 +630,12 @@ FetchDriver::HttpFetch(const nsACString& aPreferredAlternativeDataType)
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     rv = internalChan->SetIntegrityMetadata(mRequest->GetIntegrity());
     MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+    // Set the initiator type
+    nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChan));
+    if (timedChannel) {
+      timedChannel->SetInitiatorType(NS_LITERAL_STRING("fetch"));
+    }
   }
 
   // Step 5. Proxy authentication will be handled by Necko.
@@ -1087,25 +1112,37 @@ FetchDriver::OnDataAvailable(nsIRequest* aRequest,
     }
   }
 
-  uint32_t aRead;
+  // Needs to be initialized to 0 because in some cases nsStringInputStream may
+  // not write to aRead.
+  uint32_t aRead = 0;
   MOZ_ASSERT(mResponse);
   MOZ_ASSERT(mPipeOutputStream);
 
   // From "Main Fetch" step 19: SRI-part2.
   // Note: Avoid checking the hidden opaque body.
+  nsresult rv;
   if (mResponse->Type() != ResponseType::Opaque &&
       ShouldCheckSRI(mRequest, mResponse)) {
     MOZ_ASSERT(mSRIDataVerifier);
 
     SRIVerifierAndOutputHolder holder(mSRIDataVerifier, mPipeOutputStream);
-    nsresult rv = aInputStream->ReadSegments(CopySegmentToStreamAndSRI,
-                                             &holder, aCount, &aRead);
-    return rv;
+    rv = aInputStream->ReadSegments(CopySegmentToStreamAndSRI,
+                                    &holder, aCount, &aRead);
+  } else {
+    rv = aInputStream->ReadSegments(NS_CopySegmentToStream,
+                                    mPipeOutputStream,
+                                    aCount, &aRead);
   }
 
-  nsresult rv = aInputStream->ReadSegments(NS_CopySegmentToStream,
-                                           mPipeOutputStream,
-                                           aCount, &aRead);
+  // If no data was read, it's possible the output stream is closed but the
+  // ReadSegments call followed its contract of returning NS_OK despite write
+  // errors.  Unfortunately, nsIOutputStream has an ill-conceived contract when
+  // taken together with ReadSegments' contract, because the pipe will just
+  // NS_OK if we try and invoke its Write* functions ourselves with a 0 count.
+  // So we must just assume the pipe is broken.
+  if (aRead == 0 && aCount != 0) {
+    return NS_BASE_STREAM_CLOSED;
+  }
   return rv;
 }
 
@@ -1316,6 +1353,20 @@ FetchDriver::SetDocument(nsIDocument* aDocument)
   // Cannot set document after Fetch() has been called.
   MOZ_ASSERT(!mFetchCalled);
   mDocument = aDocument;
+}
+
+void
+FetchDriver::SetClientInfo(const ClientInfo& aClientInfo)
+{
+  MOZ_ASSERT(!mFetchCalled);
+  mClientInfo.emplace(aClientInfo);
+}
+
+void
+FetchDriver::SetController(const Maybe<ServiceWorkerDescriptor>& aController)
+{
+  MOZ_ASSERT(!mFetchCalled);
+  mController = aController;
 }
 
 void

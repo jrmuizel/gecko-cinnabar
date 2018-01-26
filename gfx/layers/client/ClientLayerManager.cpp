@@ -225,10 +225,7 @@ bool
 ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
 {
   // Wait for any previous async paints to complete before starting to paint again.
-  GetCompositorBridgeChild()->FlushAsyncPaints();
-  if (PaintThread::Get()) {
-    PaintThread::Get()->BeginLayerTransaction();
-  }
+  FlushAsyncPaints();
 
   MOZ_ASSERT(mForwarder, "ClientLayerManager::BeginTransaction without forwarder");
   if (!mForwarder->IPCOpen()) {
@@ -261,7 +258,7 @@ ClientLayerManager::BeginTransactionWithTarget(gfxContext* aTarget)
     orientation = currentConfig.orientation();
   }
   LayoutDeviceIntRect targetBounds = mWidget->GetNaturalBounds();
-  targetBounds.x = targetBounds.y = 0;
+  targetBounds.MoveTo(0, 0);
   mForwarder->BeginTransaction(targetBounds.ToUnknownRect(), mTargetRotation,
                                orientation);
 
@@ -417,7 +414,7 @@ ClientLayerManager::EndTransaction(DrawPaintedLayerCallback aCallback,
   if (mTransactionIncomplete) {
     // If the previous transaction was incomplete then we may have buffer operations
     // running on the paint thread that haven't finished yet
-    GetCompositorBridgeChild()->FlushAsyncPaints();
+    FlushAsyncPaints();
   }
 
   if (mWidget) {
@@ -448,6 +445,12 @@ ClientLayerManager::EndEmptyTransaction(EndTransactionFlags aFlags)
 
   if (!mRoot || !mForwarder->IPCOpen()) {
     return false;
+  }
+
+  if (mTransactionIncomplete) {
+    // If the previous transaction was incomplete then we may have buffer operations
+    // running on the paint thread that haven't finished yet
+    FlushAsyncPaints();
   }
 
   if (!EndTransactionInternal(nullptr, nullptr, aFlags)) {
@@ -484,6 +487,15 @@ ClientLayerManager::GetCompositorBridgeChild()
     return CompositorBridgeChild::Get();
   }
   return GetRemoteRenderer();
+}
+
+void
+ClientLayerManager::FlushAsyncPaints()
+{
+  CompositorBridgeChild* cbc = GetCompositorBridgeChild();
+  if (cbc) {
+    cbc->FlushAsyncPaints();
+  }
 }
 
 void
@@ -625,7 +637,7 @@ ClientLayerManager::MakeSnapshotIfRequired()
           RefPtr<DataSourceSurface> surf = GetSurfaceForDescriptor(outSnapshot);
           DrawTarget* dt = mShadowTarget->GetDrawTarget();
 
-          Rect dstRect(bounds.x, bounds.y, bounds.Width(), bounds.Height());
+          Rect dstRect(bounds.X(), bounds.Y(), bounds.Width(), bounds.Height());
           Rect srcRect(0, 0, bounds.Width(), bounds.Height());
 
           gfx::Matrix rotate =

@@ -375,7 +375,8 @@ function prompt(aBrowser, aRequest) {
   } catch (e) {
     uri = Services.io.newURI(aRequest.documentURI);
   }
-  let host = getHost(uri);
+  let message = {};
+  message.host = getHost(uri);
   let chromeDoc = aBrowser.ownerDocument;
   let stringBundle = chromeDoc.defaultView.gNavigatorBundle;
 
@@ -396,7 +397,10 @@ function prompt(aBrowser, aRequest) {
     "getUserMedia.shareScreenAndAudioCapture3.message",
   ].find(id => id.includes(joinedRequestTypes));
 
-  let message = stringBundle.getFormattedString(stringId, [host]);
+  let header = stringBundle.getFormattedString(stringId, ["<>"], 1);
+  header = header.split("<>");
+  message.end = header[1];
+  message.start = header[0];
 
   let notification; // Used by action callbacks.
   let mainAction = {
@@ -841,6 +845,29 @@ function prompt(aBrowser, aRequest) {
                    anchorId, mainAction, secondaryActions,
                    options);
   notification.callID = aRequest.callID;
+
+  let schemeHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_ORIGIN_SCHEME");
+  let thirdPartyHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_THIRD_PARTY_ORIGIN");
+  let userInputHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_HANDLING_USER_INPUT");
+
+  let docURI = aRequest.documentURI;
+  let scheme = 0;
+  if (docURI.startsWith("https")) {
+    scheme = 2;
+  } else if (docURI.startsWith("http")) {
+    scheme = 1;
+  }
+
+  for (let requestType of requestTypes) {
+    if (requestType == "AudioCapture") {
+      requestType = "Microphone";
+    }
+    requestType = requestType.toLowerCase();
+
+    schemeHistogram.add(requestType, scheme);
+    thirdPartyHistogram.add(requestType, aRequest.isThirdPartyOrigin);
+    userInputHistogram.add(requestType, aRequest.isHandlingUserInput);
+  }
 }
 
 function removePrompt(aBrowser, aCallId) {

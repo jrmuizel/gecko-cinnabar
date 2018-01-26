@@ -188,19 +188,22 @@ nsDOMCSSAttributeDeclaration::GetServoCSSParsingEnvironment(
   };
 }
 
-NS_IMETHODIMP
-nsDOMCSSAttributeDeclaration::GetParentRule(nsIDOMCSSRule **aParent)
+css::Rule*
+nsDOMCSSAttributeDeclaration::GetParentRule()
 {
-  NS_ENSURE_ARG_POINTER(aParent);
-
-  *aParent = nullptr;
-  return NS_OK;
+  return nullptr;
 }
 
 /* virtual */ nsINode*
 nsDOMCSSAttributeDeclaration::GetParentObject()
 {
   return mElement;
+}
+
+/* virtual */ DocGroup*
+nsDOMCSSAttributeDeclaration::GetDocGroup() const
+{
+  return mElement ? mElement->OwnerDoc()->GetDocGroup() : nullptr;
 }
 
 NS_IMETHODIMP

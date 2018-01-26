@@ -268,15 +268,11 @@ var TabsInTitlebar = {
     }
 
     ToolbarIconColor.inferFromText("tabsintitlebar", TabsInTitlebar.enabled);
-
-    if (document.documentElement.hasAttribute("customizing")) {
-      gCustomizeMode.updateLWTStyling();
-    }
   },
 
   _sizePlaceholder(type, width) {
     Array.forEach(document.querySelectorAll(".titlebar-placeholder[type='" + type + "']"),
-                  function(node) { node.width = width; });
+                  function(node) { node.style.width = width + "px"; });
   },
 
   uninit() {

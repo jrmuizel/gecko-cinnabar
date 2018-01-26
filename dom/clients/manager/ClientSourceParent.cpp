@@ -43,7 +43,7 @@ public:
   }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
     mContentParent->KillHard("invalid ClientSourceParent actor");
@@ -223,6 +223,12 @@ bool
 ClientSourceParent::ExecutionReady() const
 {
   return mExecutionReady;
+}
+
+const Maybe<ServiceWorkerDescriptor>&
+ClientSourceParent::GetController() const
+{
+  return mController;
 }
 
 void

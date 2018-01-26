@@ -81,7 +81,7 @@ MacroAssemblerCompat::movePatchablePtr(ImmPtr ptr, Register dest)
 
     // Scratch space for generating the load instruction.
     //
-    // allocEntry() will use InsertIndexIntoTag() to store a temporary
+    // allocLiteralLoadEntry() will use InsertIndexIntoTag() to store a temporary
     // index to the corresponding PoolEntry in the instruction itself.
     //
     // That index will be fixed up later when finishPool()
@@ -94,8 +94,8 @@ MacroAssemblerCompat::movePatchablePtr(ImmPtr ptr, Register dest)
 
     // Add the entry to the pool, fix up the LDR imm19 offset,
     // and add the completed instruction to the buffer.
-    return allocEntry(numInst, numPoolEntries, (uint8_t*)&instructionScratch,
-                      literalAddr);
+    return allocLiteralLoadEntry(numInst, numPoolEntries, (uint8_t*)&instructionScratch,
+                                 literalAddr);
 }
 
 BufferOffset
@@ -107,7 +107,7 @@ MacroAssemblerCompat::movePatchablePtr(ImmWord ptr, Register dest)
 
     // Scratch space for generating the load instruction.
     //
-    // allocEntry() will use InsertIndexIntoTag() to store a temporary
+    // allocLiteralLoadEntry() will use InsertIndexIntoTag() to store a temporary
     // index to the corresponding PoolEntry in the instruction itself.
     //
     // That index will be fixed up later when finishPool()
@@ -120,8 +120,8 @@ MacroAssemblerCompat::movePatchablePtr(ImmWord ptr, Register dest)
 
     // Add the entry to the pool, fix up the LDR imm19 offset,
     // and add the completed instruction to the buffer.
-    return allocEntry(numInst, numPoolEntries, (uint8_t*)&instructionScratch,
-                      literalAddr);
+    return allocLiteralLoadEntry(numInst, numPoolEntries, (uint8_t*)&instructionScratch,
+                                 literalAddr);
 }
 
 void
@@ -232,89 +232,6 @@ MacroAssemblerCompat::breakpoint()
     static int code = 0xA77;
     Brk((code++) & 0xffff);
 }
-
-template<typename T>
-void
-MacroAssemblerCompat::compareExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem,
-                                                     Register oldval, Register newval,
-                                                     Register temp, AnyRegister output)
-{
-    switch (arrayType) {
-      case Scalar::Int8:
-        compareExchange8SignExtend(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Uint8:
-        compareExchange8ZeroExtend(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Int16:
-        compareExchange16SignExtend(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Uint16:
-        compareExchange16ZeroExtend(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Int32:
-        compareExchange32(mem, oldval, newval, output.gpr());
-        break;
-      case Scalar::Uint32:
-        // At the moment, the code in MCallOptimize.cpp requires the output
-        // type to be double for uint32 arrays.  See bug 1077305.
-        MOZ_ASSERT(output.isFloat());
-        compareExchange32(mem, oldval, newval, temp);
-        convertUInt32ToDouble(temp, output.fpu());
-        break;
-      default:
-        MOZ_CRASH("Invalid typed array type");
-    }
-}
-
-template void
-MacroAssemblerCompat::compareExchangeToTypedIntArray(Scalar::Type arrayType, const Address& mem,
-                                                     Register oldval, Register newval, Register temp,
-                                                     AnyRegister output);
-template void
-MacroAssemblerCompat::compareExchangeToTypedIntArray(Scalar::Type arrayType, const BaseIndex& mem,
-                                                     Register oldval, Register newval, Register temp,
-                                                     AnyRegister output);
-
-template<typename T>
-void
-MacroAssemblerCompat::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const T& mem,
-                                                    Register value, Register temp, AnyRegister output)
-{
-    switch (arrayType) {
-      case Scalar::Int8:
-        atomicExchange8SignExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Uint8:
-        atomicExchange8ZeroExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Int16:
-        atomicExchange16SignExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Uint16:
-        atomicExchange16ZeroExtend(mem, value, output.gpr());
-        break;
-      case Scalar::Int32:
-        atomicExchange32(mem, value, output.gpr());
-        break;
-      case Scalar::Uint32:
-        // At the moment, the code in MCallOptimize.cpp requires the output
-        // type to be double for uint32 arrays.  See bug 1077305.
-        MOZ_ASSERT(output.isFloat());
-        atomicExchange32(mem, value, temp);
-        convertUInt32ToDouble(temp, output.fpu());
-        break;
-      default:
-        MOZ_CRASH("Invalid typed array type");
-    }
-}
-
-template void
-MacroAssemblerCompat::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const Address& mem,
-                                                    Register value, Register temp, AnyRegister output);
-template void
-MacroAssemblerCompat::atomicExchangeToTypedIntArray(Scalar::Type arrayType, const BaseIndex& mem,
-                                                    Register value, Register temp, AnyRegister output);
 
 void
 MacroAssembler::reserveStack(uint32_t amount)
@@ -935,6 +852,12 @@ MacroAssembler::comment(const char* msg)
 // ========================================================================
 // wasm support
 
+CodeOffset
+MacroAssembler::illegalInstruction()
+{
+    MOZ_CRASH("NYI");
+}
+
 void
 MacroAssembler::wasmTruncateDoubleToUInt32(FloatRegister input, Register output, Label* oolEntry)
 {
@@ -955,6 +878,168 @@ MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output
 
 void
 MacroAssembler::wasmTruncateFloat32ToInt32(FloatRegister input, Register output, Label* oolEntry)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                          Label* oolRejoin, FloatRegister tempDouble)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                           Label* oolRejoin, FloatRegister tempDouble)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                           Label* oolRejoin, FloatRegister tempDouble)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                            Label* oolRejoin, FloatRegister tempDouble)
+{
+    MOZ_CRASH("NYI");
+}
+
+// ========================================================================
+// Convert floating point.
+
+bool
+MacroAssembler::convertUInt64ToDoubleNeedsTemp()
+{
+    return false;
+}
+
+void
+MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
+    Ucvtf(ARMFPRegister(dest, 64), ARMRegister(src.reg, 64));
+}
+
+void
+MacroAssembler::convertInt64ToDouble(Register64 src, FloatRegister dest)
+{
+    Scvtf(ARMFPRegister(dest, 64), ARMRegister(src.reg, 64));
+}
+
+void
+MacroAssembler::convertUInt64ToFloat32(Register64 src, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
+    Ucvtf(ARMFPRegister(dest, 32), ARMRegister(src.reg, 64));
+}
+
+void
+MacroAssembler::convertInt64ToFloat32(Register64 src, FloatRegister dest)
+{
+    Scvtf(ARMFPRegister(dest, 32), ARMRegister(src.reg, 64));
+}
+
+// ========================================================================
+// Primitive atomic operations.
+
+void
+MacroAssembler::compareExchange(Scalar::Type type, const Synchronization& sync, const Address& mem,
+                                Register oldval, Register newval, Register output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::compareExchange(Scalar::Type type, const Synchronization& sync, const BaseIndex& mem,
+                                Register oldval, Register newval, Register output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicExchange(Scalar::Type type, const Synchronization& sync, const Address& mem,
+                               Register value, Register output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicExchange(Scalar::Type type, const Synchronization& sync, const BaseIndex& mem,
+                               Register value, Register output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicFetchOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                              Register value, const Address& mem, Register temp, Register output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicFetchOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                              Register value, const BaseIndex& mem, Register temp, Register output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                               Register value, const Address& mem, Register temp)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                               Register value, const BaseIndex& mem, Register temp)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::compareExchange64(const Synchronization& sync, const Address& mem, Register64 expect,
+                                  Register64 replace, Register64 output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::compareExchange64(const Synchronization& sync, const BaseIndex& mem, Register64 expect,
+                                  Register64 replace, Register64 output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicExchange64(const Synchronization& sync, const Address& mem, Register64 value, Register64 output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicExchange64(const Synchronization& sync, const BaseIndex& mem, Register64 value, Register64 output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicFetchOp64(const Synchronization& sync, AtomicOp op, Register64 value, const Address& mem,
+                                Register64 temp, Register64 output)
+{
+    MOZ_CRASH("NYI");
+}
+
+void
+MacroAssembler::atomicFetchOp64(const Synchronization& sync, AtomicOp op, Register64 value, const BaseIndex& mem,
+                                Register64 temp, Register64 output)
 {
     MOZ_CRASH("NYI");
 }

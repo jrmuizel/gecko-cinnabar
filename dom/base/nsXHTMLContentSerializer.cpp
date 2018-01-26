@@ -27,7 +27,6 @@
 #include "nsEscape.h"
 #include "nsCRT.h"
 #include "nsContentUtils.h"
-#include "nsLWBrkCIID.h"
 #include "nsIScriptElement.h"
 #include "nsStubMutationObserver.h"
 #include "nsAttrName.h"
@@ -359,9 +358,9 @@ nsXHTMLContentSerializer::AfterElementStart(nsIContent* aContent,
          child;
          child = child->GetNextSibling()) {
       if (child->IsHTMLElement(nsGkAtoms::meta) &&
-          child->HasAttr(kNameSpaceID_None, nsGkAtoms::content)) {
+          child->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::content)) {
         nsAutoString header;
-        child->GetAttr(kNameSpaceID_None, nsGkAtoms::httpEquiv, header);
+        child->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::httpEquiv, header);
 
         if (header.LowerCaseEqualsLiteral("content-type")) {
           hasMeta = true;

@@ -20,6 +20,7 @@ include protocol PHeapSnapshotTempFileHelper;
 include protocol PProcessHangMonitor;
 include protocol PImageBridge;
 include protocol PIPCBlobInputStream;
+include protocol PLoginReputation;
 include protocol PMedia;
 include protocol PNecko;
 include protocol PStreamFilter;
@@ -59,6 +60,7 @@ include ServiceWorkerConfiguration;
 include GraphicsMessages;
 include MemoryReportTypes;
 include ClientIPCTypes;
+include HangTypes;
 
 // Workaround to prevent error if PContentChild.cpp & PContentBridgeParent.cpp
 // are put into different UnifiedProtocolsXX.cpp files.
@@ -97,7 +99,6 @@ using mozilla::Telemetry::DynamicScalarDefinition from "mozilla/TelemetryComms.h
 using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::DiscardedData from "mozilla/TelemetryComms.h";
 using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
-using mozilla::HangDetails from "mozilla/HangDetails.h";
 
 union ChromeRegistryItem
 {
@@ -316,6 +317,7 @@ nested(upto inside_cpow) sync protocol PContent
     manages PURLClassifier;
     manages PURLClassifierLocal;
     manages PScriptCache;
+    manages PLoginReputation;
 
 both:
     // Depending on exactly how the new browser is being created, it might be
@@ -424,7 +426,7 @@ child:
     async SetConnectivity(bool connectivity);
     async SetCaptivePortalState(int32_t aState);
 
-    async NotifyVisited(URIParams uri);
+    async NotifyVisited(URIParams[] uri);
 
     async PreferenceUpdate(Pref pref);
     async VarUpdate(GfxVarUpdate var);
@@ -453,6 +455,7 @@ child:
 
     async GarbageCollect();
     async CycleCollect();
+    async UnlinkGhosts();
 
     /**
      * Start accessibility engine in content process.
@@ -741,7 +744,7 @@ parent:
                      OriginAttributes aOriginAttributes)
         returns (bool isSecureURI);
 
-    async AccumulateMixedContentHSTS(URIParams aURI, bool aActive, bool aHasHSTSPriming,
+    async AccumulateMixedContentHSTS(URIParams aURI, bool aActive,
                                      OriginAttributes aOriginAttributes);
 
     nested(inside_cpow) async PHal();
@@ -762,12 +765,16 @@ parent:
 
     async PPresentation();
 
+    async CreateAudioIPCConnection() returns (FileDescriptor fd);
+
     sync PURLClassifier(Principal principal, bool useTrackingProtection)
         returns (bool success);
     sync ClassifyLocal(URIParams uri, nsCString tables)
         returns (nsresult rv, nsCString[] results);
     // The async version of ClassifyLocal.
     async PURLClassifierLocal(URIParams uri, nsCString tables);
+
+    async PLoginReputation(URIParams formURI);
 
     // Services remoting
 
@@ -840,6 +847,12 @@ parent:
     // Returns true if data of one of the specified types is on the clipboard.
     sync ClipboardHasType(nsCString[] aTypes, int32_t aWhichClipboard)
         returns (bool hasType);
+
+    // 'Play', 'Beep' and 'PlayEventSound' are the only nsISound methods used in
+    // the content process.
+    async PlaySound(URIParams aURL) compress;
+    async Beep() compress;
+    async PlayEventSound(uint32_t aEventId) compress;
 
     sync GetSystemColors(uint32_t colorsCount)
         returns (uint32_t[] colors);

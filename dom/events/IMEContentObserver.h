@@ -4,8 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef mozilla_IMEContentObserver_h_
-#define mozilla_IMEContentObserver_h_
+#ifndef mozilla_IMEContentObserver_h
+#define mozilla_IMEContentObserver_h
 
 #include "mozilla/Attributes.h"
 #include "mozilla/EditorBase.h"
@@ -13,7 +13,6 @@
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsIDocShell.h" // XXX Why does only this need to be included here?
-#include "nsIEditorObserver.h"
 #include "nsIReflowObserver.h"
 #include "nsISelectionListener.h"
 #include "nsIScrollObserver.h"
@@ -40,11 +39,8 @@ class IMEContentObserver final : public nsISelectionListener
                                , public nsIReflowObserver
                                , public nsIScrollObserver
                                , public nsSupportsWeakReference
-                               , public nsIEditorObserver
 {
 public:
-  typedef ContentEventHandler::NodePosition NodePosition;
-  typedef ContentEventHandler::NodePositionBefore NodePositionBefore;
   typedef widget::IMENotification::SelectionChangeData SelectionChangeData;
   typedef widget::IMENotification::TextChangeData TextChangeData;
   typedef widget::IMENotification::TextChangeDataBase TextChangeDataBase;
@@ -56,7 +52,6 @@ public:
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_CLASS_AMBIGUOUS(IMEContentObserver,
                                            nsISelectionListener)
-  NS_DECL_NSIEDITOROBSERVER
   NS_DECL_NSISELECTIONLISTENER
   NS_DECL_NSIMUTATIONOBSERVER_CHARACTERDATAWILLCHANGE
   NS_DECL_NSIMUTATIONOBSERVER_CHARACTERDATACHANGED
@@ -166,6 +161,16 @@ public:
    */
   void MaybeNotifyCompositionEventHandled();
 
+  /**
+   * Following methods are called when the editor:
+   *   - an edit action handled.
+   *   - before handling an edit action.
+   *   - canceled handling an edit action after calling BeforeEditAction().
+   */
+  void OnEditActionHandled();
+  void BeforeEditAction();
+  void CancelEditAction();
+
 private:
   ~IMEContentObserver() {}
 
@@ -187,12 +192,6 @@ private:
   bool IsReflowLocked() const;
   bool IsSafeToNotifyIME() const;
   bool IsEditorComposing() const;
-
-  /**
-   * nsINode::GetChildAt() is slow.  So, this avoids to use it if it's
-   * first child or last child of aParent.
-   */
-  static nsIContent* GetChildNode(nsINode* aParent, int32_t aOffset);
 
   // Following methods are called by DocumentObserver when
   // beginning to update the contents and ending updating the contents.
@@ -535,4 +534,4 @@ private:
 
 } // namespace mozilla
 
-#endif // mozilla_IMEContentObserver_h_
+#endif // mozilla_IMEContentObserver_h

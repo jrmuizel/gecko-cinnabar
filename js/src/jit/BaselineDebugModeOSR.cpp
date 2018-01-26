@@ -16,6 +16,7 @@
 #include "jit/JitFrames-inl.h"
 #include "jit/MacroAssembler-inl.h"
 #include "vm/Stack-inl.h"
+#include "vm/TypeInference-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -673,6 +674,7 @@ RecompileBaselineScriptForDebugMode(JSContext* cx, JSScript* script,
     JitSpew(JitSpew_BaselineDebugModeOSR, "Recompiling (%s:%zu) for %s",
             script->filename(), script->lineno(), observing ? "DEBUGGING" : "NORMAL EXECUTION");
 
+    AutoKeepTypeScripts keepTypes(cx);
     script->setBaselineScript(cx->runtime(), nullptr);
 
     MethodStatus status = BaselineCompile(cx, script, /* forceDebugMode = */ observing);
@@ -1184,7 +1186,7 @@ JitRuntime::generateBaselineDebugModeOSRHandler(JSContext* cx, uint32_t* noFrame
 
 /* static */ void
 DebugModeOSRVolatileJitFrameIter::forwardLiveIterators(const CooperatingContext& cx,
-                                                         uint8_t* oldAddr, uint8_t* newAddr)
+                                                       uint8_t* oldAddr, uint8_t* newAddr)
 {
     DebugModeOSRVolatileJitFrameIter* iter;
     for (iter = cx.context()->liveVolatileJitFrameIter_; iter; iter = iter->prev)

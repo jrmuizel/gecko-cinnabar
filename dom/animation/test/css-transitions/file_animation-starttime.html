@@ -68,7 +68,7 @@ const END_POSITION = 200;
 // terms used in the Web Animations specification for specific phases of an
 // animation. The terms can be found here:
 //
-//   https://w3c.github.io/web-animations/#animation-effect-phases-and-states
+//   https://drafts.csswg.org/web-animations/#animation-effect-phases-and-states
 //
 // Note the distinction between the "animation start time" which occurs before
 // the start delay and the start of the active interval which occurs after it.
@@ -154,7 +154,7 @@ test(function(t)
   var animation = div.getAnimations()[0];
   var currentTime = animation.timeline.currentTime;
   animation.startTime = currentTime;
-  assert_approx_equals(animation.startTime, currentTime, 0.0001, // rounding error
+  assert_times_equal(animation.startTime, currentTime,
     'Check setting of startTime actually works');
 }, 'Sanity test to check round-tripping assigning to new animation\'s ' +
    'startTime');

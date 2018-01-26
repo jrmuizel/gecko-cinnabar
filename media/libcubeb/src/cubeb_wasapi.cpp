@@ -499,9 +499,21 @@ mask_to_channel_layout(WAVEFORMATEX const * fmt)
     case MASK_3F1: return CUBEB_LAYOUT_3F1;
     case MASK_3F1_LFE: return CUBEB_LAYOUT_3F1_LFE;
     case MASK_2F2: return CUBEB_LAYOUT_2F2;
+    // Special case similar to MASK_2F2 but with rear left and right
+    // speakers instead of side left and right. This mapping is a band-aid as
+    // cubeb does not current have an enum to differentiate this and MASK_2F2,
+    // but is preferred to returning an undefined layout.
+    // See: https://github.com/kinetiknz/cubeb/issues/178 and https://bugzilla.mozilla.org/show_bug.cgi?id=1325023
+    case KSAUDIO_SPEAKER_QUAD: return CUBEB_LAYOUT_2F2;
     case MASK_2F2_LFE: return CUBEB_LAYOUT_2F2_LFE;
     case MASK_3F2: return CUBEB_LAYOUT_3F2;
     case MASK_3F2_LFE: return CUBEB_LAYOUT_3F2_LFE;
+    // Special case similar to MASK_3F2_LFE but with rear left and right
+    // speakers instead of side left and right. his mapping is a band-aid as
+    // cubeb does not current have an enum to differentiate this and MASK_3F2_LFE,
+    // but is preferred to returning an undefined layout.
+    // See: https://github.com/kinetiknz/cubeb/issues/178 and https://bugzilla.mozilla.org/show_bug.cgi?id=1325023
+    case KSAUDIO_SPEAKER_5POINT1: return CUBEB_LAYOUT_3F2_LFE;
     case MASK_3F3R_LFE: return CUBEB_LAYOUT_3F3R_LFE;
     case MASK_3F4_LFE: return CUBEB_LAYOUT_3F4_LFE;
     default: return CUBEB_LAYOUT_UNDEFINED;
@@ -550,6 +562,7 @@ long
 refill(cubeb_stream * stm, void * input_buffer, long input_frames_count,
        void * output_buffer, long output_frames_needed)
 {
+  XASSERT(!stm->draining);
   /* If we need to upmix after resampling, resample into the mix buffer to
      avoid a copy. */
   void * dest = nullptr;
@@ -756,6 +769,10 @@ refill_callback_duplex(cubeb_stream * stm)
     return true;
   }
 
+  /* Wait for draining is not important on duplex. */
+  if (stm->draining) {
+    return false;
+  }
 
   ALOGV("Duplex callback: input frames: %Iu, output frames: %Iu",
         input_frames, output_frames);
@@ -1125,7 +1142,7 @@ stream_set_volume(cubeb_stream * stm, float volume)
 
   uint32_t channels;
   HRESULT hr = stm->audio_stream_volume->GetChannelCount(&channels);
-  if (hr != S_OK) {
+  if (FAILED(hr)) {
     LOG("could not get the channel count: %lx", hr);
     return CUBEB_ERROR;
   }
@@ -1141,7 +1158,7 @@ stream_set_volume(cubeb_stream * stm, float volume)
   }
 
   hr = stm->audio_stream_volume->SetAllVolumes(channels,  volumes);
-  if (hr != S_OK) {
+  if (FAILED(hr)) {
     LOG("could not set the channels volume: %lx", hr);
     return CUBEB_ERROR;
   }
@@ -1173,7 +1190,7 @@ int wasapi_init(cubeb ** context, char const * context_name)
 
   ctx->ops = &wasapi_ops;
   if (cubeb_strings_init(&ctx->device_ids) != CUBEB_OK) {
-    free(ctx);
+    delete ctx;
     return CUBEB_ERROR;
   }
 
@@ -1572,7 +1589,7 @@ int setup_wasapi_stream_one_side(cubeb_stream * stm,
   mix_params->channels = mix_format->nChannels;
   mix_params->layout = mask_to_channel_layout(mix_format.get());
   if (mix_params->layout == CUBEB_LAYOUT_UNDEFINED) {
-    LOG("Output using undefined layout!\n");
+    LOG("Stream using undefined layout! Any mixing may be unpredictable!\n");
   } else if (mix_format->nChannels != CUBEB_CHANNEL_LAYOUT_MAPS[mix_params->layout].channels) {
     // The CUBEB_CHANNEL_LAYOUT_MAPS[mix_params->layout].channels may be
     // different from the mix_params->channels. 6 channel ouput with stereo
@@ -1654,6 +1671,10 @@ int setup_wasapi_stream(cubeb_stream * stm)
                                       stm->input_available_event,
                                       stm->capture_client,
                                       &stm->input_mix_params);
+    if (rv != CUBEB_OK) {
+      LOG("Failure to open the input side.");
+      return rv;
+    }
 
     // We initializing an input stream, buffer ahead two buffers worth of silence.
     // This delays the input side slightly, but allow to not glitch when no input
@@ -1663,16 +1684,11 @@ int setup_wasapi_stream(cubeb_stream * stm)
 #if !defined(DEBUG)
     const int silent_buffer_count = 2;
 #else
-    const int silent_buffer_count = 4;
+    const int silent_buffer_count = 6;
 #endif
     stm->linear_input_buffer->push_silence(stm->input_buffer_frame_count *
-                                          stm->input_stream_params.channels *
-                                          silent_buffer_count);
-
-    if (rv != CUBEB_OK) {
-      LOG("Failure to open the input side.");
-      return rv;
-    }
+                                           stm->input_stream_params.channels *
+                                           silent_buffer_count);
   }
 
   if (has_output(stm)) {

@@ -33,7 +33,7 @@ struct RetainedDisplayListBuilder {
    * Also clears the frame properties set by RetainedDisplayListBuilder for all
    * the frames in the modified frame lists.
    */
-  void ClearModifiedFrameProps();
+  void ClearFramesWithProps();
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(Cached, RetainedDisplayListBuilder)
 
@@ -48,7 +48,7 @@ private:
   bool ComputeRebuildRegion(nsTArray<nsIFrame*>& aModifiedFrames,
                             nsRect* aOutDirty,
                             AnimatedGeometryRoot** aOutModifiedAGR,
-                            nsTArray<nsIFrame*>* aOutFramesWithProps);
+                            nsTArray<nsIFrame*>& aOutFramesWithProps);
 
   void IncrementSubDocPresShellPaintCount(nsDisplayItem* aItem);
 

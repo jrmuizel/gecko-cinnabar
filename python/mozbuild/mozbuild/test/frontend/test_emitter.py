@@ -15,7 +15,6 @@ from mozbuild.frontend.context import (
 )
 from mozbuild.frontend.data import (
     AndroidResDirs,
-    BrandingFiles,
     ChromeManifestEntry,
     ComputedFlags,
     ConfigFileSubstitution,
@@ -29,13 +28,12 @@ from mozbuild.frontend.data import (
     HostRustLibrary,
     HostRustProgram,
     HostSources,
-    IPDLFile,
+    IPDLCollection,
     JARManifest,
     LinkageMultipleRustLibrariesError,
     LocalInclude,
     LocalizedFiles,
     LocalizedPreprocessedFiles,
-    PreprocessedIPDLFile,
     Program,
     RustLibrary,
     RustProgram,
@@ -114,7 +112,7 @@ class TestEmitterBasic(unittest.TestCase):
             self.assertTrue(os.path.isabs(o.context_main_path))
             self.assertEqual(len(o.context_all_paths), 1)
 
-        reldirs = [o.relativedir for o in objs]
+        reldirs = [o.relsrcdir for o in objs]
         self.assertEqual(reldirs, ['', 'foo', 'foo/biz', 'bar'])
 
         dirs = [[d.full_path for d in o.dirs] for o in objs]
@@ -134,11 +132,11 @@ class TestEmitterBasic(unittest.TestCase):
         for o in objs:
             self.assertIsInstance(o, DirectoryTraversal)
 
-        reldirs = set([o.relativedir for o in objs])
+        reldirs = set([o.relsrcdir for o in objs])
         self.assertEqual(reldirs, set(['', 'regular']))
 
         for o in objs:
-            reldir = o.relativedir
+            reldir = o.relsrcdir
 
             if reldir == '':
                 self.assertEqual([d.full_path for d in o.dirs], [
@@ -152,11 +150,11 @@ class TestEmitterBasic(unittest.TestCase):
         for o in objs:
             self.assertIsInstance(o, DirectoryTraversal)
 
-        reldirs = set([o.relativedir for o in objs])
+        reldirs = set([o.relsrcdir for o in objs])
         self.assertEqual(reldirs, set(['', 'regular', 'test']))
 
         for o in objs:
-            reldir = o.relativedir
+            reldir = o.relsrcdir
 
             if reldir == '':
                 self.assertEqual([d.full_path for d in o.dirs], [
@@ -640,22 +638,6 @@ class TestEmitterBasic(unittest.TestCase):
             'Cannot install files to the root of TEST_HARNESS_FILES'):
             self.read_topsrcdir(reader)
 
-    def test_branding_files(self):
-        reader = self.reader('branding-files')
-        objs = self.read_topsrcdir(reader)
-
-        self.assertEqual(len(objs), 1)
-        self.assertIsInstance(objs[0], BrandingFiles)
-
-        files = objs[0].files
-
-        self.assertEqual(files._strings, ['bar.ico', 'baz.png', 'foo.xpm'])
-
-        self.assertIn('icons', files._children)
-        icons = files._children['icons']
-
-        self.assertEqual(icons._strings, ['quux.icns'])
-
     def test_program(self):
         reader = self.reader('program')
         objs = self.read_topsrcdir(reader)
@@ -940,32 +922,50 @@ class TestEmitterBasic(unittest.TestCase):
             self.read_topsrcdir(reader)
 
     def test_ipdl_sources(self):
-        reader = self.reader('ipdl_sources')
+        reader = self.reader('ipdl_sources',
+                             extra_substs={'IPDL_ROOT': mozpath.abspath('/path/to/topobjdir')})
         objs = self.read_topsrcdir(reader)
+        ipdl_collection = objs[0]
+        self.assertIsInstance(ipdl_collection, IPDLCollection)
 
-        ipdls = []
-        nonstatic_ipdls = []
-        for o in objs:
-            if isinstance(o, IPDLFile):
-                ipdls.append('%s/%s' % (o.relativedir, o.basename))
-            elif isinstance(o, PreprocessedIPDLFile):
-                nonstatic_ipdls.append('%s/%s' % (o.relativedir, o.basename))
-
-        expected = [
+        ipdls = set(mozpath.relpath(p, ipdl_collection.topsrcdir)
+                    for p in ipdl_collection.all_regular_sources())
+        expected = set([
             'bar/bar.ipdl',
             'bar/bar2.ipdlh',
             'foo/foo.ipdl',
             'foo/foo2.ipdlh',
-        ]
+        ])
 
         self.assertEqual(ipdls, expected)
 
-        expected = [
+        pp_ipdls = set(mozpath.relpath(p, ipdl_collection.topsrcdir)
+                       for p in ipdl_collection.all_preprocessed_sources())
+        expected = set([
             'bar/bar1.ipdl',
             'foo/foo1.ipdl',
-        ]
+        ])
+        self.assertEqual(pp_ipdls, expected)
 
-        self.assertEqual(nonstatic_ipdls, expected)
+        generated_sources = set(ipdl_collection.all_generated_sources())
+        expected = set([
+            'bar.cpp',
+            'barChild.cpp',
+            'barParent.cpp',
+            'bar1.cpp',
+            'bar1Child.cpp',
+            'bar1Parent.cpp',
+            'bar2.cpp',
+            'foo.cpp',
+            'fooChild.cpp',
+            'fooParent.cpp',
+            'foo1.cpp',
+            'foo1Child.cpp',
+            'foo1Parent.cpp',
+            'foo2.cpp'
+        ])
+        self.assertEqual(generated_sources, expected)
+
 
     def test_local_includes(self):
         """Test that LOCAL_INCLUDES is emitted correctly."""
@@ -988,6 +988,22 @@ class TestEmitterBasic(unittest.TestCase):
         ]
 
         self.assertEqual(local_includes, expected)
+
+    def test_local_includes_invalid(self):
+        """Test that invalid LOCAL_INCLUDES are properly detected."""
+        reader = self.reader('local_includes-invalid/srcdir')
+
+        with self.assertRaisesRegexp(
+                SandboxValidationError,
+                'Path specified in LOCAL_INCLUDES is not allowed:'):
+            objs = self.read_topsrcdir(reader)
+
+        reader = self.reader('local_includes-invalid/objdir')
+
+        with self.assertRaisesRegexp(
+                SandboxValidationError,
+                'Path specified in LOCAL_INCLUDES is not allowed:'):
+            objs = self.read_topsrcdir(reader)
 
     def test_generated_includes(self):
         """Test that GENERATED_INCLUDES is emitted correctly."""

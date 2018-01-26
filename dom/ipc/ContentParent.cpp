@@ -79,6 +79,7 @@
 #include "mozilla/layers/LayerTreeOwnerTracker.h"
 #include "mozilla/layout/RenderFrameParent.h"
 #include "mozilla/loader/ScriptCacheActors.h"
+#include "mozilla/LoginReputationIPC.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/media/MediaParent.h"
 #include "mozilla/Move.h"
@@ -99,6 +100,7 @@
 #include "mozilla/WebBrowserPersistDocumentParent.h"
 #include "mozilla/widget/ScreenManager.h"
 #include "mozilla/Unused.h"
+#include "mozilla/HangDetails.h"
 #include "nsAnonymousTemporaryFile.h"
 #include "nsAppRunner.h"
 #include "nsCDefaultURIFixup.h"
@@ -141,10 +143,12 @@
 #include "nsIScriptError.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsISiteSecurityService.h"
+#include "nsISound.h"
 #include "nsISpellChecker.h"
 #include "nsISupportsPrimitives.h"
 #include "nsITimer.h"
 #include "nsIURIFixup.h"
+#include "nsIURL.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIXULWindow.h"
 #include "nsIDOMChromeWindow.h"
@@ -211,9 +215,7 @@
 # include "gfxAndroidPlatform.h"
 #endif
 
-#ifdef MOZ_PERMISSIONS
 # include "nsPermissionManager.h"
-#endif
 
 #ifdef MOZ_WIDGET_ANDROID
 # include "AndroidBridge.h"
@@ -295,6 +297,10 @@ struct nsIConsoleService::COMTypeInfo<nsConsoleService, void> {
 const nsIID nsIConsoleService::COMTypeInfo<nsConsoleService, void>::kIID = NS_ICONSOLESERVICE_IID;
 
 namespace mozilla {
+namespace CubebUtils {
+  extern FileDescriptor CreateAudioIPCConnection();
+}
+
 namespace dom {
 
 #define NS_IPC_IOSERVICE_SET_OFFLINE_TOPIC "ipc:network:set-offline"
@@ -575,6 +581,7 @@ static const char* sObserverTopics[] = {
   "child-gc-request",
   "child-cc-request",
   "child-mmu-request",
+  "child-ghost-request",
   "last-pb-context-exited",
   "file-watcher-update",
 #ifdef ACCESSIBILITY
@@ -1133,9 +1140,9 @@ ContentParent::CreateBrowser(const TabContext& aContext,
 
   bool isPreloadBrowser = false;
   nsAutoString isPreloadBrowserStr;
-  if (aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::isPreloadBrowser,
+  if (aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::preloadedState,
                              isPreloadBrowserStr)) {
-    isPreloadBrowser = isPreloadBrowserStr.EqualsLiteral("true");
+    isPreloadBrowser = isPreloadBrowserStr.EqualsLiteral("preloaded");
   }
 
   RefPtr<nsIContentParent> constructorSender;
@@ -1758,7 +1765,8 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   mIdleListeners.Clear();
 
   MessageLoop::current()->
-    PostTask(NewRunnableFunction(DelayedDeleteSubprocess, mSubprocess));
+    PostTask(NewRunnableFunction("DelayedDeleteSubprocessRunnable",
+                                 DelayedDeleteSubprocess, mSubprocess));
   mSubprocess = nullptr;
 
   // IPDL rules require actors to live on past ActorDestroy, but it
@@ -1980,6 +1988,11 @@ bool
 ContentParent::LaunchSubprocess(ProcessPriority aInitialPriority /* = PROCESS_PRIORITY_FOREGROUND */)
 {
   AUTO_PROFILER_LABEL("ContentParent::LaunchSubprocess", OTHER);
+
+  if (!ContentProcessManager::GetSingleton()) {
+    // Shutdown has begun, we shouldn't spawn any more child processes.
+    return false;
+  }
 
   std::vector<std::string> extraArgs;
   extraArgs.push_back("-childID");
@@ -2666,6 +2679,54 @@ ContentParent::RecvClipboardHasType(nsTArray<nsCString>&& aTypes,
 }
 
 mozilla::ipc::IPCResult
+ContentParent::RecvPlaySound(const URIParams& aURI)
+{
+  nsCOMPtr<nsIURI> soundURI = DeserializeURI(aURI);
+  bool isChrome = false;
+  // If the check here fails, it can only mean that this message was spoofed.
+  if (!soundURI || NS_FAILED(soundURI->SchemeIs("chrome", &isChrome)) || !isChrome) {
+    KillHard("PlaySound only accepts a valid chrome URI.");
+    return IPC_OK();
+  }
+  nsCOMPtr<nsIURL> soundURL(do_QueryInterface(soundURI));
+  if (!soundURL) {
+    return IPC_OK();
+  }
+
+  nsresult rv;
+  nsCOMPtr<nsISound> sound(do_GetService(NS_SOUND_CID, &rv));
+  NS_ENSURE_SUCCESS(rv, IPC_OK());
+
+  sound->Play(soundURL);
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvBeep()
+{
+  nsresult rv;
+  nsCOMPtr<nsISound> sound(do_GetService(NS_SOUND_CID, &rv));
+  NS_ENSURE_SUCCESS(rv, IPC_OK());
+
+  sound->Beep();
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvPlayEventSound(const uint32_t& aEventId)
+{
+  nsresult rv;
+  nsCOMPtr<nsISound> sound(do_GetService(NS_SOUND_CID, &rv));
+  NS_ENSURE_SUCCESS(rv, IPC_OK());
+
+  sound->PlayEventSound(aEventId);
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
 ContentParent::RecvGetSystemColors(const uint32_t& colorsCount,
                                    InfallibleTArray<uint32_t>* colors)
 {
@@ -2843,6 +2904,9 @@ ContentParent::Observe(nsISupports* aSubject,
   }
   else if (!strcmp(aTopic, "child-mmu-request")){
     Unused << SendMinimizeMemoryUsage();
+  }
+  else if (!strcmp(aTopic, "child-ghost-request")){
+    Unused << SendUnlinkGhosts();
   }
   else if (!strcmp(aTopic, "last-pb-context-exited")) {
     Unused << SendLastPrivateDocShellDestroyed();
@@ -3115,7 +3179,8 @@ ContentParent::OnGenerateMinidumpComplete(bool aDumpResult)
 
   // EnsureProcessTerminated has responsibilty for closing otherProcessHandle.
   XRE_GetIOMessageLoop()->PostTask(
-    NewRunnableFunction(&ProcessWatcher::EnsureProcessTerminated,
+    NewRunnableFunction("EnsureProcessTerminatedRunnable",
+                        &ProcessWatcher::EnsureProcessTerminated,
                         otherProcessHandle, /*force=*/true));
 }
 
@@ -3561,14 +3626,14 @@ ContentParent::RecvIsSecureURI(const uint32_t& aType,
 }
 
 mozilla::ipc::IPCResult
-ContentParent::RecvAccumulateMixedContentHSTS(const URIParams& aURI, const bool& aActive, const bool& aHSTSPriming,
+ContentParent::RecvAccumulateMixedContentHSTS(const URIParams& aURI, const bool& aActive,
                                               const OriginAttributes& aOriginAttributes)
 {
   nsCOMPtr<nsIURI> ourURI = DeserializeURI(aURI);
   if (!ourURI) {
     return IPC_FAIL_NO_REASON(this);
   }
-  nsMixedContentBlocker::AccumulateMixedContentHSTS(ourURI, aActive, aHSTSPriming, aOriginAttributes);
+  nsMixedContentBlocker::AccumulateMixedContentHSTS(ourURI, aActive, aOriginAttributes);
   return IPC_OK();
 }
 
@@ -4155,6 +4220,17 @@ ContentParent::RecvRequestAnonymousTemporaryFile(const uint64_t& aID)
   }
 
   rv = NS_OK;
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvCreateAudioIPCConnection(CreateAudioIPCConnectionResolver&& aResolver)
+{
+  FileDescriptor fd = CubebUtils::CreateAudioIPCConnection();
+  if (!fd.IsValid()) {
+    return IPC_FAIL(this, "CubebUtils::CreateAudioIPCConnection failed");
+  }
+  aResolver(Move(fd));
   return IPC_OK();
 }
 
@@ -5168,7 +5244,6 @@ ContentParent::AboutToLoadHttpFtpWyciwygDocumentForChild(nsIChannel* aChannel)
 nsresult
 ContentParent::TransmitPermissionsForPrincipal(nsIPrincipal* aPrincipal)
 {
-#ifdef MOZ_PERMISSIONS
   // Create the key, and send it down to the content process.
   nsTArray<nsCString> keys =
     nsPermissionManager::GetAllKeysForPrincipal(aPrincipal);
@@ -5176,7 +5251,6 @@ ContentParent::TransmitPermissionsForPrincipal(nsIPrincipal* aPrincipal)
   for (auto& key : keys) {
     EnsurePermissionsByKey(key);
   }
-#endif
 
   return NS_OK;
 }
@@ -5184,7 +5258,6 @@ ContentParent::TransmitPermissionsForPrincipal(nsIPrincipal* aPrincipal)
 void
 ContentParent::EnsurePermissionsByKey(const nsCString& aKey)
 {
-#ifdef MOZ_PERMISSIONS
   // NOTE: Make sure to initialize the permission manager before updating the
   // mActivePermissionKeys list. If the permission manager is being initialized
   // by this call to GetPermissionManager, and we've added the key to
@@ -5205,7 +5278,6 @@ ContentParent::EnsurePermissionsByKey(const nsCString& aKey)
   }
 
   Unused << SendSetPermissionsWithKey(aKey, perms);
-#endif
 }
 
 bool
@@ -5346,6 +5418,42 @@ ContentParent::DeallocPURLClassifierLocalParent(PURLClassifierLocalParent* aActo
 
   RefPtr<URLClassifierLocalParent> actor =
     dont_AddRef(static_cast<URLClassifierLocalParent*>(aActor));
+  return true;
+}
+
+PLoginReputationParent*
+ContentParent::AllocPLoginReputationParent(const URIParams& aURI)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  RefPtr<LoginReputationParent> actor = new LoginReputationParent();
+  return actor.forget().take();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvPLoginReputationConstructor(PLoginReputationParent* aActor,
+                                               const URIParams& aURI)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aActor);
+
+  nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
+  if (!uri) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+
+  auto* actor = static_cast<LoginReputationParent*>(aActor);
+  return actor->QueryReputation(uri);
+}
+
+bool
+ContentParent::DeallocPLoginReputationParent(PLoginReputationParent* aActor)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aActor);
+
+  RefPtr<LoginReputationParent> actor =
+    dont_AddRef(static_cast<LoginReputationParent*>(aActor));
   return true;
 }
 

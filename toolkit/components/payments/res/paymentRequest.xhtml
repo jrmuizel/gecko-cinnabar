@@ -8,6 +8,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'"/>
   <title></title>
   <link rel="stylesheet" href="paymentRequest.css"/>
+  <link rel="stylesheet" href="components/rich-select.css"/>
+  <link rel="stylesheet" href="components/address-option.css"/>
   <script src="vendor/custom-elements.min.js"></script>
 
   <script src="PaymentsStore.js"></script>
@@ -17,6 +19,10 @@
 
   <script src="components/currency-amount.js"></script>
 
+  <script src="components/rich-select.js"></script>
+  <script src="components/rich-option.js"></script>
+  <script src="components/address-option.js"></script>
+  <script src="containers/address-picker.js"></script>
   <script src="containers/payment-dialog.js"></script>
 
   <script src="paymentRequest.js"></script>
@@ -28,14 +34,19 @@
       <h2 class="label"></h2>
       <currency-amount></currency-amount>
     </div>
+
+    <div><label>Shipping Address</label></div>
+    <address-picker>
+    </address-picker>
+
     <div id="controls-container">
-      <button id="cancel">Cancel payment</button>
+      <button id="cancel">Cancel</button>
+      <button id="pay">Pay</button>
     </div>
   </template>
 </head>
 <body>
   <iframe id="debugging-console" hidden="hidden" src="debugging.html"></iframe>
-
   <payment-dialog></payment-dialog>
 </body>
 </html>

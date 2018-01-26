@@ -1,3 +1,5 @@
+/* -*- Mode: indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set sts=2 sw=2 et tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,7 +24,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.jsm",
   DeferredTask: "resource://gre/modules/DeferredTask.jsm",
-  E10SUtils: "resource:///modules/E10SUtils.jsm",
+  E10SUtils: "resource://gre/modules/E10SUtils.jsm",
   ExtensionData: "resource://gre/modules/Extension.jsm",
   MessageChannel: "resource://gre/modules/MessageChannel.jsm",
   OS: "resource://gre/modules/osfile.jsm",
@@ -75,21 +77,12 @@ const global = this;
 // This object loads the ext-*.js scripts that define the extension API.
 let apiManager = new class extends SchemaAPIManager {
   constructor() {
-    super("main");
+    super("main", Schemas);
     this.initialized = null;
 
     /* eslint-disable mozilla/balanced-listeners */
     this.on("startup", (e, extension) => {
-      let promises = [];
-      for (let apiName of this.eventModules.get("startup")) {
-        promises.push(this.asyncGetAPI(apiName, extension).then(api => {
-          if (api) {
-            api.onStartup();
-          }
-        }));
-      }
-
-      return Promise.all(promises);
+      return extension.apiManager.onStartup(extension);
     });
 
     this.on("update", async (e, {id, resourceURI}) => {
@@ -142,6 +135,7 @@ let apiManager = new class extends SchemaAPIManager {
 
       this.initModuleData(await modulesPromise);
 
+      this.initGlobal();
       for (let script of scripts) {
         script.executeInGlobal(this.global);
       }
@@ -473,7 +467,7 @@ class ProxyContextParent extends BaseContext {
 
 defineLazyGetter(ProxyContextParent.prototype, "apiCan", function() {
   let obj = {};
-  let can = new CanOfAPIs(this, apiManager, obj);
+  let can = new CanOfAPIs(this, this.extension.apiManager, obj);
   GlobalManager.injectInObject(this, false, obj);
   return can;
 });
@@ -820,7 +814,8 @@ ParentAPIManager = {
         {
           lowPriority,
           recipient: {childId},
-        }).then(result => {
+        })
+        .then(result => {
           return result && result.deserialize(global);
         });
     }
@@ -1239,9 +1234,6 @@ function watchExtensionProxyContextLoad({extension, viewType, browser}, onExtens
   };
 }
 
-// Used to cache the list of WebExtensionManifest properties defined in the BASE_SCHEMA.
-let gBaseManifestProperties = null;
-
 // Manages icon details for toolbar buttons in the |pageAction| and
 // |browserAction| APIs.
 let IconDetails = {
@@ -1260,7 +1252,7 @@ let IconDetails = {
   // If no context is specified, instead of throwing an error, this
   // function simply logs a warning message.
   normalize(details, extension, context = null) {
-    if (!details.imageData && details.path) {
+    if (!details.imageData && details.path != null) {
       // Pick a cache key for the icon paths. If the path is a string,
       // use it directly. Otherwise, stringify the path object.
       let key = details.path;
@@ -1301,20 +1293,22 @@ let IconDetails = {
 
       let baseURI = context ? context.uri : extension.baseURI;
 
-      if (path) {
+      if (path != null) {
         if (typeof path != "object") {
           path = {"19": path};
         }
 
         for (let size of Object.keys(path)) {
-          let url = baseURI.resolve(path[size]);
+          let url = path[size];
+          if (url) {
+            url = baseURI.resolve(path[size]);
 
-          // The Chrome documentation specifies these parameters as
-          // relative paths. We currently accept absolute URLs as well,
-          // which means we need to check that the extension is allowed
-          // to load them. This will throw an error if it's not allowed.
-          this._checkURL(url, extension);
-
+            // The Chrome documentation specifies these parameters as
+            // relative paths. We currently accept absolute URLs as well,
+            // which means we need to check that the extension is allowed
+            // to load them. This will throw an error if it's not allowed.
+            this._checkURL(url, extension);
+          }
           result[size] = url;
         }
       }
@@ -1376,7 +1370,7 @@ let IconDetails = {
     }
 
     if (bestSize) {
-      return {size: bestSize, icon: icons[bestSize]};
+      return {size: bestSize, icon: icons[bestSize] || DEFAULT};
     }
 
     return {size, icon: DEFAULT};
@@ -1587,20 +1581,6 @@ var ExtensionParent = {
   StartupCache,
   WebExtensionPolicy,
   apiManager,
-  get baseManifestProperties() {
-    if (gBaseManifestProperties) {
-      return gBaseManifestProperties;
-    }
-
-    let types = Schemas.schemaJSON.get(BASE_SCHEMA).deserialize({})[0].types;
-    let manifest = types.find(type => type.id === "WebExtensionManifest");
-    if (!manifest) {
-      throw new Error("Unable to find base manifest properties");
-    }
-
-    gBaseManifestProperties = Object.getOwnPropertyNames(manifest.properties);
-    return gBaseManifestProperties;
-  },
   promiseExtensionViewLoaded,
   watchExtensionProxyContextLoad,
   DebugUtils,

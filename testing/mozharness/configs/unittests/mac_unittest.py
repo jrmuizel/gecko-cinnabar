@@ -10,7 +10,6 @@ ADJUST_MOUSE_AND_SCREEN = False
 config = {
     "buildbot_json_path": "buildprops.json",
     "exes": {
-        'virtualenv': '/tools/virtualenv/bin/virtualenv',
         'tooltool.py': "/tools/tooltool.py",
     },
     "find_links": [
@@ -177,7 +176,8 @@ config = {
             'tests': ["tests/reftest/tests/testing/crashtest/crashtests.list"]
         },
         "jsreftest": {
-            'options':["--extra-profile-file=tests/jsreftest/tests/user.js"],
+            'options':["--extra-profile-file=tests/jsreftest/tests/user.js",
+                       "--suite=jstestbrowser"],
             'tests': ["tests/jsreftest/tests/jstests.list"]
         },
         "reftest": {

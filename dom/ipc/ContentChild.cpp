@@ -26,6 +26,7 @@
 #include "mozilla/dom/ClientOpenWindowOpActors.h"
 #include "mozilla/dom/ContentBridgeChild.h"
 #include "mozilla/dom/ContentBridgeParent.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/VideoDecoderManagerChild.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/DataTransfer.h"
@@ -35,6 +36,7 @@
 #include "mozilla/dom/GetFilesHelper.h"
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/MemoryReportRequest.h"
+#include "mozilla/dom/PLoginReputationChild.h"
 #include "mozilla/dom/ProcessGlobal.h"
 #include "mozilla/dom/PushNotifier.h"
 #include "mozilla/dom/TabGroup.h"
@@ -71,6 +73,7 @@
 #include "mozilla/media/MediaChild.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/WebBrowserPersistDocumentChild.h"
+#include "mozilla/HangDetails.h"
 #include "imgLoader.h"
 #include "GMPServiceChild.h"
 #include "NullPrincipal.h"
@@ -90,9 +93,6 @@
 #elif defined(XP_LINUX)
 #include "mozilla/Sandbox.h"
 #include "mozilla/SandboxInfo.h"
-
-// Remove this include with Bug 1104619
-#include "CubebUtils.h"
 #elif defined(XP_MACOSX)
 #include "mozilla/Sandbox.h"
 #endif
@@ -138,6 +138,7 @@
 #ifdef NS_PRINTING
 #include "nsPrintingProxy.h"
 #endif
+#include "nsWindowMemoryReporter.h"
 
 #include "IHistory.h"
 #include "nsNetUtil.h"
@@ -159,10 +160,8 @@
 #include "signaling/src/peerconnection/WebrtcGlobalChild.h"
 #endif
 
-#ifdef MOZ_PERMISSIONS
 #include "nsPermission.h"
 #include "nsPermissionManager.h"
-#endif
 
 #include "PermissionMessageUtils.h"
 
@@ -476,7 +475,7 @@ class PendingInputEventHangAnnotator final
   : public HangMonitor::Annotator
 {
 public:
-  virtual void AnnotateHang(HangMonitor::HangAnnotations& aAnnotations)
+  virtual void AnnotateHang(HangMonitor::HangAnnotations& aAnnotations) override
   {
     int32_t pending = ContentChild::GetSingleton()->GetPendingInputEvents();
     if (pending > 0) {
@@ -1232,6 +1231,8 @@ ContentChild::InitXPCOM(const XPCOMInitData& aXPCOMInit,
 
   // Set the dynamic scalar definitions for this process.
   TelemetryIPC::AddDynamicScalarDefinitions(aXPCOMInit.dynamicScalarDefs());
+
+  DOMPrefs::Initialize();
 }
 
 mozilla::ipc::IPCResult
@@ -1665,46 +1666,14 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
 #if defined(MOZ_CONTENT_SANDBOX)
   bool sandboxEnabled = true;
 #if defined(XP_LINUX)
-  // Otherwise, sandboxing is best-effort.
+  // On Linux, we have to support systems that can't use any sandboxing.
   if (!SandboxInfo::Get().CanSandboxContent()) {
-       sandboxEnabled = false;
-   } else {
-       // This triggers the initialization of cubeb, which needs to happen
-       // before seccomp is enabled (Bug 1259508). It also increases the startup
-       // time of the content process, because cubeb is usually initialized
-       // when it is actually needed. This call here is no longer required
-       // once Bug 1104619 (remoting audio) is resolved.
-       Unused << CubebUtils::GetCubebContext();
+    sandboxEnabled = false;
   }
 
   if (sandboxEnabled) {
-    int brokerFd = -1;
-    if (aBroker.type() == MaybeFileDesc::TFileDescriptor) {
-      auto fd = aBroker.get_FileDescriptor().ClonePlatformHandle();
-      brokerFd = fd.release();
-      // brokerFd < 0 means to allow direct filesystem access, so
-      // make absolutely sure that doesn't happen if the parent
-      // didn't intend it.
-      MOZ_RELEASE_ASSERT(brokerFd >= 0);
-    }
-    // Allow user overrides of seccomp-bpf syscall filtering
-    std::vector<int> syscallWhitelist;
-    nsAutoCString extraSyscalls;
-    nsresult rv =
-      Preferences::GetCString("security.sandbox.content.syscall_whitelist",
-                              extraSyscalls);
-    if (NS_SUCCEEDED(rv)) {
-      for (const nsACString& callNrString : extraSyscalls.Split(',')) {
-        int callNr = PromiseFlatCString(callNrString).ToInteger(&rv);
-        if (NS_SUCCEEDED(rv)) {
-          syscallWhitelist.push_back(callNr);
-        }
-      }
-    }
-    ContentChild* cc = ContentChild::GetSingleton();
-    bool isFileProcess = cc->GetRemoteType().EqualsLiteral(FILE_REMOTE_TYPE);
-    sandboxEnabled = SetContentProcessSandbox(brokerFd, isFileProcess,
-                                              syscallWhitelist);
+    sandboxEnabled =
+      SetContentProcessSandbox(ContentProcessSandboxParams::ForThisProcess(aBroker));
   }
 #elif defined(XP_WIN)
   mozilla::SandboxTarget::Instance()->StartSandbox();
@@ -1819,9 +1788,13 @@ ContentChild::RecvPBrowserConstructor(PBrowserChild* aActor,
   if (!hasRunOnce) {
     hasRunOnce = true;
     MOZ_ASSERT(!gFirstIdleTask);
-    RefPtr<CancelableRunnable> firstIdleTask = NewCancelableRunnableFunction(FirstIdle);
+    RefPtr<CancelableRunnable> firstIdleTask = NewCancelableRunnableFunction("FirstIdleRunnable",
+                                                                             FirstIdle);
     gFirstIdleTask = firstIdleTask;
-    NS_IdleDispatchToCurrentThread(firstIdleTask.forget());
+    if (NS_FAILED(NS_IdleDispatchToCurrentThread(firstIdleTask.forget()))) {
+      gFirstIdleTask = nullptr;
+      hasRunOnce = false;
+    }
   }
 
   return nsIContentChild::RecvPBrowserConstructor(aActor,
@@ -2327,6 +2300,7 @@ ContentChild::ActorDestroy(ActorDestroyReason why)
 #else
   if (gFirstIdleTask) {
     gFirstIdleTask->Cancel();
+    gFirstIdleTask = nullptr;
   }
 
   nsHostObjectProtocolHandler::RemoveDataEntries();
@@ -2452,15 +2426,17 @@ ContentChild::RecvNotifyAlertsObserver(const nsCString& aType, const nsString& a
 // NOTE: This method is being run in the SystemGroup, and thus cannot directly
 // touch pages. See GetSpecificMessageEventTarget.
 mozilla::ipc::IPCResult
-ContentChild::RecvNotifyVisited(const URIParams& aURI)
+ContentChild::RecvNotifyVisited(nsTArray<URIParams>&& aURIs)
 {
-  nsCOMPtr<nsIURI> newURI = DeserializeURI(aURI);
-  if (!newURI) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  nsCOMPtr<IHistory> history = services::GetHistoryService();
-  if (history) {
-    history->NotifyVisited(newURI);
+  for (const URIParams& uri : aURIs) {
+    nsCOMPtr<nsIURI> newURI = DeserializeURI(uri);
+    if (!newURI) {
+      return IPC_FAIL_NO_REASON(this);
+    }
+    nsCOMPtr<IHistory> history = services::GetHistoryService();
+    if (history) {
+      history->NotifyVisited(newURI);
+    }
   }
   return IPC_OK();
 }
@@ -2553,7 +2529,6 @@ ContentChild::RecvUpdateRequestedLocales(nsTArray<nsCString>&& aRequestedLocales
 mozilla::ipc::IPCResult
 ContentChild::RecvAddPermission(const IPC::Permission& permission)
 {
-#if MOZ_PERMISSIONS
   nsCOMPtr<nsIPermissionManager> permissionManagerIface =
     services::GetPermissionManager();
   nsPermissionManager* permissionManager =
@@ -2586,7 +2561,6 @@ ContentChild::RecvAddPermission(const IPC::Permission& permission)
                                  modificationTime,
                                  nsPermissionManager::eNotify,
                                  nsPermissionManager::eNoDBOperation);
-#endif
 
   return IPC_OK();
 }
@@ -2654,6 +2628,15 @@ ContentChild::RecvCycleCollect()
     obs->NotifyObservers(nullptr, "child-cc-request", nullptr);
   }
   nsJSContext::CycleCollectNow();
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentChild::RecvUnlinkGhosts()
+{
+#ifdef DEBUG
+  nsWindowMemoryReporter::UnlinkGhostWindows();
+#endif
   return IPC_OK();
 }
 
@@ -3428,6 +3411,20 @@ ContentChild::AllocPURLClassifierLocalChild(const URIParams& aUri,
 
 bool
 ContentChild::DeallocPURLClassifierLocalChild(PURLClassifierLocalChild* aActor)
+{
+  MOZ_ASSERT(aActor);
+  delete aActor;
+  return true;
+}
+
+PLoginReputationChild*
+ContentChild::AllocPLoginReputationChild(const URIParams& aUri)
+{
+  return new PLoginReputationChild();
+}
+
+bool
+ContentChild::DeallocPLoginReputationChild(PLoginReputationChild* aActor)
 {
   MOZ_ASSERT(aActor);
   delete aActor;

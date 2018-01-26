@@ -204,13 +204,30 @@ HTMLSelectElement::GetAutocompleteInfo(AutocompleteInfo& aInfo)
 }
 
 nsresult
-HTMLSelectElement::InsertChildAt(nsIContent* aKid,
-                                 uint32_t aIndex,
-                                 bool aNotify)
+HTMLSelectElement::InsertChildBefore(nsIContent* aKid,
+                                     nsIContent* aBeforeThis,
+                                     bool aNotify)
+{
+  int32_t index = aBeforeThis ? ComputeIndexOf(aBeforeThis) : GetChildCount();
+  SafeOptionListMutation safeMutation(this, this, aKid, index, aNotify);
+  nsresult rv =
+    nsGenericHTMLFormElementWithState::InsertChildBefore(aKid, aBeforeThis,
+                                                         aNotify);
+  if (NS_FAILED(rv)) {
+    safeMutation.MutationFailed();
+  }
+  return rv;
+}
+
+nsresult
+HTMLSelectElement::InsertChildAt_Deprecated(nsIContent* aKid,
+                                            uint32_t aIndex,
+                                            bool aNotify)
 {
   SafeOptionListMutation safeMutation(this, this, aKid, aIndex, aNotify);
-  nsresult rv = nsGenericHTMLFormElementWithState::InsertChildAt(aKid, aIndex,
-                                                                 aNotify);
+  nsresult rv =
+    nsGenericHTMLFormElementWithState::InsertChildAt_Deprecated(aKid, aIndex,
+                                                                aNotify);
   if (NS_FAILED(rv)) {
     safeMutation.MutationFailed();
   }
@@ -218,13 +235,19 @@ HTMLSelectElement::InsertChildAt(nsIContent* aKid,
 }
 
 void
-HTMLSelectElement::RemoveChildAt(uint32_t aIndex, bool aNotify)
+HTMLSelectElement::RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify)
 {
   SafeOptionListMutation safeMutation(this, this, nullptr, aIndex, aNotify);
-  nsGenericHTMLFormElementWithState::RemoveChildAt(aIndex, aNotify);
+  nsGenericHTMLFormElementWithState::RemoveChildAt_Deprecated(aIndex, aNotify);
 }
 
-
+void
+HTMLSelectElement::RemoveChildNode(nsIContent* aKid, bool aNotify)
+{
+  SafeOptionListMutation safeMutation(this, this, nullptr,
+                                      ComputeIndexOf(aKid), aNotify);
+  nsGenericHTMLFormElementWithState::RemoveChildNode(aKid, aNotify);
+}
 
 void
 HTMLSelectElement::InsertOptionsIntoList(nsIContent* aOptions,
@@ -420,7 +443,7 @@ HTMLSelectElement::WillAddOptions(nsIContent* aOptions,
       // If the content insert is somewhere in the middle of the container, then
       // we want to get the option currently at the index and insert in front of
       // that.
-      nsIContent* currentKid = aParent->GetChildAt(aContentIndex);
+      nsIContent* currentKid = aParent->GetChildAt_Deprecated(aContentIndex);
       NS_ASSERTION(currentKid, "Child not found!");
       if (currentKid) {
         ind = GetOptionIndexAt(currentKid);
@@ -445,7 +468,7 @@ HTMLSelectElement::WillRemoveOptions(nsIContent* aParent,
   int32_t level = this == aParent ? 0 : 1;
 
   // Get the index where the options will be removed
-  nsIContent* currentKid = aParent->GetChildAt(aContentIndex);
+  nsIContent* currentKid = aParent->GetChildAt_Deprecated(aContentIndex);
   if (currentKid) {
     int32_t ind;
     if (!mNonOptionChildren) {
@@ -494,7 +517,7 @@ HTMLSelectElement::GetOptionIndexAfter(nsIContent* aOptions)
   nsCOMPtr<nsIContent> parent = aOptions->GetParent();
 
   if (parent) {
-    int32_t index = parent->IndexOf(aOptions);
+    int32_t index = parent->ComputeIndexOf(aOptions);
     int32_t count = parent->GetChildCount();
 
     retval = GetFirstChildOptionIndex(parent, index+1, count);
@@ -530,7 +553,7 @@ HTMLSelectElement::GetFirstChildOptionIndex(nsIContent* aOptions,
   int32_t retval = -1;
 
   for (int32_t i = aStartIndex; i < aEndIndex; ++i) {
-    retval = GetFirstOptionIndex(aOptions->GetChildAt(i));
+    retval = GetFirstOptionIndex(aOptions->GetChildAt_Deprecated(i));
     if (retval != -1) {
       break;
     }

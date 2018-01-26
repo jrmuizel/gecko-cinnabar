@@ -9,7 +9,7 @@ this.EXPORTED_SYMBOLS = ["PermissionPrompts"];
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource:///modules/E10SUtils.jsm");
+Cu.import("resource://gre/modules/E10SUtils.jsm");
 Cu.import("resource://testing-common/ContentTask.jsm");
 Cu.import("resource://testing-common/BrowserTestUtils.jsm");
 
@@ -112,8 +112,10 @@ this.PermissionPrompts = {
 
         // We want to skip the progress-notification, so we wait for
         // the install-confirmation screen to be "not hidden" = shown.
-        await BrowserTestUtils.waitForCondition(() => !notification.hasAttribute("hidden"),
-                                                "addon install confirmation did not show", 200);
+        return BrowserTestUtils.waitForCondition(() => !notification.hasAttribute("hidden"),
+                                                "addon install confirmation did not show", 200).catch((msg) => {
+                                                  return Promise.resolve({todo: msg});
+                                                });
       },
     },
   },

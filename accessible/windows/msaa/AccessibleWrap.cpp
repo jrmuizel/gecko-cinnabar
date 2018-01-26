@@ -496,7 +496,7 @@ AccessibleWrap::get_accRole(
   if (content->IsElement()) {
     nsAutoString roleString;
     // Try the role attribute.
-    content->GetAttr(kNameSpaceID_None, nsGkAtoms::role, roleString);
+    content->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::role, roleString);
 
     if (roleString.IsEmpty()) {
       // No role attribute (or it is an empty string).
@@ -902,10 +902,10 @@ AccessibleWrap::accLocation(
 
   nsIntRect rect = Bounds();
 
-  *pxLeft = rect.x;
-  *pyTop = rect.y;
-  *pcxWidth = rect.width;
-  *pcyHeight = rect.height;
+  *pxLeft = rect.X();
+  *pyTop = rect.Y();
+  *pcxWidth = rect.Width();
+  *pcyHeight = rect.Height();
   return S_OK;
 }
 
@@ -1436,6 +1436,19 @@ GetProxiedAccessibleInSubtree(const DocAccessibleParent* aDoc,
   return disp.forget();
 }
 
+bool
+AccessibleWrap::IsRootForHWND()
+{
+  if (IsRoot()) {
+    return true;
+  }
+  HWND thisHwnd = GetHWNDFor(this);
+  AccessibleWrap* parent = static_cast<AccessibleWrap*>(Parent());
+  MOZ_ASSERT(parent);
+  HWND parentHwnd = GetHWNDFor(parent);
+  return thisHwnd != parentHwnd;
+}
+
 already_AddRefed<IAccessible>
 AccessibleWrap::GetIAccessibleFor(const VARIANT& aVarChild, bool* aIsDefunct)
 {
@@ -1484,8 +1497,9 @@ AccessibleWrap::GetIAccessibleFor(const VARIANT& aVarChild, bool* aIsDefunct)
   // Child indices (> 0) are handled below for both local and remote children.
   if (XRE_IsParentProcess() && !IsProxy() &&
       varChild.lVal < 0 && !sIDGen.IsChromeID(varChild.lVal)) {
-    if (!IsRoot()) {
-      // Bug 1422201: accChild with a remote id is only valid on the root accessible.
+    if (!IsRootForHWND()) {
+      // Bug 1422201, 1424657: accChild with a remote id is only valid on the
+      // root accessible for an HWND.
       // Otherwise, we might return remote accessibles which aren't descendants
       // of this accessible. This would confuse clients which use accChild to
       // check whether something is a descendant of a document.
@@ -1647,12 +1661,12 @@ AccessibleWrap::UpdateSystemCaretFor(HWND aCaretWnd,
 
   // Create invisible bitmap for caret, otherwise its appearance interferes
   // with Gecko caret
-  nsAutoBitmap caretBitMap(CreateBitmap(1, aCaretRect.height, 1, 1, nullptr));
-  if (::CreateCaret(aCaretWnd, caretBitMap, 1, aCaretRect.height)) {  // Also destroys the last caret
+  nsAutoBitmap caretBitMap(CreateBitmap(1, aCaretRect.Height(), 1, 1, nullptr));
+  if (::CreateCaret(aCaretWnd, caretBitMap, 1, aCaretRect.Height())) {  // Also destroys the last caret
     ::ShowCaret(aCaretWnd);
     RECT windowRect;
     ::GetWindowRect(aCaretWnd, &windowRect);
-    ::SetCaretPos(aCaretRect.x - windowRect.left, aCaretRect.y - windowRect.top);
+    ::SetCaretPos(aCaretRect.X() - windowRect.left, aCaretRect.Y() - windowRect.top);
   }
 }
 

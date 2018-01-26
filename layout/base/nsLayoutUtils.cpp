@@ -88,7 +88,6 @@
 #include "nsDataHashtable.h"
 #include "nsTableWrapperFrame.h"
 #include "nsTextFrame.h"
-#include "nsFontFaceList.h"
 #include "nsFontInflationData.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGUtils.h"
@@ -133,6 +132,7 @@
 #include "nsDeckFrame.h"
 #include "nsIEffectiveTLDService.h" // for IsInStyloBlocklist
 #include "mozilla/StylePrefs.h"
+#include "mozilla/dom/InspectorFontFace.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
@@ -160,11 +160,11 @@ using namespace mozilla::layers;
 using namespace mozilla::layout;
 using namespace mozilla::gfx;
 
-#define GRID_ENABLED_PREF_NAME "layout.css.grid.enabled"
 #define WEBKIT_PREFIXES_ENABLED_PREF_NAME "layout.css.prefixes.webkit"
 #define TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME "layout.css.text-align-unsafe-value.enabled"
 #define FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME "layout.css.float-logical-values.enabled"
 #define INTERCHARACTER_RUBY_ENABLED_PREF_NAME "layout.css.ruby.intercharacter.enabled"
+#define CONTENT_SELECT_ENABLED_PREF_NAME "dom.select_popup_in_content.enabled"
 
 // The time in number of frames that we estimate for a refresh driver
 // to be quiescent
@@ -212,51 +212,6 @@ static ContentMap& GetContentMap() {
     sContentMap = new ContentMap();
   }
   return *sContentMap;
-}
-
-// When the pref "layout.css.grid.enabled" changes, this function is invoked
-// to let us update kDisplayKTable, to selectively disable or restore the
-// entries for "grid" and "inline-grid" in that table.
-static void
-GridEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
-{
-  MOZ_ASSERT(strncmp(aPrefName, GRID_ENABLED_PREF_NAME,
-                     ArrayLength(GRID_ENABLED_PREF_NAME)) == 0,
-             "We only registered this callback for a single pref, so it "
-             "should only be called for that pref");
-
-  static int32_t sIndexOfGridInDisplayTable;
-  static int32_t sIndexOfInlineGridInDisplayTable;
-  static bool sAreGridKeywordIndicesInitialized; // initialized to false
-
-  bool isGridEnabled =
-    Preferences::GetBool(GRID_ENABLED_PREF_NAME, false);
-  if (!sAreGridKeywordIndicesInitialized) {
-    // First run: find the position of "grid" and "inline-grid" in
-    // kDisplayKTable.
-    sIndexOfGridInDisplayTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_grid,
-                                     nsCSSProps::kDisplayKTable);
-    MOZ_ASSERT(sIndexOfGridInDisplayTable >= 0,
-               "Couldn't find grid in kDisplayKTable");
-    sIndexOfInlineGridInDisplayTable =
-      nsCSSProps::FindIndexOfKeyword(eCSSKeyword_inline_grid,
-                                     nsCSSProps::kDisplayKTable);
-    MOZ_ASSERT(sIndexOfInlineGridInDisplayTable >= 0,
-               "Couldn't find inline-grid in kDisplayKTable");
-    sAreGridKeywordIndicesInitialized = true;
-  }
-
-  // OK -- now, stomp on or restore the "grid" entries in kDisplayKTable,
-  // depending on whether the grid pref is enabled vs. disabled.
-  if (sIndexOfGridInDisplayTable >= 0) {
-    nsCSSProps::kDisplayKTable[sIndexOfGridInDisplayTable].mKeyword =
-      isGridEnabled ? eCSSKeyword_grid : eCSSKeyword_UNKNOWN;
-  }
-  if (sIndexOfInlineGridInDisplayTable >= 0) {
-    nsCSSProps::kDisplayKTable[sIndexOfInlineGridInDisplayTable].mKeyword =
-      isGridEnabled ? eCSSKeyword_inline_grid : eCSSKeyword_UNKNOWN;
-  }
 }
 
 // When the pref "layout.css.prefixes.webkit" changes, this function is invoked
@@ -682,6 +637,16 @@ nsLayoutUtils::IsAnimationLoggingEnabled()
 }
 
 bool
+nsLayoutUtils::AreRetainedDisplayListsEnabled()
+{
+  if (XRE_IsContentProcess()) {
+    return gfxPrefs::LayoutRetainDisplayList();
+  } else {
+    return gfxPrefs::LayoutRetainDisplayListChrome();
+  }
+}
+
+bool
 nsLayoutUtils::GPUImageScalingEnabled()
 {
   static bool sGPUImageScalingEnabled;
@@ -774,6 +739,22 @@ nsLayoutUtils::IsInterCharacterRubyEnabled()
   }
 
   return sInterCharacterRubyEnabled;
+}
+
+bool
+nsLayoutUtils::IsContentSelectEnabled()
+{
+  static bool sContentSelectEnabled;
+  static bool sContentSelectEnabledPrefCached = false;
+
+  if (!sContentSelectEnabledPrefCached) {
+    sContentSelectEnabledPrefCached = true;
+    Preferences::AddBoolVarCache(&sContentSelectEnabled,
+                                 CONTENT_SELECT_ENABLED_PREF_NAME,
+                                 false);
+  }
+
+  return sContentSelectEnabled;
 }
 
 void
@@ -1135,7 +1116,10 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
       int32_t budget = maxHeightScreenPx - screenRect.height;
       // Scale the margins down to fit into the budget if necessary, maintaining
       // their relative ratio.
-      float scale = std::min(1.0f, float(budget) / margins.TopBottom());
+      float scale = 1.0f;
+      if (float(budget) < margins.TopBottom()) {
+        scale = float(budget) / margins.TopBottom();
+      }
       float top = margins.top * scale;
       float bottom = margins.bottom * scale;
       screenRect.y -= top;
@@ -1143,7 +1127,10 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
     }
     if (screenRect.width < maxWidthScreenPx) {
       int32_t budget = maxWidthScreenPx - screenRect.width;
-      float scale = std::min(1.0f, float(budget) / margins.LeftRight());
+      float scale = 1.0f;
+      if (float(budget) < margins.LeftRight()) {
+        scale = float(budget) / margins.LeftRight();
+      }
       float left = margins.left * scale;
       float right = margins.right * scale;
       screenRect.x -= left;
@@ -1403,7 +1390,7 @@ nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
     // rect properties on so we can find the frame later to remove the properties.
     frame->SchedulePaint();
 
-    if (!gfxPrefs::LayoutRetainDisplayList()) {
+    if (!nsLayoutUtils::AreRetainedDisplayListsEnabled()) {
       return;
     }
 
@@ -1422,6 +1409,19 @@ nsLayoutUtils::InvalidateForDisplayPortChange(nsIContent* aContent,
       rect = new nsRect();
       frame->SetProperty(nsDisplayListBuilder::DisplayListBuildingDisplayPortRect(), rect);
       frame->SetHasOverrideDirtyRegion(true);
+
+      nsIFrame* rootFrame = frame->PresContext()->PresShell()->GetRootFrame();
+      MOZ_ASSERT(rootFrame);
+
+      nsTArray<nsIFrame*>* frames =
+        rootFrame->GetProperty(nsIFrame::OverriddenDirtyRectFrameList());
+
+      if (!frames) {
+        frames = new nsTArray<nsIFrame*>();
+        rootFrame->SetProperty(nsIFrame::OverriddenDirtyRectFrameList(), frames);
+      }
+
+      frames->AppendElement(frame);
     }
 
     if (aHadDisplayPort) {
@@ -1738,7 +1738,7 @@ nsLayoutUtils::GetFloatFromPlaceholder(nsIFrame* aFrame) {
   if (aFrame->GetStateBits() & PLACEHOLDER_FOR_FLOAT) {
     nsIFrame *outOfFlowFrame =
       nsPlaceholderFrame::GetRealFrameForPlaceholder(aFrame);
-    NS_ASSERTION(outOfFlowFrame->IsFloating(),
+    NS_ASSERTION(outOfFlowFrame && outOfFlowFrame->IsFloating(),
                  "How did that happen?");
     return outOfFlowFrame;
   }
@@ -1875,8 +1875,8 @@ nsLayoutUtils::DoCompareTreePosition(nsIContent* aContent1,
     return 0;
   }
 
-  int32_t index1 = parent->IndexOf(content1Ancestor);
-  int32_t index2 = parent->IndexOf(content2Ancestor);
+  int32_t index1 = parent->ComputeIndexOf(content1Ancestor);
+  int32_t index2 = parent->ComputeIndexOf(content2Ancestor);
   if (index1 < 0 || index2 < 0) {
     // one of them must be anonymous; we can't determine the order
     return 0;
@@ -2720,7 +2720,9 @@ nsLayoutUtils::GetTransformToAncestor(nsIFrame *aFrame,
   ctm = aFrame->GetTransformMatrix(aAncestor, &parent, aFlags);
   while (parent && parent != aAncestor &&
     (!(aFlags & nsIFrame::STOP_AT_STACKING_CONTEXT_AND_DISPLAY_PORT) ||
-      (!parent->IsStackingContext() && !FrameHasDisplayPort(parent)))) {
+      (!parent->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW) &&
+       !parent->IsStackingContext() &&
+       !FrameHasDisplayPort(parent)))) {
     if (!parent->Extend3DContext()) {
       ctm.ProjectTo2D();
     }
@@ -3666,9 +3668,10 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   const bool isForPainting = (aFlags & PaintFrameFlags::PAINT_WIDGET_LAYERS) &&
     aBuilderMode == nsDisplayListBuilderMode::PAINTING;
 
-  // Retained display list builder is currently only used for content processes.
-  const bool retainingEnabled = isForPainting &&
-    gfxPrefs::LayoutRetainDisplayList() && XRE_IsContentProcess();
+  // Only allow retaining for painting when preffed on, and for root frames (since
+  // the modified frame tracking is per-root-frame).
+  const bool retainingEnabled =
+    isForPainting && AreRetainedDisplayListsEnabled() && !aFrame->GetParent();
 
   RetainedDisplayListBuilder* retainedBuilder =
     GetOrCreateRetainedDisplayListBuilder(aFrame, retainingEnabled, buildCaret);
@@ -3696,7 +3699,7 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
   // Retained builder exists, but display list retaining is disabled.
   if (!useRetainedBuilder && retainedBuilder) {
     // Clear the modified frames lists and frame properties.
-    retainedBuilder->ClearModifiedFrameProps();
+    retainedBuilder->ClearFramesWithProps();
 
     // Clear the retained display list.
     retainedBuilder->List()->DeleteAll(retainedBuilder->Builder());
@@ -3885,6 +3888,10 @@ nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
             ss << "\n\n*** after-merge retained display items:";
             afterMergeChecker.Dump(ss);
             fprintf(stderr, "%s\n\n", ss.str().c_str());
+#ifdef DEBUG_FRAME_DUMP
+            fprintf(stderr, "*** Frame tree:\n");
+            aFrame->DumpFrameTree();
+#endif
           }
         }
       }
@@ -6930,7 +6937,7 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
                                                   svgViewportSize.height));
 }
 
-static DrawResult
+static ImgDrawResult
 DrawImageInternal(gfxContext&            aContext,
                   nsPresContext*         aPresContext,
                   imgIContainer*         aImage,
@@ -6944,7 +6951,7 @@ DrawImageInternal(gfxContext&            aContext,
                   ExtendMode             aExtendMode = ExtendMode::CLAMP,
                   float                  aOpacity = 1.0)
 {
-  DrawResult result = DrawResult::SUCCESS;
+  ImgDrawResult result = ImgDrawResult::SUCCESS;
 
   aImageFlags |= imgIContainer::FLAG_ASYNC_NOTIFY;
 
@@ -6989,7 +6996,7 @@ DrawImageInternal(gfxContext&            aContext,
   return result;
 }
 
-/* static */ DrawResult
+/* static */ ImgDrawResult
 nsLayoutUtils::DrawSingleUnscaledImage(gfxContext&          aContext,
                                        nsPresContext*       aPresContext,
                                        imgIContainer*       aImage,
@@ -7004,7 +7011,7 @@ nsLayoutUtils::DrawSingleUnscaledImage(gfxContext&          aContext,
   aImage->GetHeight(&imageSize.height);
   if (imageSize.width < 1 || imageSize.height < 1) {
     NS_WARNING("Image width or height is non-positive");
-    return DrawResult::TEMPORARY_ERROR;
+    return ImgDrawResult::TEMPORARY_ERROR;
   }
 
   nsSize size(CSSPixel::ToAppUnits(imageSize));
@@ -7027,7 +7034,7 @@ nsLayoutUtils::DrawSingleUnscaledImage(gfxContext&          aContext,
                            /* no SVGImageContext */ Nothing(), aImageFlags);
 }
 
-/* static */ DrawResult
+/* static */ ImgDrawResult
 nsLayoutUtils::DrawSingleImage(gfxContext&            aContext,
                                nsPresContext*         aPresContext,
                                imgIContainer*         aImage,
@@ -7044,7 +7051,7 @@ nsLayoutUtils::DrawSingleImage(gfxContext&            aContext,
   if (pixelImageSize.width < 1 || pixelImageSize.height < 1) {
     NS_ASSERTION(pixelImageSize.width >= 0 && pixelImageSize.height >= 0,
                  "Image width or height is negative");
-    return DrawResult::SUCCESS;  // no point in drawing a zero size image
+    return ImgDrawResult::SUCCESS;  // no point in drawing a zero size image
   }
 
   nsSize imageSize(CSSPixel::ToAppUnits(pixelImageSize));
@@ -7234,7 +7241,7 @@ nsLayoutUtils::GetBackgroundFirstTilePos(const nsPoint& aDest,
          aDest;
 }
 
-/* static */ DrawResult
+/* static */ ImgDrawResult
 nsLayoutUtils::DrawBackgroundImage(gfxContext&         aContext,
                                    nsIFrame*           aForFrame,
                                    nsPresContext*      aPresContext,
@@ -7267,20 +7274,20 @@ nsLayoutUtils::DrawBackgroundImage(gfxContext&         aContext,
   for (int32_t i = firstTilePos.x; i < aFill.XMost(); i += aRepeatSize.width) {
     for (int32_t j = firstTilePos.y; j < aFill.YMost(); j += aRepeatSize.height) {
       nsRect dest(i, j, aDest.width, aDest.height);
-      DrawResult result = DrawImageInternal(aContext, aPresContext, aImage, aSamplingFilter,
+      ImgDrawResult result = DrawImageInternal(aContext, aPresContext, aImage, aSamplingFilter,
                                             dest, dest, aAnchor, aDirty, svgContext,
                                             aImageFlags, ExtendMode::CLAMP,
                                             aOpacity);
-      if (result != DrawResult::SUCCESS) {
+      if (result != ImgDrawResult::SUCCESS) {
         return result;
       }
     }
   }
 
-  return DrawResult::SUCCESS;
+  return ImgDrawResult::SUCCESS;
 }
 
-/* static */ DrawResult
+/* static */ ImgDrawResult
 nsLayoutUtils::DrawImage(gfxContext&         aContext,
                          nsStyleContext*     aStyleContext,
                          nsPresContext*      aPresContext,
@@ -7442,7 +7449,8 @@ static bool IsPopupFrame(nsIFrame* aFrame)
 {
   // aFrame is a popup it's the list control frame dropdown for a combobox.
   LayoutFrameType frameType = aFrame->Type();
-  if (frameType == LayoutFrameType::ListControl) {
+  if (!nsLayoutUtils::IsContentSelectEnabled() &&
+      frameType == LayoutFrameType::ListControl) {
     nsListControlFrame* lcf = static_cast<nsListControlFrame*>(aFrame);
     return lcf->IsInDropDownMode();
   }
@@ -7930,7 +7938,7 @@ nsLayoutUtils::SurfaceFromElement(dom::Element* aElement,
 }
 
 /* static */
-nsIContent*
+Element*
 nsLayoutUtils::GetEditableRootContentByContentEditable(nsIDocument* aDocument)
 {
   // If the document is in designMode we should return nullptr.
@@ -7956,7 +7964,7 @@ nsLayoutUtils::GetEditableRootContentByContentEditable(nsIDocument* aDocument)
   // Note that the body element could be <frameset> element.
   nsCOMPtr<nsIDOMHTMLElement> body;
   nsresult rv = domHTMLDoc->GetBody(getter_AddRefs(body));
-  nsCOMPtr<nsIContent> content = do_QueryInterface(body);
+  nsCOMPtr<Element> content = do_QueryInterface(body);
   if (NS_SUCCEEDED(rv) && content && content->IsEditable()) {
     return content;
   }
@@ -8024,14 +8032,15 @@ nsLayoutUtils::AssertTreeOnlyEmptyNextInFlows(nsIFrame *aSubtreeRoot)
 #endif
 
 static void
-GetFontFacesForFramesInner(nsIFrame* aFrame, nsFontFaceList* aFontFaceList)
+GetFontFacesForFramesInner(nsIFrame* aFrame,
+                           nsLayoutUtils::UsedFontFaceTable& aFontFaces)
 {
   NS_PRECONDITION(aFrame, "NULL frame pointer");
 
   if (aFrame->IsTextFrame()) {
     if (!aFrame->GetPrevContinuation()) {
       nsLayoutUtils::GetFontFacesForText(aFrame, 0, INT32_MAX, true,
-                                         aFontFaceList);
+                                         aFontFaces);
     }
     return;
   }
@@ -8043,32 +8052,56 @@ GetFontFacesForFramesInner(nsIFrame* aFrame, nsFontFaceList* aFontFaceList)
     for (nsFrameList::Enumerator e(children); !e.AtEnd(); e.Next()) {
       nsIFrame* child = e.get();
       child = nsPlaceholderFrame::GetRealFrameFor(child);
-      GetFontFacesForFramesInner(child, aFontFaceList);
+      GetFontFacesForFramesInner(child, aFontFaces);
     }
   }
 }
 
-/* static */
-nsresult
+/* static */ nsresult
 nsLayoutUtils::GetFontFacesForFrames(nsIFrame* aFrame,
-                                     nsFontFaceList* aFontFaceList)
+                                     UsedFontFaceTable& aFontFaces)
 {
   NS_PRECONDITION(aFrame, "NULL frame pointer");
 
   while (aFrame) {
-    GetFontFacesForFramesInner(aFrame, aFontFaceList);
+    GetFontFacesForFramesInner(aFrame, aFontFaces);
     aFrame = GetNextContinuationOrIBSplitSibling(aFrame);
   }
 
   return NS_OK;
 }
 
-/* static */
-nsresult
+static void
+AddFontsFromTextRun(gfxTextRun* aTextRun,
+                    uint32_t aOffset,
+                    uint32_t aLength,
+                    nsLayoutUtils::UsedFontFaceTable& aFontFaces)
+{
+  gfxTextRun::Range range(aOffset, aOffset + aLength);
+  gfxTextRun::GlyphRunIterator iter(aTextRun, range);
+  while (iter.NextRun()) {
+    gfxFontEntry *fe = iter.GetGlyphRun()->mFont->GetFontEntry();
+    // if we have already listed this face, just make sure the match type is
+    // recorded
+    InspectorFontFace* existingFace = aFontFaces.Get(fe);
+    if (existingFace) {
+      existingFace->AddMatchType(iter.GetGlyphRun()->mMatchType);
+    } else {
+      // A new font entry we haven't seen before
+      InspectorFontFace* ff =
+        new InspectorFontFace(fe, aTextRun->GetFontGroup(),
+                              iter.GetGlyphRun()->mMatchType);
+      aFontFaces.Put(fe, ff);
+    }
+  }
+}
+
+/* static */ nsresult
 nsLayoutUtils::GetFontFacesForText(nsIFrame* aFrame,
-                                   int32_t aStartOffset, int32_t aEndOffset,
+                                   int32_t aStartOffset,
+                                   int32_t aEndOffset,
                                    bool aFollowContinuations,
-                                   nsFontFaceList* aFontFaceList)
+                                   UsedFontFaceTable& aFontFaces)
 {
   NS_PRECONDITION(aFrame, "NULL frame pointer");
 
@@ -8103,7 +8136,7 @@ nsLayoutUtils::GetFontFacesForText(nsIFrame* aFrame,
 
     uint32_t skipStart = iter.ConvertOriginalToSkipped(fstart);
     uint32_t skipEnd = iter.ConvertOriginalToSkipped(fend);
-    aFontFaceList->AddFontsFromTextRun(textRun, skipStart, skipEnd - skipStart);
+    AddFontsFromTextRun(textRun, skipStart, skipEnd - skipStart, aFontFaces);
     curr = next;
   } while (aFollowContinuations && curr);
 
@@ -8155,8 +8188,6 @@ struct PrefCallbacks
   PrefChangedFunc func;
 };
 static const PrefCallbacks kPrefCallbacks[] = {
-  { GRID_ENABLED_PREF_NAME,
-    GridEnabledPrefChangeCallback },
   { WEBKIT_PREFIXES_ENABLED_PREF_NAME,
     WebkitPrefixEnabledPrefChangeCallback },
   { TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME,

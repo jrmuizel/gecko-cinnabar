@@ -450,6 +450,17 @@ LIRGenerator::visitComputeThis(MComputeThis* ins)
 }
 
 void
+LIRGenerator::visitImplicitThis(MImplicitThis* ins)
+{
+    MDefinition* env = ins->envChain();
+    MOZ_ASSERT(env->type() == MIRType::Object);
+
+    LImplicitThis* lir = new(alloc()) LImplicitThis(useRegisterAtStart(env));
+    defineReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
 LIRGenerator::visitArrowNewTarget(MArrowNewTarget* ins)
 {
     MOZ_ASSERT(ins->type() == MIRType::Value);
@@ -2170,14 +2181,14 @@ LIRGenerator::visitToFloat32(MToFloat32* convert)
 }
 
 void
-LIRGenerator::visitToInt32(MToInt32* convert)
+LIRGenerator::visitToNumberInt32(MToNumberInt32* convert)
 {
     MDefinition* opd = convert->input();
 
     switch (opd->type()) {
       case MIRType::Value:
       {
-        LValueToInt32* lir =
+        auto* lir =
             new(alloc()) LValueToInt32(useBox(opd), tempDouble(), temp(), LValueToInt32::NORMAL);
         assignSnapshot(lir, Bailout_NonPrimitiveInput);
         define(lir, convert);
@@ -3119,6 +3130,26 @@ LIRGenerator::visitBoundsCheck(MBoundsCheck* ins)
 }
 
 void
+LIRGenerator::visitSpectreMaskIndex(MSpectreMaskIndex* ins)
+{
+    MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
+    MOZ_ASSERT(ins->length()->type() == MIRType::Int32);
+    MOZ_ASSERT(ins->type() == MIRType::Int32);
+
+    // On 64-bit platforms, the length must be in a register, so
+    // MacroAssembler::maskIndex can emit more efficient code.
+#if JS_BITS_PER_WORD == 64
+    LAllocation lengthUse = useRegister(ins->length());
+#else
+    LAllocation lengthUse = useAny(ins->length());
+#endif
+
+    LSpectreMaskIndex* lir =
+        new(alloc()) LSpectreMaskIndex(useRegisterOrConstant(ins->index()), lengthUse);
+    define(lir, ins);
+}
+
+void
 LIRGenerator::visitBoundsCheckLower(MBoundsCheckLower* ins)
 {
     MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
@@ -3193,7 +3224,7 @@ LIRGenerator::visitLoadElementHole(MLoadElementHole* ins)
     MOZ_ASSERT(ins->type() == MIRType::Value);
 
     LLoadElementHole* lir = new(alloc()) LLoadElementHole(useRegister(ins->elements()),
-                                                          useRegisterOrConstant(ins->index()),
+                                                          useRegister(ins->index()),
                                                           useRegister(ins->initLength()));
     if (ins->needsNegativeIntCheck())
         assignSnapshot(lir, Bailout_NegativeIndex);
@@ -3565,8 +3596,9 @@ LIRGenerator::visitLoadUnboxedScalar(MLoadUnboxedScalar* ins)
     if (ins->readType() == Scalar::Uint32 && IsFloatingPointType(ins->type()))
         tempDef = temp();
 
+    Synchronization sync = Synchronization::Load();
     if (ins->requiresMemoryBarrier()) {
-        LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(MembarBeforeLoad);
+        LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(sync.barrierBefore);
         add(fence, ins);
     }
     LLoadUnboxedScalar* lir = new(alloc()) LLoadUnboxedScalar(elements, index, tempDef);
@@ -3574,7 +3606,7 @@ LIRGenerator::visitLoadUnboxedScalar(MLoadUnboxedScalar* ins)
         assignSnapshot(lir, Bailout_Overflow);
     define(lir, ins);
     if (ins->requiresMemoryBarrier()) {
-        LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(MembarAfterLoad);
+        LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(sync.barrierAfter);
         add(fence, ins);
     }
 }
@@ -3622,9 +3654,10 @@ LIRGenerator::visitLoadTypedArrayElementHole(MLoadTypedArrayElementHole* ins)
     MOZ_ASSERT(ins->type() == MIRType::Value);
 
     const LUse object = useRegister(ins->object());
-    const LAllocation index = useRegisterOrConstant(ins->index());
+    const LAllocation index = useRegister(ins->index());
 
-    LLoadTypedArrayElementHole* lir = new(alloc()) LLoadTypedArrayElementHole(object, index);
+    LLoadTypedArrayElementHole* lir = new(alloc()) LLoadTypedArrayElementHole(object, index,
+                                                                              temp());
     if (ins->fallible())
         assignSnapshot(lir, Bailout_Overflow);
     defineBox(lir, ins);
@@ -3675,13 +3708,14 @@ LIRGenerator::visitStoreUnboxedScalar(MStoreUnboxedScalar* ins)
     // is a store instruction that incorporates the necessary
     // barriers, and we could use that instead of separate barrier and
     // store instructions.  See bug #1077027.
+    Synchronization sync = Synchronization::Store();
     if (ins->requiresMemoryBarrier()) {
-        LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(MembarBeforeStore);
+        LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(sync.barrierBefore);
         add(fence, ins);
     }
     add(new(alloc()) LStoreUnboxedScalar(elements, index, value), ins);
     if (ins->requiresMemoryBarrier()) {
-        LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(MembarAfterStore);
+        LMemoryBarrier* fence = new(alloc()) LMemoryBarrier(sync.barrierAfter);
         add(fence, ins);
     }
 }

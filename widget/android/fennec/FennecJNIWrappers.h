@@ -119,7 +119,7 @@ public:
         static const mozilla::jni::CallingThread callingThread =
                 mozilla::jni::CallingThread::ANY;
         static const mozilla::jni::DispatchTarget dispatchTarget =
-                mozilla::jni::DispatchTarget::CURRENT;
+                mozilla::jni::DispatchTarget::GECKO;
     };
 
     static const mozilla::jni::CallingThread callingThread =
@@ -518,6 +518,7 @@ public:
     template<class Impl> class Natives;
 };
 
+#ifdef MOZ_NATIVE_DEVICES
 class PresentationMediaPlayerManager : public mozilla::jni::ObjectBase<PresentationMediaPlayerManager>
 {
 public:
@@ -585,6 +586,7 @@ public:
     template<class Impl> class Natives;
 };
 
+#endif // MOZ_NATIVE_DEVICES
 class Telemetry : public mozilla::jni::ObjectBase<Telemetry>
 {
 public:

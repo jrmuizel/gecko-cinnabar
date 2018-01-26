@@ -126,6 +126,7 @@ var lazilyLoadedBrowserScripts = [
   ["Linkifier", "chrome://browser/content/Linkify.js"],
   ["CastingApps", "chrome://browser/content/CastingApps.js"],
   ["RemoteDebugger", "chrome://browser/content/RemoteDebugger.js"],
+  ["gViewSourceUtils", "chrome://global/content/viewSourceUtils.js"],
 ];
 if (!AppConstants.RELEASE_OR_BETA) {
   lazilyLoadedBrowserScripts.push(
@@ -261,12 +262,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "Haptic",
 XPCOMUtils.defineLazyServiceGetter(this, "ParentalControls",
   "@mozilla.org/parental-controls-service;1", "nsIParentalControlsService");
 
-XPCOMUtils.defineLazyServiceGetter(this, "DOMUtils",
-  "@mozilla.org/inspector/dom-utils;1", "inIDOMUtils");
-
-XPCOMUtils.defineLazyServiceGetter(window, "URIFixup",
-  "@mozilla.org/docshell/urifixup;1", "nsIURIFixup");
-
 XPCOMUtils.defineLazyModuleGetter(this, "Log",
   "resource://gre/modules/AndroidLog.jsm", "AndroidLog");
 
@@ -373,6 +368,7 @@ var BrowserApp = {
       "Tab:Closed",
       "Tab:Move",
       "Tab:OpenUri",
+      "Tab:ViewSource",
     ]);
 
     GlobalEventDispatcher.registerListener(this, [
@@ -1282,6 +1278,9 @@ var BrowserApp = {
       }
     }
 
+    // Retrieve updated tabIndex again for the removal because the index could
+    // be changed if a new tab is added by the event listener.
+    tabIndex = this._tabs.indexOf(aTab);
     aTab.destroy();
     this._tabs.splice(tabIndex, 1);
   },
@@ -1436,6 +1435,27 @@ var BrowserApp = {
     let evt = document.createEvent("UIEvents");
     evt.initUIEvent("TabSelect", true, false, window, null);
     aTab.browser.dispatchEvent(evt);
+  },
+
+  viewSourceForTab(aTab) {
+    let browser = aTab.browser;
+    let outerWindowID = browser.outerWindowID;
+    let url = browser.currentURI.spec;
+    let args = { browser, outerWindowID, URL: url };
+
+    // `viewSourceInBrowser` will load the source content from the page
+    // descriptor for the tab (when possible) or fallback to the network if
+    // that fails.  Either way, the view source module will manage the tab's
+    // location, so use "about:blank" here to avoid unnecessary redundant
+    // requests.
+    let tab = this.addTab("about:blank", {
+      selected: true,
+      parentId: aTab.id,
+      isPrivate: PrivateBrowsingUtils.isBrowserPrivate(aTab.browser)
+    });
+    args.viewSourceBrowser = tab.browser;
+
+    gViewSourceUtils.viewSourceInBrowser(args);
   },
 
   quit: function quit(aClear = { sanitize: {}, dontSaveSession: false }) {
@@ -1693,7 +1713,11 @@ var BrowserApp = {
 
       case "FormHistory:Init": {
         // Force creation/upgrade of formhistory.sqlite
-        FormHistory.count({});
+        FormHistory.count({}, {
+          handleCompletion() {
+            GlobalEventDispatcher.sendRequest({ type: "FormHistory:Ready" });
+          },
+        });
         GlobalEventDispatcher.unregisterListener(this, event);
         break;
       }
@@ -1946,6 +1970,10 @@ var BrowserApp = {
 
       case "Tab:Move":
         this._handleTabMove(data.fromTabId, data.fromPosition, data.toTabId, data.toPosition);
+        break;
+
+      case "Tab:ViewSource":
+        this.viewSourceForTab(this.getTabForId(data.tabId));
         break;
     }
   },
@@ -2694,6 +2722,10 @@ var NativeWindow = {
       return this.defaultContext = Strings.browser.GetStringFromName("browser.menu.context.default");
     },
 
+    get nonLinkContext() {
+      return "";
+    },
+
     /* Gets menuitems for an arbitrary node
      * Parameters:
      *   element - The element to look at. If this element has a contextmenu attribute, the
@@ -2756,16 +2788,33 @@ var NativeWindow = {
       return false;
     },
 
+    // Returns true if there are any link-related context menu items
+    _shouldPreventDefault: function() {
+      for (let context in this.menus) {
+        if (context === this.nonLinkContext) {
+          continue;
+        }
+        let menu = this.menus[context];
+        if (menu.length > 0) {
+          return true;
+        }
+      }
+      return false;
+    },
+
     /* Returns a label to be shown in a tabbed ui if there are multiple "contexts". For instance, if this
      * is an image inside an <a> tag, we may have a "link" context and an "image" one.
      */
     _getContextType: function(element) {
       // For anchor nodes, we try to use the scheme to pick a string
       if (ChromeUtils.getClassName(element) === "HTMLAnchorElement") {
-        let uri = this.makeURI(this._getLinkURL(element));
         try {
+          let uri = this.makeURI(this._getLinkURL(element));
           return Strings.browser.GetStringFromName("browser.menu.context." + uri.scheme);
-        } catch(ex) { }
+        } catch(ex) {
+          // Fallback to the default
+          return this.defaultContext;
+        }
       }
 
       // Otherwise we try the nodeName
@@ -2773,8 +2822,7 @@ var NativeWindow = {
         return Strings.browser.GetStringFromName("browser.menu.context." + element.nodeName.toLowerCase());
       } catch(ex) { }
 
-      // Fallback to the default
-      return this.defaultContext;
+      return this.nonLinkContext;
     },
 
     // Adds context menu items added through the add-on api
@@ -2822,8 +2870,10 @@ var NativeWindow = {
       if (this._shouldShow()) {
         BrowserEventHandler._cancelTapHighlight();
 
-        // Consume / preventDefault the event, and show the contextmenu.
-        event.preventDefault();
+        if (this._shouldPreventDefault()) {
+          // Consume / preventDefault the event.
+          event.preventDefault();
+        }
         this._innerShow(this._target, event.clientX, event.clientY);
         this._target = null;
 
@@ -4429,7 +4479,7 @@ Tab.prototype = {
 
     let fixedURI = aLocationURI;
     try {
-      fixedURI = URIFixup.createExposableURI(aLocationURI);
+      fixedURI = Services.uriFixup.createExposableURI(aLocationURI);
     } catch (ex) { }
 
     // In restricted profiles, we refuse to let you open various urls.
@@ -6808,4 +6858,3 @@ HTMLContextMenuItem.prototype = Object.create(ContextMenuItem.prototype, {
     }
   },
 });
-

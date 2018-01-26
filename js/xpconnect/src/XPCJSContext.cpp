@@ -696,13 +696,6 @@ XPCJSContext::InterruptCallback(JSContext* cx)
         return false;
     }
 
-    if (win->GetIsPrerendered()) {
-        // We cannot display a dialog if the page is being prerendered, so
-        // just kill the page.
-        mozilla::dom::HandlePrerenderingViolation(win->AsInner());
-        return false;
-    }
-
     // Accumulate slow script invokation delay.
     if (!chrome && !self->mTimeoutAccumulated) {
       uint32_t delay = uint32_t(self->mSlowScriptActualWait.ToMilliseconds() - (limit * 1000.0));
@@ -815,6 +808,8 @@ ReloadPrefsCallback(const char* pref, void* data)
 
     bool streams = Preferences::GetBool(JS_OPTIONS_DOT_STR "streams");
 
+    bool spectreIndexMasking = Preferences::GetBool(JS_OPTIONS_DOT_STR "spectre.index_masking");
+
     sSharedMemoryEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "shared_memory");
 
 #ifdef DEBUG
@@ -871,6 +866,8 @@ ReloadPrefsCallback(const char* pref, void* data)
 #ifdef DEBUG
     JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_FULL_DEBUG_CHECKS, fullJitDebugChecks);
 #endif
+
+    JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_SPECTRE_INDEX_MASKING, spectreIndexMasking);
 }
 
 XPCJSContext::~XPCJSContext()

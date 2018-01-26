@@ -16,15 +16,29 @@ const {
   getHeadersURL,
   getHTTPStatusCodeURL,
 } = require("../utils/mdn-utils");
-const { writeHeaderText } = require("../utils/request-utils");
-const { sortObjectKeys } = require("../utils/sort-utils");
+const {
+  fetchNetworkUpdatePacket,
+  writeHeaderText,
+} = require("../utils/request-utils");
+const {
+  HeadersProvider,
+  HeaderList,
+} = require("../utils/headers-provider");
 
 // Components
-const { REPS, MODE } = require("devtools/client/shared/components/reps/reps");
-const MDNLink = createFactory(require("./MdnLink"));
 const PropertiesView = createFactory(require("./PropertiesView"));
 
-const { Rep } = REPS;
+loader.lazyGetter(this, "MDNLink", function () {
+  return createFactory(require("./MdnLink"));
+});
+
+loader.lazyGetter(this, "Rep", function () {
+  return require("devtools/client/shared/components/reps/reps").REPS.Rep;
+});
+loader.lazyGetter(this, "MODE", function () {
+  return require("devtools/client/shared/components/reps/reps").MODE;
+});
+
 const { button, div, input, textarea, span } = dom;
 
 const EDIT_AND_RESEND = L10N.getStr("netmonitor.summary.editAndResend");
@@ -42,7 +56,7 @@ const SUMMARY_URL = L10N.getStr("netmonitor.summary.url");
 const SUMMARY_STATUS = L10N.getStr("netmonitor.summary.status");
 const SUMMARY_VERSION = L10N.getStr("netmonitor.summary.version");
 
-/*
+/**
  * Headers panel component
  * Lists basic information about the request
  */
@@ -68,43 +82,32 @@ class HeadersPanel extends Component {
     this.toggleRawHeaders = this.toggleRawHeaders.bind(this);
     this.renderSummary = this.renderSummary.bind(this);
     this.renderValue = this.renderValue.bind(this);
-    this.maybeFetchPostData = this.maybeFetchPostData.bind(this);
   }
 
   componentDidMount() {
-    this.maybeFetchPostData(this.props);
+    let { request, connector } = this.props;
+    fetchNetworkUpdatePacket(connector.requestData, request, [
+      "requestHeaders",
+      "responseHeaders",
+      "requestPostData",
+    ]);
   }
 
   componentWillReceiveProps(nextProps) {
-    this.maybeFetchPostData(nextProps);
-  }
-
-  /**
-   * When switching to another request, lazily fetch request post data
-   * from the backend. The panel will first be empty and then display the content.
-   * Fetching post data is used for updating requestHeadersFromUploadStream section,
-   */
-  maybeFetchPostData(props) {
-    if (props.request.requestPostDataAvailable &&
-        (!props.request.requestPostData ||
-        !props.request.requestPostData.postData.text)) {
-      // This method will set `props.request.requestPostData`
-      // asynchronously and force another render.
-      props.connector.requestData(props.request.id, "requestPostData");
-    }
+    let { request, connector } = nextProps;
+    fetchNetworkUpdatePacket(connector.requestData, request, [
+      "requestHeaders",
+      "responseHeaders",
+      "requestPostData",
+    ]);
   }
 
   getProperties(headers, title) {
     if (headers && headers.headers.length) {
       let headerKey = `${title} (${getFormattedSize(headers.headersSize, 3)})`;
       let propertiesResult = {
-        [headerKey]:
-          headers.headers.reduce((acc, { name, value }) =>
-            name ? Object.assign(acc, { [name]: value }) : acc
-          , {})
+        [headerKey]: new HeaderList(headers.headers)
       };
-
-      propertiesResult[headerKey] = sortObjectKeys(propertiesResult[headerKey]);
       return propertiesResult;
     }
 
@@ -258,6 +261,8 @@ class HeadersPanel extends Component {
 
     let summaryVersion = httpVersion ?
       this.renderSummary(SUMMARY_VERSION, httpVersion) : null;
+    // display Status-Line above other response headers
+    let statusLine = `${httpVersion} ${status} ${statusText}\n`;
 
     let summaryRawHeaders;
     if (this.state.rawHeadersOpened) {
@@ -274,7 +279,7 @@ class HeadersPanel extends Component {
             div({ className: "raw-headers" },
               div({ className: "tabpanel-summary-label" }, RAW_HEADERS_RESPONSE),
               textarea({
-                value: writeHeaderText(responseHeaders.headers),
+                value: statusLine + writeHeaderText(responseHeaders.headers),
                 readOnly: true,
               }),
             ),
@@ -295,6 +300,7 @@ class HeadersPanel extends Component {
         ),
         PropertiesView({
           object,
+          provider: HeadersProvider,
           filterPlaceHolder: HEADERS_FILTER_TEXT,
           sectionNames: Object.keys(object),
           renderValue: this.renderValue,

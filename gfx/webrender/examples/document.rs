@@ -11,7 +11,7 @@ extern crate webrender;
 mod boilerplate;
 
 use boilerplate::Example;
-use euclid::ScaleFactor;
+use euclid::TypedScale;
 use webrender::api::*;
 
 // This example creates multiple documents overlapping each other with
@@ -67,17 +67,15 @@ impl App {
             let bounds = DeviceUintRect::new(offset, size);
 
             let document_id = api.add_document(size, layer);
-            api.set_window_parameters(document_id,
-                framebuffer_size,
-                bounds,
-                1.0
-            );
-            api.set_root_pipeline(document_id, pipeline_id);
+            let mut txn = Transaction::new();
+            txn.set_window_parameters(framebuffer_size, bounds, 1.0);
+            txn.set_root_pipeline(pipeline_id);
+            api.send_transaction(document_id, txn);
 
             self.documents.push(Document {
                 id: document_id,
                 pipeline_id,
-                content_rect: bounds.to_f32() / ScaleFactor::new(device_pixel_ratio),
+                content_rect: bounds.to_f32() / TypedScale::new(device_pixel_ratio),
                 color,
             });
         }
@@ -127,17 +125,16 @@ impl Example for App {
             );
             builder.pop_stacking_context();
 
-            api.set_display_list(
-                doc.id,
+            let mut txn = Transaction::new();
+            txn.set_display_list(
                 Epoch(0),
                 None,
                 doc.content_rect.size,
                 builder.finalize(),
                 true,
-                ResourceUpdates::new(),
             );
-
-            api.generate_frame(doc.id, None);
+            txn.generate_frame();
+            api.send_transaction(doc.id, txn);
         }
     }
 }

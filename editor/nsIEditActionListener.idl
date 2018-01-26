@@ -26,18 +26,8 @@ Editor Action Listener interface to outside world
  */
 [scriptable, uuid(b22907b1-ee93-11d2-8d50-000064657374)]
 
-interface nsIEditActionListener : nsISupports{
-
-  /**
-   * Called before the editor creates a node.
-   * @param aTag                    The tag name of the DOM Node to create.
-   * @param aNextSiblingOfNewNode   The node which will be next sibling of
-   *                                new node.  If the new node will be appended,
-   *                                this is null.
-   */
-  void WillCreateNode(in DOMString aTag,
-                      in nsIDOMNode aNextSiblingOfNewNode);
-
+interface nsIEditActionListener : nsISupports
+{
   /**
    * Called after the editor creates a node.
    * @param aTag      The tag name of the DOM Node to create.
@@ -49,36 +39,12 @@ interface nsIEditActionListener : nsISupports{
                      in nsresult aResult);
 
   /**
-   * Called before the editor inserts a node.
-   * @param aNode     The DOM Node to insert.
-   * @param aParent   The node to insert the new object into
-   * @param aPosition The place in aParent to insert the new node
-   *                  0=first child, 1=second child, etc.
-   *                  any number > number of current children = last child
-   */
-  void WillInsertNode(in nsIDOMNode aNode,
-                            in nsIDOMNode aParent,
-                            in long      aPosition);
-
-  /**
    * Called after the editor inserts a node.
    * @param aNode     The DOM Node to insert.
-   * @param aParent   The node to insert the new object into
-   * @param aPosition The place in aParent to insert the new node
-   *                  0=first child, 1=second child, etc.
-   *                  any number > number of current children = last child
    * @param aResult   The result of the insert node operation.
    */
   void DidInsertNode(in nsIDOMNode aNode,
-                           in nsIDOMNode aParent,
-                           in long      aPosition,
-                           in nsresult    aResult);
-
-  /**
-   * Called before the editor deletes a node.
-   * @param aChild    The node to delete
-   */
-  void WillDeleteNode(in nsIDOMNode aChild);
+                     in nsresult aResult);
 
   /**
    * Called after the editor deletes a node.
@@ -86,15 +52,6 @@ interface nsIEditActionListener : nsISupports{
    * @param aResult   The result of the delete node operation.
    */
   void DidDeleteNode(in nsIDOMNode aChild, in nsresult aResult);
-
-  /**
-   * Called before the editor splits a node.
-   * @param aExistingRightNode   the node to split.  It will become the new node's next sibling.
-   * @param aOffset              the offset of aExistingRightNode's content|children to do the split at
-   * @param aNewLeftNode         [OUT] the new node resulting from the split, becomes aExistingRightNode's previous sibling.
-   */
-  void WillSplitNode(in nsIDOMNode aExistingRightNode,
-                           in long      aOffset);
 
   /**
    * Called after the editor splits a node.
@@ -105,18 +62,6 @@ interface nsIEditActionListener : nsISupports{
    */
   void DidSplitNode(in nsIDOMNode aExistingRightNode,
                     in nsIDOMNode aNewLeftNode);
-
-  /**
-   * Called before the editor joins 2 nodes.
-   * @param aLeftNode   This node will be merged into the right node
-   * @param aRightNode  The node that will be merged into.
-   *                    There is no requirement that the two nodes be of
-   *                    the same type.
-   * @param aParent     The parent of aRightNode
-   */
-  void WillJoinNodes(in nsIDOMNode aLeftNode,
-                           in nsIDOMNode aRightNode,
-                           in nsIDOMNode aParent);
 
   /**
    * Called after the editor joins 2 nodes.
@@ -131,16 +76,6 @@ interface nsIEditActionListener : nsISupports{
                           in nsIDOMNode aRightNode,
                           in nsIDOMNode aParent,
                           in nsresult    aResult);
-
-  /**
-   * Called before the editor inserts text.
-   * @param aTextNode   This node getting inserted text
-   * @param aOffset     The offset in aTextNode to insert at.
-   * @param aString     The string that gets inserted.
-   */
-  void WillInsertText(in nsIDOMCharacterData aTextNode,
-                            in long          aOffset,
-                            in DOMString     aString);
 
   /**
    * Called after the editor inserts text.

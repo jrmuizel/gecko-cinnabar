@@ -75,20 +75,6 @@ MacroAssemblerMIPS64Compat::convertUInt32ToDouble(Register src, FloatRegister de
 }
 
 void
-MacroAssemblerMIPS64Compat::convertInt64ToDouble(Register src, FloatRegister dest)
-{
-    as_dmtc1(src, dest);
-    as_cvtdl(dest, dest);
-}
-
-void
-MacroAssemblerMIPS64Compat::convertInt64ToFloat32(Register src, FloatRegister dest)
-{
-    as_dmtc1(src, dest);
-    as_cvtsl(dest, dest);
-}
-
-void
 MacroAssemblerMIPS64Compat::convertUInt64ToDouble(Register src, FloatRegister dest)
 {
     Label positive, done;
@@ -110,42 +96,6 @@ MacroAssemblerMIPS64Compat::convertUInt64ToDouble(Register src, FloatRegister de
     as_cvtdl(dest, dest);
 
     bind(&done);
-}
-
-void
-MacroAssemblerMIPS64Compat::convertUInt64ToFloat32(Register src, FloatRegister dest)
-{
-    Label positive, done;
-    ma_b(src, src, &positive, NotSigned, ShortJump);
-
-    MOZ_ASSERT(src!= ScratchRegister);
-    MOZ_ASSERT(src!= SecondScratchReg);
-
-    ma_and(ScratchRegister, src, Imm32(1));
-    ma_dsrl(SecondScratchReg, src, Imm32(1));
-    ma_or(ScratchRegister, SecondScratchReg);
-    as_dmtc1(ScratchRegister, dest);
-    as_cvtsl(dest, dest);
-    asMasm().addFloat32(dest, dest);
-    ma_b(&done, ShortJump);
-
-    bind(&positive);
-    as_dmtc1(src, dest);
-    as_cvtsl(dest, dest);
-
-    bind(&done);
-}
-
-bool
-MacroAssemblerMIPS64Compat::convertUInt64ToDoubleNeedsTemp()
-{
-    return false;
-}
-
-void
-MacroAssemblerMIPS64Compat::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
-{
-    convertUInt64ToDouble(src.reg, dest);
 }
 
 void
@@ -489,8 +439,8 @@ template void
 MacroAssemblerMIPS64::ma_addTestOverflow<Label*>(Register rd, Register rs,
                                                  Register rt, Label* overflow);
 template void
-MacroAssemblerMIPS64::ma_addTestOverflow<wasm::TrapDesc>(Register rd, Register rs, Register rt,
-                                                         wasm::TrapDesc overflow);
+MacroAssemblerMIPS64::ma_addTestOverflow<wasm::OldTrapDesc>(Register rd, Register rs, Register rt,
+                                                            wasm::OldTrapDesc overflow);
 
 template <typename L>
 void
@@ -511,8 +461,8 @@ template void
 MacroAssemblerMIPS64::ma_addTestOverflow<Label*>(Register rd, Register rs,
                                                  Imm32 imm, Label* overflow);
 template void
-MacroAssemblerMIPS64::ma_addTestOverflow<wasm::TrapDesc>(Register rd, Register rs, Imm32 imm,
-                                                         wasm::TrapDesc overflow);
+MacroAssemblerMIPS64::ma_addTestOverflow<wasm::OldTrapDesc>(Register rd, Register rs, Imm32 imm,
+                                                            wasm::OldTrapDesc overflow);
 
 // Subtract.
 void
@@ -2602,6 +2552,63 @@ MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output
     moveFromFloat32(ScratchDoubleReg, output);
     ma_b(ScratchRegister, Imm32(0), oolEntry, Assembler::NotEqual);
 
+}
+
+// ========================================================================
+// Convert floating point.
+
+void
+MacroAssembler::convertInt64ToDouble(Register64 src, FloatRegister dest)
+{
+    as_dmtc1(src.reg, dest);
+    as_cvtdl(dest, dest);
+}
+
+void
+MacroAssembler::convertInt64ToFloat32(Register64 src, FloatRegister dest)
+{
+    as_dmtc1(src.reg, dest);
+    as_cvtsl(dest, dest);
+}
+
+bool
+MacroAssembler::convertUInt64ToDoubleNeedsTemp()
+{
+    return false;
+}
+
+void
+MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
+    MacroAssemblerSpecific::convertUInt64ToDouble(src.reg, dest);
+}
+
+void
+MacroAssembler::convertUInt64ToFloat32(Register64 src_, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
+
+    Register src = src_.reg;
+    Label positive, done;
+    ma_b(src, src, &positive, NotSigned, ShortJump);
+
+    MOZ_ASSERT(src!= ScratchRegister);
+    MOZ_ASSERT(src!= SecondScratchReg);
+
+    ma_and(ScratchRegister, src, Imm32(1));
+    ma_dsrl(SecondScratchReg, src, Imm32(1));
+    ma_or(ScratchRegister, SecondScratchReg);
+    as_dmtc1(ScratchRegister, dest);
+    as_cvtsl(dest, dest);
+    addFloat32(dest, dest);
+    ma_b(&done, ShortJump);
+
+    bind(&positive);
+    as_dmtc1(src, dest);
+    as_cvtsl(dest, dest);
+
+    bind(&done);
 }
 
 //}}} check_macroassembler_style

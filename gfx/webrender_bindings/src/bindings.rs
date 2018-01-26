@@ -28,8 +28,31 @@ use core_foundation::string::CFString;
 #[cfg(target_os = "macos")]
 use core_graphics::font::CGFont;
 
-/// cbindgen:field-names=[mNamespace, mHandle]
-type WrExternalImageBufferType = ExternalImageType;
+#[repr(C)]
+pub enum WrExternalImageBufferType {
+    TextureHandle = 0,
+    TextureRectHandle = 1,
+    TextureArrayHandle = 2,
+    TextureExternalHandle = 3,
+    ExternalBuffer = 4,
+}
+
+impl WrExternalImageBufferType {
+    fn to_wr(self) -> ExternalImageType {
+        match self {
+            WrExternalImageBufferType::TextureHandle =>
+                ExternalImageType::TextureHandle(TextureTarget::Default),
+            WrExternalImageBufferType::TextureRectHandle =>
+                ExternalImageType::TextureHandle(TextureTarget::Rect),
+            WrExternalImageBufferType::TextureArrayHandle =>
+                ExternalImageType::TextureHandle(TextureTarget::Array),
+            WrExternalImageBufferType::TextureExternalHandle =>
+                ExternalImageType::TextureHandle(TextureTarget::External),
+            WrExternalImageBufferType::ExternalBuffer =>
+                ExternalImageType::Buffer,
+        }
+    }
+}
 
 /// cbindgen:field-names=[mHandle]
 /// cbindgen:derive-lt=true
@@ -268,8 +291,9 @@ impl Into<WrExternalImageId> for ExternalImageId {
 #[repr(u32)]
 #[allow(dead_code)]
 enum WrExternalImageType {
-    NativeTexture,
     RawData,
+    NativeTexture,
+    Invalid,
 }
 
 #[repr(C)]
@@ -305,25 +329,19 @@ impl ExternalImageHandler for WrExternalImageHandler {
             channel_index: u8)
             -> ExternalImage {
         let image = (self.lock_func)(self.external_image_obj, id.into(), channel_index);
-
-        match image.image_type {
-            WrExternalImageType::NativeTexture => {
-                ExternalImage {
-                    u0: image.u0,
-                    v0: image.v0,
-                    u1: image.u1,
-                    v1: image.v1,
-                    source: ExternalImageSource::NativeTexture(image.handle),
-                }
-            },
-            WrExternalImageType::RawData => {
-                ExternalImage {
-                    u0: image.u0,
-                    v0: image.v0,
-                    u1: image.u1,
-                    v1: image.v1,
-                    source: ExternalImageSource::RawData(make_slice(image.buff, image.size)),
-                }
+        ExternalImage {
+            uv: TexelRect::new(image.u0, image.v0, image.u1, image.v1),
+            //uv: UvRect::new(UvPoint::new(image.u0, image.v0), UvSize::new(image.u1, image.v1)),
+            /*
+            u0: image.u0,
+            v0: image.v0,
+            u1: image.u1,
+            v1: image.v1,
+            */
+            source: match image.image_type {
+                WrExternalImageType::NativeTexture => ExternalImageSource::NativeTexture(image.handle),
+                WrExternalImageType::RawData => ExternalImageSource::RawData(make_slice(image.buff, image.size)),
+                WrExternalImageType::Invalid => ExternalImageSource::Invalid,
             },
         }
     }
@@ -359,13 +377,16 @@ pub enum WrFilterOpType {
   Opacity = 6,
   Saturate = 7,
   Sepia = 8,
+  DropShadow = 9,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct WrFilterOp {
     filter_type: WrFilterOpType,
-    argument: c_float,
+    argument: c_float, // holds radius for DropShadow; value for other filters
+    offset: LayoutVector2D, // only used for DropShadow
+    color: ColorF, // only used for DropShadow
 }
 
 /// cbindgen:derive-eq=false
@@ -534,7 +555,7 @@ pub unsafe extern "C" fn wr_renderer_readback(renderer: &mut Renderer,
     renderer.read_pixels_into(DeviceUintRect::new(
                                 DeviceUintPoint::new(0, 0),
                                 DeviceUintSize::new(width, height)),
-                              ReadPixelsFormat::Bgra8,
+                              ReadPixelsFormat::Standard(ImageFormat::BGRA8),
                               &mut slice);
 }
 
@@ -798,6 +819,160 @@ pub unsafe extern "C" fn wr_api_delete(dh: *mut DocumentHandle) {
 }
 
 #[no_mangle]
+pub extern "C" fn wr_transaction_new() -> *mut Transaction {
+    Box::into_raw(Box::new(Transaction::new()))
+}
+
+/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
+#[no_mangle]
+pub extern "C" fn wr_transaction_delete(txn: *mut Transaction) {
+    unsafe { let _ = Box::from_raw(txn); }
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_is_empty(txn: &Transaction) -> bool {
+    txn.is_empty()
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_update_epoch(
+    txn: &mut Transaction,
+    pipeline_id: WrPipelineId,
+    epoch: WrEpoch,
+) {
+    txn.update_epoch(pipeline_id, epoch);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_set_root_pipeline(
+    txn: &mut Transaction,
+    pipeline_id: WrPipelineId,
+) {
+    txn.set_root_pipeline(pipeline_id);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_remove_pipeline(
+    txn: &mut Transaction,
+    pipeline_id: WrPipelineId,
+) {
+    txn.remove_pipeline(pipeline_id);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_set_display_list(
+    txn: &mut Transaction,
+    epoch: WrEpoch,
+    background: ColorF,
+    viewport_width: f32,
+    viewport_height: f32,
+    pipeline_id: WrPipelineId,
+    content_size: LayoutSize,
+    dl_descriptor: BuiltDisplayListDescriptor,
+    dl_data: &mut WrVecU8,
+) {
+    let color = if background.a == 0.0 { None } else { Some(background) };
+
+    // See the documentation of set_display_list in api.rs. I don't think
+    // it makes a difference in gecko at the moment(until APZ is figured out)
+    // but I suppose it is a good default.
+    let preserve_frame_state = true;
+
+    let dl_vec = dl_data.flush_into_vec();
+    let dl = BuiltDisplayList::from_data(dl_vec, dl_descriptor);
+
+    txn.set_display_list(
+        epoch,
+        color,
+        LayoutSize::new(viewport_width, viewport_height),
+        (pipeline_id, content_size, dl),
+        preserve_frame_state,
+    );
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_update_resources(
+    txn: &mut Transaction,
+    resource_updates: &mut ResourceUpdates
+) {
+    txn.update_resources(mem::replace(resource_updates, ResourceUpdates::new()));
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_set_window_parameters(
+    txn: &mut Transaction,
+    window_width: i32,
+    window_height: i32,
+) {
+    let size = DeviceUintSize::new(window_width as u32, window_height as u32);
+    txn.set_window_parameters(
+        size,
+        DeviceUintRect::new(DeviceUintPoint::new(0, 0), size),
+        1.0,
+    );
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_generate_frame(txn: &mut Transaction) {
+    txn.generate_frame();
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_update_dynamic_properties(
+    txn: &mut Transaction,
+    opacity_array: *const WrOpacityProperty,
+    opacity_count: usize,
+    transform_array: *const WrTransformProperty,
+    transform_count: usize,
+) {
+    debug_assert!(transform_count > 0 || opacity_count > 0);
+
+    let mut properties = DynamicProperties {
+        transforms: Vec::new(),
+        floats: Vec::new(),
+    };
+
+    if transform_count > 0 {
+        let transform_slice = make_slice(transform_array, transform_count);
+
+        for element in transform_slice.iter() {
+            let prop = PropertyValue {
+                key: PropertyBindingKey::new(element.id),
+                value: element.transform.into(),
+            };
+
+            properties.transforms.push(prop);
+        }
+    }
+
+    if opacity_count > 0 {
+        let opacity_slice = make_slice(opacity_array, opacity_count);
+
+        for element in opacity_slice.iter() {
+            let prop = PropertyValue {
+                key: PropertyBindingKey::new(element.id),
+                value: element.opacity,
+            };
+            properties.floats.push(prop);
+        }
+    }
+
+    txn.update_dynamic_properties(properties);
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_scroll_layer(
+    txn: &mut Transaction,
+    pipeline_id: WrPipelineId,
+    scroll_id: u64,
+    new_scroll_origin: LayoutPoint
+) {
+    assert!(unsafe { is_in_compositor_thread() });
+    let clip_id = ClipId::new(scroll_id, pipeline_id);
+    txn.scroll_node_with_id(new_scroll_origin, clip_id, ScrollClamping::NoClamping);
+}
+
+#[no_mangle]
 pub extern "C" fn wr_resource_updates_add_image(
     resources: &mut ResourceUpdates,
     image_key: WrImageKey,
@@ -843,7 +1018,7 @@ pub extern "C" fn wr_resource_updates_add_external_image(
             ExternalImageData {
                 id: external_image_id.into(),
                 channel_index: channel_index,
-                image_type: buffer_type,
+                image_type: buffer_type.to_wr(),
             }
         ),
         None
@@ -881,7 +1056,7 @@ pub extern "C" fn wr_resource_updates_update_external_image(
             ExternalImageData {
                 id: external_image_id.into(),
                 channel_index,
-                image_type,
+                image_type: image_type.to_wr(),
             }
         ),
         None
@@ -913,148 +1088,33 @@ pub extern "C" fn wr_resource_updates_delete_image(
 }
 
 #[no_mangle]
-pub extern "C" fn wr_api_update_resources(
+pub extern "C" fn wr_api_send_transaction(
     dh: &mut DocumentHandle,
-    resources: &mut ResourceUpdates
+    transaction: &mut Transaction
 ) {
-    let resource_updates = mem::replace(resources, ResourceUpdates::new());
-    dh.api.update_resources(resource_updates);
+    if transaction.is_empty() {
+        return;
+    }
+    let txn = mem::replace(transaction, Transaction::new());
+    dh.api.send_transaction(dh.document_id, txn);
 }
 
 #[no_mangle]
-pub extern "C" fn wr_api_update_pipeline_resources(
-    dh: &mut DocumentHandle,
-    pipeline_id: WrPipelineId,
-    epoch: WrEpoch,
-    resources: &mut ResourceUpdates
-) {
-    let resource_updates = mem::replace(resources, ResourceUpdates::new());
-    dh.api.update_pipeline_resources(resource_updates, dh.document_id, pipeline_id, epoch);
-}
-
-
-#[no_mangle]
-pub extern "C" fn wr_api_set_root_pipeline(dh: &mut DocumentHandle,
-                                           pipeline_id: WrPipelineId) {
-    dh.api.set_root_pipeline(dh.document_id, pipeline_id);
-}
-
-#[no_mangle]
-pub extern "C" fn wr_api_remove_pipeline(dh: &mut DocumentHandle,
-                                         pipeline_id: WrPipelineId) {
-    dh.api.remove_pipeline(dh.document_id, pipeline_id);
-}
-
-#[no_mangle]
-pub extern "C" fn wr_api_set_window_parameters(dh: &mut DocumentHandle,
-                                               width: i32,
-                                               height: i32) {
-    let size = DeviceUintSize::new(width as u32, height as u32);
-    dh.api.set_window_parameters(dh.document_id,
-                                 size,
-                                 DeviceUintRect::new(DeviceUintPoint::new(0, 0), size),
-                                 1.0);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn wr_api_set_display_list(
-    dh: &mut DocumentHandle,
-    color: ColorF,
-    epoch: WrEpoch,
-    viewport_width: f32,
-    viewport_height: f32,
-    pipeline_id: WrPipelineId,
-    content_size: LayoutSize,
-    dl_descriptor: BuiltDisplayListDescriptor,
-    dl_data: &mut WrVecU8,
-    resources: &mut ResourceUpdates,
-) {
-    let resource_updates = mem::replace(resources, ResourceUpdates::new());
-
-    let color = if color.a == 0.0 { None } else { Some(color) };
-
-    // See the documentation of set_display_list in api.rs. I don't think
-    // it makes a difference in gecko at the moment(until APZ is figured out)
-    // but I suppose it is a good default.
-    let preserve_frame_state = true;
-
-    let dl_vec = dl_data.flush_into_vec();
-    let dl = BuiltDisplayList::from_data(dl_vec, dl_descriptor);
-
-    dh.api.set_display_list(
-        dh.document_id,
-        epoch,
-        color,
-        LayoutSize::new(viewport_width, viewport_height),
-        (pipeline_id, content_size, dl),
-        preserve_frame_state,
-        resource_updates
-    );
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn wr_api_clear_display_list(
-    dh: &mut DocumentHandle,
+pub unsafe extern "C" fn wr_transaction_clear_display_list(
+    txn: &mut Transaction,
     epoch: WrEpoch,
     pipeline_id: WrPipelineId,
 ) {
     let preserve_frame_state = true;
     let frame_builder = WebRenderFrameBuilder::new(pipeline_id, LayoutSize::zero());
-    let resource_updates = ResourceUpdates::new();
 
-    dh.api.set_display_list(
-        dh.document_id,
+    txn.set_display_list(
         epoch,
         None,
         LayoutSize::new(0.0, 0.0),
         frame_builder.dl_builder.finalize(),
         preserve_frame_state,
-        resource_updates
     );
-}
-
-#[no_mangle]
-pub extern "C" fn wr_api_generate_frame(dh: &mut DocumentHandle) {
-    dh.api.generate_frame(dh.document_id, None);
-}
-
-#[no_mangle]
-pub extern "C" fn wr_api_generate_frame_with_properties(dh: &mut DocumentHandle,
-                                                        opacity_array: *const WrOpacityProperty,
-                                                        opacity_count: usize,
-                                                        transform_array: *const WrTransformProperty,
-                                                        transform_count: usize) {
-    let mut properties = DynamicProperties {
-        transforms: Vec::new(),
-        floats: Vec::new(),
-    };
-
-    if transform_count > 0 {
-        let transform_slice = make_slice(transform_array, transform_count);
-
-        for element in transform_slice.iter() {
-            let prop = PropertyValue {
-                key: PropertyBindingKey::new(element.id),
-                value: element.transform.into(),
-            };
-
-            properties.transforms.push(prop);
-        }
-    }
-
-    if opacity_count > 0 {
-        let opacity_slice = make_slice(opacity_array, opacity_count);
-
-        for element in opacity_slice.iter() {
-            let prop = PropertyValue {
-                key: PropertyBindingKey::new(element.id),
-                value: element.opacity,
-            };
-            properties.floats.push(prop);
-        }
-    }
-
-    dh.api.generate_frame(dh.document_id, Some(properties));
 }
 
 /// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
@@ -1293,6 +1353,9 @@ pub extern "C" fn wr_dp_push_stacking_context(state: &mut WrState,
             WrFilterOpType::Opacity => FilterOp::Opacity(PropertyBinding::Value(c_filter.argument), c_filter.argument),
             WrFilterOpType::Saturate => FilterOp::Saturate(c_filter.argument),
             WrFilterOpType::Sepia => FilterOp::Sepia(c_filter.argument),
+            WrFilterOpType::DropShadow => FilterOp::DropShadow(c_filter.offset,
+                                                               c_filter.argument,
+                                                               c_filter.color),
         }
     }).collect();
 
@@ -1483,16 +1546,6 @@ pub extern "C" fn wr_dp_pop_scroll_layer(state: &mut WrState) {
 }
 
 #[no_mangle]
-pub extern "C" fn wr_scroll_layer_with_id(dh: &mut DocumentHandle,
-                                          pipeline_id: WrPipelineId,
-                                          scroll_id: u64,
-                                          new_scroll_origin: LayoutPoint) {
-    assert!(unsafe { is_in_compositor_thread() });
-    let clip_id = ClipId::new(scroll_id, pipeline_id);
-    dh.api.scroll_node_with_id(dh.document_id, new_scroll_origin, clip_id, ScrollClamping::NoClamping);
-}
-
-#[no_mangle]
 pub extern "C" fn wr_dp_push_clip_and_scroll_info(state: &mut WrState,
                                                   scroll_id: u64,
                                                   clip_id: *const u64) {
@@ -1553,18 +1606,25 @@ pub extern "C" fn wr_dp_push_image(state: &mut WrState,
                                    stretch_size: LayoutSize,
                                    tile_spacing: LayoutSize,
                                    image_rendering: ImageRendering,
-                                   key: WrImageKey) {
+                                   key: WrImageKey,
+                                   premultiplied_alpha: bool) {
     debug_assert!(unsafe { is_in_main_thread() || is_in_compositor_thread() });
 
     let mut prim_info = LayoutPrimitiveInfo::with_clip_rect(bounds, clip.into());
     prim_info.is_backface_visible = is_backface_visible;
     prim_info.tag = state.current_tag;
+    let alpha_type = if premultiplied_alpha {
+        AlphaType::PremultipliedAlpha
+    } else {
+        AlphaType::Alpha
+    };
     state.frame_builder
          .dl_builder
          .push_image(&prim_info,
                      stretch_size,
                      tile_spacing,
                      image_rendering,
+                     alpha_type,
                      key);
 }
 
@@ -2003,6 +2063,7 @@ pub extern "C" fn wr_add_ref_arc(arc: &ArcVecU8) -> *const VecU8 {
     Arc::into_raw(arc.clone())
 }
 
+/// cbindgen:postfix=WR_DESTRUCTOR_SAFE_FUNC
 #[no_mangle]
 pub unsafe extern "C" fn wr_dec_ref_arc(arc: *const VecU8) {
     Arc::from_raw(arc);

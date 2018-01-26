@@ -157,6 +157,17 @@ nsLayoutStylesheetCache::XULSheet()
 }
 
 StyleSheet*
+nsLayoutStylesheetCache::XULComponentsSheet()
+{
+  if (!mXULComponentsSheet) {
+    LoadSheetURL("chrome://global/content/components.css",
+                 &mXULComponentsSheet, eAgentSheetFeatures, eCrash);
+  }
+
+  return mXULComponentsSheet;
+}
+
+StyleSheet*
 nsLayoutStylesheetCache::QuirkSheet()
 {
   return mQuirkSheet;
@@ -313,6 +324,7 @@ nsLayoutStylesheetCache::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf
   MEASURE(mUserChromeSheet);
   MEASURE(mUserContentSheet);
   MEASURE(mXULSheet);
+  MEASURE(mXULComponentsSheet);
 
   // Measurement of the following members may be added later if DMD finds it is
   // worthwhile:
@@ -353,6 +365,7 @@ nsLayoutStylesheetCache::nsLayoutStylesheetCache(StyleBackendType aType)
   if (XRE_IsParentProcess()) {
     // We know we need xul.css for the UI, so load that now too:
     XULSheet();
+    XULComponentsSheet();
   }
 
   auto& userContentSheetURL = aType == StyleBackendType::Gecko ?
@@ -407,8 +420,6 @@ nsLayoutStylesheetCache::For(StyleBackendType aType)
     // style sheets will be re-parsed.
     // Preferences::RegisterCallback(&DependentPrefChanged,
     //                               "layout.css.example-pref.enabled");
-    Preferences::RegisterCallback(&DependentPrefChanged,
-                                  "layout.css.grid.enabled");
   }
 
   return cache;
@@ -865,7 +876,7 @@ nsLayoutStylesheetCache::DependentPrefChanged(const char* aPref, void* aData)
   InvalidateSheet(gStyleCache_Gecko ? &gStyleCache_Gecko->sheet_ : nullptr, \
                   gStyleCache_Servo ? &gStyleCache_Servo->sheet_ : nullptr);
 
-  INVALIDATE(mUASheet);  // for layout.css.grid.enabled
+  // INVALIDATE(mUASheet);  // for layout.css.example-pref.enabled
 
 #undef INVALIDATE
 }

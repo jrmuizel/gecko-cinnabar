@@ -66,6 +66,26 @@ using mozilla::FloatingPoint;
 // Some convenient short-cuts are used to avoid repeating the same list of
 // architectures on each method declaration, such as PER_ARCH and
 // PER_SHARED_ARCH.
+//
+// Functions that are architecture-agnostic and are the same for all
+// architectures, that it's necessary to define inline *in this header* to
+// avoid used-before-defined warnings/errors that would occur if the
+// definitions were in MacroAssembler-inl.h, should use the OOL_IN_HEADER
+// marker at end of the declaration:
+//
+//   inline uint32_t framePushed() const OOL_IN_HEADER;
+//
+// Such functions should then be defined immediately after MacroAssembler's
+// definition, for example like so:
+//
+//   //{{{ check_macroassembler_style
+//   inline uint32_t
+//   MacroAssembler::framePushed() const
+//   {
+//       return framePushed_;
+//   }
+//   ////}}} check_macroassembler_style
+
 
 # define ALL_ARCH mips32, mips64, arm, arm64, x86, x64
 # define ALL_SHARED_ARCH arm, arm64, x86_shared, mips_shared
@@ -177,7 +197,7 @@ using mozilla::FloatingPoint;
 
 # define PER_ARCH DEFINED_ON(ALL_ARCH)
 # define PER_SHARED_ARCH DEFINED_ON(ALL_SHARED_ARCH)
-
+# define OOL_IN_HEADER
 
 #if MOZ_LITTLE_ENDIAN
 #define IMM32_16ADJ(X) X << 16
@@ -303,7 +323,7 @@ class MacroAssembler : public MacroAssemblerSpecific
             type_(type)
         { }
 
-        void emit(MacroAssembler& masm);
+        void emit(MacroAssembler& masm) override;
     };
 
     /*
@@ -324,7 +344,7 @@ class MacroAssembler : public MacroAssemblerSpecific
             ptr_(ptr)
         { }
 
-        void emit(MacroAssembler& masm);
+        void emit(MacroAssembler& masm) override;
     };
 
     mozilla::Maybe<AutoRooter> autoRooter_;
@@ -401,7 +421,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         return size();
     }
 
-    //{{{ check_macroassembler_style
+    //{{{ check_macroassembler_decl_style
   public:
     // ===============================================================
     // MacroAssembler high-level usage.
@@ -415,14 +435,14 @@ class MacroAssembler : public MacroAssemblerSpecific
     // ===============================================================
     // Frame manipulation functions.
 
-    inline uint32_t framePushed() const;
-    inline void setFramePushed(uint32_t framePushed);
-    inline void adjustFrame(int32_t value);
+    inline uint32_t framePushed() const OOL_IN_HEADER;
+    inline void setFramePushed(uint32_t framePushed) OOL_IN_HEADER;
+    inline void adjustFrame(int32_t value) OOL_IN_HEADER;
 
     // Adjust the frame, to account for implicit modification of the stack
     // pointer, such that callee can remove arguments on the behalf of the
     // caller.
-    inline void implicitPop(uint32_t bytes);
+    inline void implicitPop(uint32_t bytes) OOL_IN_HEADER;
 
   private:
     // This field is used to statically (at compilation time) emulate a frame
@@ -1397,7 +1417,29 @@ class MacroAssembler : public MacroAssemblerSpecific
 
   public:
     // ========================================================================
+    // Convert floating point.
+
+    // temp required on x86 and x64; must be undefined on mips64.
+    void convertUInt64ToFloat32(Register64 src, FloatRegister dest, Register temp)
+        DEFINED_ON(arm64, mips64, x64, x86);
+
+    void convertInt64ToFloat32(Register64 src, FloatRegister dest)
+        DEFINED_ON(arm64, mips64, x64, x86);
+
+    bool convertUInt64ToDoubleNeedsTemp() PER_ARCH;
+
+    // temp required when convertUInt64ToDoubleNeedsTemp() returns true.
+    void convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp) PER_ARCH;
+
+    void convertInt64ToDouble(Register64 src, FloatRegister dest)
+        DEFINED_ON(arm64, mips64, x64, x86);
+
+  public:
+    // ========================================================================
     // wasm support
+
+    CodeOffset illegalInstruction() PER_SHARED_ARCH;
+    void wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset);
 
     // Emit a bounds check against the wasm heap limit, jumping to 'label' if 'cond' holds.
     // Required when WASM_HUGE_MEMORY is not defined.
@@ -1483,9 +1525,22 @@ class MacroAssembler : public MacroAssemblerSpecific
                                              wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(x86_shared);
 
+    void wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                   Label* oolRejoin, FloatRegister tempDouble)
+        DEFINED_ON(arm64, x86, x64);
+    void wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                    Label* oolRejoin, FloatRegister tempDouble)
+        DEFINED_ON(arm64, x86, x64);
     void outOfLineWasmTruncateDoubleToInt64(FloatRegister input, bool isUnsigned,
                                             wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(x86_shared);
+
+    void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                    Label* oolRejoin, FloatRegister tempDouble)
+        DEFINED_ON(arm64, x86, x64);
+    void wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                     Label* oolRejoin, FloatRegister tempDouble)
+        DEFINED_ON(arm64, x86, x64);
     void outOfLineWasmTruncateFloat32ToInt64(FloatRegister input, bool isUnsigned,
                                              wasm::BytecodeOffset off, Label* rejoin)
         DEFINED_ON(x86_shared);
@@ -1506,7 +1561,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Emit the out-of-line trap code to which trapping jumps/branches are
     // bound. This should be called once per function after all other codegen,
     // including "normal" OutOfLineCode.
-    void wasmEmitTrapOutOfLineCode();
+    void wasmEmitOldTrapOutOfLineCode();
 
     // Perform a stack-overflow test, branching to the given Label on overflow.
     void wasmEmitStackCheck(Register sp, Register scratch, Label* onOverflow);
@@ -1520,7 +1575,219 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline void clampIntToUint8(Register reg) PER_SHARED_ARCH;
 
-    //}}} check_macroassembler_style
+  public:
+    // ========================================================================
+    // Primitive atomic operations.
+    //
+    // If the access is from JS and the eventual destination of the result is a
+    // js::Value, it's probably best to use the JS-specific versions of these,
+    // see further below.
+    //
+    // Temp registers must be defined unless otherwise noted in the per-function
+    // constraints.
+
+    // 8-bit, 16-bit, and 32-bit wide operations.
+    //
+    // The 8-bit and 16-bit operations zero-extend or sign-extend the result to
+    // 32 bits, according to `type`.  On 64-bit systems, the upper 32 bits of
+    // the result will be zero.
+
+    // CompareExchange with memory.  Return the value that was in memory,
+    // whether we wrote or not.
+    //
+    // x86-shared: `output` must be eax.
+
+    void compareExchange(Scalar::Type type, const Synchronization& sync, const Address& mem,
+                         Register expected, Register replacement, Register output)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    void compareExchange(Scalar::Type type, const Synchronization& sync, const BaseIndex& mem,
+                         Register expected, Register replacement, Register output)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    // Exchange with memory.  Return the value initially in memory.
+
+    void atomicExchange(Scalar::Type type, const Synchronization& sync, const Address& mem,
+                        Register value, Register output)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    void atomicExchange(Scalar::Type type, const Synchronization& sync, const BaseIndex& mem,
+                        Register value, Register output)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    // Read-modify-write with memory.  Return the value in memory before the
+    // operation.
+    //
+    // x86-shared:
+    //   For 8-bit operations, `value` and `output` must have a byte subregister.
+    //   For Add and Sub, `temp` must be invalid.
+    //   For And, Or, and Xor, `output` must be eax and `temp` must have a byte subregister.
+    //
+    // ARM: Registers `value` and `output` must differ.
+
+    void atomicFetchOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                       Register value, const Address& mem, Register temp, Register output)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    void atomicFetchOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                       Imm32 value, const Address& mem, Register temp, Register output)
+        DEFINED_ON(x86_shared);
+
+    void atomicFetchOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                       Register value, const BaseIndex& mem, Register temp, Register output)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    void atomicFetchOp(Scalar::Type type, const Synchronization& sync, AtomicOp op,
+                       Imm32 value, const BaseIndex& mem, Register temp, Register output)
+        DEFINED_ON(x86_shared);
+
+    // Read-modify-write with memory.  Return no value.
+
+    void atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op, Register value,
+                        const Address& mem, Register temp)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    void atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op, Imm32 value,
+                        const Address& mem, Register temp)
+        DEFINED_ON(x86_shared);
+
+    void atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op, Register value,
+                        const BaseIndex& mem, Register temp)
+        DEFINED_ON(arm, arm64, x86_shared);
+
+    void atomicEffectOp(Scalar::Type type, const Synchronization& sync, AtomicOp op, Imm32 value,
+                        const BaseIndex& mem, Register temp)
+        DEFINED_ON(x86_shared);
+
+    // 64-bit wide operations.
+
+    // 64-bit atomic load.  On 64-bit systems, use regular wasm load with
+    // Synchronization::Load, not this method.
+    //
+    // x86: `temp` must be ecx:ebx; `output` must be edx:eax.
+    // ARM: `temp` should be invalid; `output` must be (even,odd) pair.
+
+    void atomicLoad64(const Synchronization& sync, const Address& mem, Register64 temp,
+                      Register64 output)
+        DEFINED_ON(arm, x86);
+
+    void atomicLoad64(const Synchronization& sync, const BaseIndex& mem, Register64 temp,
+                      Register64 output)
+        DEFINED_ON(arm, x86);
+
+    // x86: `expected` must be the same as `output`, and must be edx:eax
+    // x86: `replacement` must be ecx:ebx
+    // x64: `output` must be rax.
+    // ARM: Registers must be distinct; `replacement` and `output` must be (even,odd) pairs.
+
+    void compareExchange64(const Synchronization& sync, const Address& mem, Register64 expected,
+                           Register64 replacement, Register64 output)
+        DEFINED_ON(arm, arm64, x64, x86);
+
+    void compareExchange64(const Synchronization& sync, const BaseIndex& mem, Register64 expected,
+                           Register64 replacement, Register64 output)
+        DEFINED_ON(arm, arm64, x64, x86);
+
+    // x86: `value` must be ecx:ebx; `output` must be edx:eax.
+    // ARM: Registers must be distinct; `value` and `output` must be (even,odd) pairs.
+
+    void atomicExchange64(const Synchronization& sync, const Address& mem, Register64 value,
+                          Register64 output)
+        DEFINED_ON(arm, arm64, x64, x86);
+
+    void atomicExchange64(const Synchronization& sync, const BaseIndex& mem, Register64 value,
+                          Register64 output)
+        DEFINED_ON(arm, arm64, x64, x86);
+
+    // x86: `output` must be edx:eax, `temp` must be ecx:ebx.
+    // x64: For And, Or, and Xor `output` must be rax.
+    // ARM: Registers must be distinct; `temp` and `output` must be (even,odd) pairs.
+
+    void atomicFetchOp64(const Synchronization& sync, AtomicOp op, Register64 value,
+                         const Address& mem, Register64 temp, Register64 output)
+        DEFINED_ON(arm, arm64, x64);
+
+    void atomicFetchOp64(const Synchronization& sync, AtomicOp op, Register64 value,
+                         const BaseIndex& mem, Register64 temp, Register64 output)
+        DEFINED_ON(arm, arm64, x64);
+
+    void atomicFetchOp64(const Synchronization& sync, AtomicOp op, const Address& value,
+                         const Address& mem, Register64 temp, Register64 output)
+        DEFINED_ON(x86);
+
+    void atomicFetchOp64(const Synchronization& sync, AtomicOp op, const Address& value,
+                         const BaseIndex& mem, Register64 temp, Register64 output)
+        DEFINED_ON(x86);
+
+    void atomicEffectOp64(const Synchronization& sync, AtomicOp op, Register64 value,
+                          const BaseIndex& mem)
+        DEFINED_ON(x64);
+
+    // ========================================================================
+    // JS atomic operations.
+    //
+    // Here the arrayType must be a type that is valid for JS.  As of 2017 that
+    // is an 8-bit, 16-bit, or 32-bit integer type.
+    //
+    // If arrayType is Scalar::Uint32 then:
+    //
+    //   - `output` must be a float register (this is bug 1077305)
+    //   - if the operation takes one temp register then `temp` must be defined
+    //   - if the operation takes two temp registers then `temp2` must be defined.
+    //
+    // Otherwise `output` must be a GPR and `temp`/`temp2` should be InvalidReg.
+    // (`temp1` must always be valid.)
+    //
+    // For additional register constraints, see the primitive 32-bit operations
+    // above.
+
+    void compareExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const Address& mem,
+                           Register expected, Register replacement, Register temp,
+                           AnyRegister output);
+
+    void compareExchangeJS(Scalar::Type arrayType, const Synchronization& sync,
+                           const BaseIndex& mem, Register expected, Register replacement,
+                           Register temp, AnyRegister output);
+
+    void atomicExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const Address& mem,
+                          Register value, Register temp, AnyRegister output);
+
+    void atomicExchangeJS(Scalar::Type arrayType, const Synchronization& sync, const BaseIndex& mem,
+                          Register value, Register temp, AnyRegister output);
+
+    void atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                         Register value, const Address& mem, Register temp1, Register temp2,
+                         AnyRegister output);
+
+    void atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                         Register value, const BaseIndex& mem, Register temp1, Register temp2,
+                         AnyRegister output);
+
+    void atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                         Imm32 value, const Address& mem, Register temp1, Register temp2,
+                         AnyRegister output)
+        DEFINED_ON(x86_shared);
+
+    void atomicFetchOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                         Imm32 value, const BaseIndex& mem, Register temp1, Register temp2,
+                         AnyRegister output)
+        DEFINED_ON(x86_shared);
+
+    void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                          Register value, const Address& mem, Register temp);
+
+    void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                          Register value, const BaseIndex& mem, Register temp);
+
+    void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                          Imm32 value, const Address& mem, Register temp)
+        DEFINED_ON(x86_shared);
+
+    void atomicEffectOpJS(Scalar::Type arrayType, const Synchronization& sync, AtomicOp op,
+                          Imm32 value, const BaseIndex& mem, Register temp)
+        DEFINED_ON(x86_shared);
+
+    //}}} check_macroassembler_decl_style
   public:
 
     // Emits a test of a value against all types in a TypeSet. A scratch
@@ -1625,19 +1892,20 @@ class MacroAssembler : public MacroAssemblerSpecific
             storeTypedOrValue(src.reg(), dest);
     }
 
-    void storeCallWordResult(Register reg) {
+    void storeCallPointerResult(Register reg) {
         if (reg != ReturnReg)
             mov(ReturnReg, reg);
     }
 
     inline void storeCallBoolResult(Register reg);
+    inline void storeCallInt32Result(Register reg);
 
     void storeCallFloatResult(FloatRegister reg) {
         if (reg != ReturnDoubleReg)
             moveDouble(ReturnDoubleReg, reg);
     }
 
-    inline void storeCallResultValue(AnyRegister dest);
+    inline void storeCallResultValue(AnyRegister dest, JSValueType type);
 
     void storeCallResultValue(ValueOperand dest) {
 #if defined(JS_NUNBOX32)
@@ -1677,6 +1945,29 @@ class MacroAssembler : public MacroAssemblerSpecific
         else
             store32(Imm32(key.constant()), dest);
     }
+
+  private:
+    template <typename T>
+    void computeSpectreIndexMaskGeneric(Register index, const T& length, Register output);
+
+    void computeSpectreIndexMask(Register index, Register length, Register output);
+
+    template <typename T>
+    void computeSpectreIndexMask(int32_t index, const T& length, Register output);
+
+  public:
+    void spectreMaskIndex(int32_t index, Register length, Register output);
+    void spectreMaskIndex(int32_t index, const Address& length, Register output);
+    void spectreMaskIndex(Register index, Register length, Register output);
+    void spectreMaskIndex(Register index, const Address& length, Register output);
+
+    // The length must be a power of two. Performs a bounds check and Spectre index
+    // masking.
+    void boundsCheck32PowerOfTwo(Register index, uint32_t length, Label* failure);
+
+    // Performs a bounds check and Spectre index masking.
+    void boundsCheck32ForLoad(Register index, Register length, Register scratch, Label* failure);
+    void boundsCheck32ForLoad(Register index, const Address& length, Register scratch, Label* failure);
 
     template <typename T>
     void guardedCallPreBarrier(const T& address, MIRType type) {
@@ -1735,6 +2026,9 @@ class MacroAssembler : public MacroAssemblerSpecific
     void storeToTypedFloatArray(Scalar::Type arrayType, FloatRegister value, const Address& dest,
                                 unsigned numElems = 0);
 
+    void memoryBarrierBefore(const Synchronization& sync);
+    void memoryBarrierAfter(const Synchronization& sync);
+
     // Load a property from an UnboxedPlainObject or UnboxedArrayObject.
     template <typename T>
     void loadUnboxedProperty(T address, JSValueType type, TypedOrValueRegister output);
@@ -1745,16 +2039,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     template <typename T>
     void storeUnboxedProperty(T address, JSValueType type,
                               const ConstantOrRegister& value, Label* failure);
-
-    template <typename T>
-    Register extractString(const T& source, Register scratch) {
-        return extractObject(source, scratch);
-    }
-
-    template <typename T>
-    Register extractSymbol(const T& source, Register scratch) {
-        return extractObject(source, scratch);
-    }
 
     void debugAssertIsObject(const ValueOperand& val);
 
@@ -2060,8 +2344,11 @@ class MacroAssembler : public MacroAssemblerSpecific
     }
 
     enum IntConversionBehavior {
+        // These two try to convert the input to an int32 using ToNumber and
+        // will fail if the resulting int32 isn't strictly equal to the input.
         IntConversion_Normal,
         IntConversion_NegativeZeroCheck,
+        // These two will convert the input to an int32 with loss of precision.
         IntConversion_Truncate,
         IntConversion_ClampToUint8,
     };
@@ -2103,19 +2390,12 @@ class MacroAssembler : public MacroAssemblerSpecific
     void convertTypedOrValueToInt(TypedOrValueRegister src, FloatRegister temp, Register output,
                                   Label* fail, IntConversionBehavior behavior);
 
-    //
-    // Convenience functions for converting values to int32.
-    //
-    void convertValueToInt32(ValueOperand value, FloatRegister temp, Register output, Label* fail,
-                             bool negativeZeroCheck)
-    {
-        convertValueToInt(value, temp, output, fail, negativeZeroCheck
-                          ? IntConversion_NegativeZeroCheck
-                          : IntConversion_Normal);
-    }
+    // This carries over the MToNumberInt32 operation on the ValueOperand
+    // input; see comment at the top of this class.
     void convertValueToInt32(ValueOperand value, MDefinition* input,
                              FloatRegister temp, Register output, Label* fail,
-                             bool negativeZeroCheck, IntConversionInputKind conversion = IntConversion_Any)
+                             bool negativeZeroCheck,
+                             IntConversionInputKind conversion = IntConversion_Any)
     {
         convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
                           negativeZeroCheck
@@ -2123,36 +2403,9 @@ class MacroAssembler : public MacroAssemblerSpecific
                           : IntConversion_Normal,
                           conversion);
     }
-    MOZ_MUST_USE bool convertValueToInt32(JSContext* cx, const Value& v, Register output,
-                                          Label* fail, bool negativeZeroCheck)
-    {
-        return convertValueToInt(cx, v, output, fail, negativeZeroCheck
-                                 ? IntConversion_NegativeZeroCheck
-                                 : IntConversion_Normal);
-    }
-    MOZ_MUST_USE bool convertConstantOrRegisterToInt32(JSContext* cx,
-                                                       const ConstantOrRegister& src,
-                                                       FloatRegister temp, Register output,
-                                                       Label* fail, bool negativeZeroCheck)
-    {
-        return convertConstantOrRegisterToInt(cx, src, temp, output, fail, negativeZeroCheck
-                                              ? IntConversion_NegativeZeroCheck
-                                              : IntConversion_Normal);
-    }
-    void convertTypedOrValueToInt32(TypedOrValueRegister src, FloatRegister temp, Register output,
-                                    Label* fail, bool negativeZeroCheck)
-    {
-        convertTypedOrValueToInt(src, temp, output, fail, negativeZeroCheck
-                                 ? IntConversion_NegativeZeroCheck
-                                 : IntConversion_Normal);
-    }
 
-    //
-    // Convenience functions for truncating values to int32.
-    //
-    void truncateValueToInt32(ValueOperand value, FloatRegister temp, Register output, Label* fail) {
-        convertValueToInt(value, temp, output, fail, IntConversion_Truncate);
-    }
+    // This carries over the MTruncateToInt32 operation on the ValueOperand
+    // input; see the comment at the top of this class.
     void truncateValueToInt32(ValueOperand value, MDefinition* input,
                               Label* handleStringEntry, Label* handleStringRejoin,
                               Label* truncateDoubleSlow,
@@ -2161,16 +2414,13 @@ class MacroAssembler : public MacroAssemblerSpecific
         convertValueToInt(value, input, handleStringEntry, handleStringRejoin, truncateDoubleSlow,
                           stringReg, temp, output, fail, IntConversion_Truncate);
     }
-    void truncateValueToInt32(ValueOperand value, MDefinition* input,
-                              FloatRegister temp, Register output, Label* fail)
+
+    void truncateValueToInt32(ValueOperand value, FloatRegister temp, Register output, Label* fail)
     {
-        convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
-                          IntConversion_Truncate);
+        truncateValueToInt32(value, nullptr, nullptr, nullptr, nullptr, InvalidReg, temp, output,
+                             fail);
     }
-    MOZ_MUST_USE bool truncateValueToInt32(JSContext* cx, const Value& v, Register output,
-                                           Label* fail) {
-        return convertValueToInt(cx, v, output, fail, IntConversion_Truncate);
-    }
+
     MOZ_MUST_USE bool truncateConstantOrRegisterToInt32(JSContext* cx,
                                                         const ConstantOrRegister& src,
                                                         FloatRegister temp, Register output,
@@ -2178,16 +2428,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     {
         return convertConstantOrRegisterToInt(cx, src, temp, output, fail, IntConversion_Truncate);
     }
-    void truncateTypedOrValueToInt32(TypedOrValueRegister src, FloatRegister temp, Register output,
-                                     Label* fail)
-    {
-        convertTypedOrValueToInt(src, temp, output, fail, IntConversion_Truncate);
-    }
 
     // Convenience functions for clamping values to uint8.
-    void clampValueToUint8(ValueOperand value, FloatRegister temp, Register output, Label* fail) {
-        convertValueToInt(value, temp, output, fail, IntConversion_ClampToUint8);
-    }
     void clampValueToUint8(ValueOperand value, MDefinition* input,
                            Label* handleStringEntry, Label* handleStringRejoin,
                            Register stringReg, FloatRegister temp, Register output, Label* fail)
@@ -2195,16 +2437,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         convertValueToInt(value, input, handleStringEntry, handleStringRejoin, nullptr,
                           stringReg, temp, output, fail, IntConversion_ClampToUint8);
     }
-    void clampValueToUint8(ValueOperand value, MDefinition* input,
-                           FloatRegister temp, Register output, Label* fail)
-    {
-        convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
-                          IntConversion_ClampToUint8);
-    }
-    MOZ_MUST_USE bool clampValueToUint8(JSContext* cx, const Value& v, Register output,
-                                        Label* fail) {
-        return convertValueToInt(cx, v, output, fail, IntConversion_ClampToUint8);
-    }
+
     MOZ_MUST_USE bool clampConstantOrRegisterToUint8(JSContext* cx,
                                                      const ConstantOrRegister& src,
                                                      FloatRegister temp, Register output,
@@ -2212,11 +2445,6 @@ class MacroAssembler : public MacroAssemblerSpecific
     {
         return convertConstantOrRegisterToInt(cx, src, temp, output, fail,
                                               IntConversion_ClampToUint8);
-    }
-    void clampTypedOrValueToUint8(TypedOrValueRegister src, FloatRegister temp, Register output,
-                                  Label* fail)
-    {
-        convertTypedOrValueToInt(src, temp, output, fail, IntConversion_ClampToUint8);
     }
 
   public:
@@ -2252,6 +2480,35 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     inline void assertStackAlignment(uint32_t alignment, int32_t offset = 0);
 };
+
+//{{{ check_macroassembler_style
+inline uint32_t
+MacroAssembler::framePushed() const
+{
+    return framePushed_;
+}
+
+inline void
+MacroAssembler::setFramePushed(uint32_t framePushed)
+{
+    framePushed_ = framePushed;
+}
+
+inline void
+MacroAssembler::adjustFrame(int32_t value)
+{
+    MOZ_ASSERT_IF(value < 0, framePushed_ >= uint32_t(-value));
+    setFramePushed(framePushed_ + value);
+}
+
+inline void
+MacroAssembler::implicitPop(uint32_t bytes)
+{
+    MOZ_ASSERT(bytes % sizeof(intptr_t) == 0);
+    MOZ_ASSERT(bytes <= INT32_MAX);
+    adjustFrame(-int32_t(bytes));
+}
+//}}} check_macroassembler_style
 
 static inline Assembler::DoubleCondition
 JSOpToDoubleCondition(JSOp op)

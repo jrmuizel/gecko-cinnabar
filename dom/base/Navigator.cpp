@@ -13,7 +13,6 @@
 #include "nsMimeTypeArray.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/BodyExtractor.h"
-#include "mozilla/dom/DesktopNotification.h"
 #include "mozilla/dom/FetchBinding.h"
 #include "mozilla/dom/File.h"
 #include "nsGeolocation.h"
@@ -174,9 +173,7 @@ Navigator::~Navigator()
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(Navigator)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMNavigator)
-  NS_INTERFACE_MAP_ENTRY(nsIDOMNavigator)
-  NS_INTERFACE_MAP_ENTRY(nsIMozNavigatorNetwork)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Navigator)
@@ -195,7 +192,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPlugins)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPermissions)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mGeolocation)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNotification)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBatteryManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBatteryPromise)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mConnection)
@@ -236,11 +232,6 @@ Navigator::Invalidate()
   if (mGeolocation) {
     mGeolocation->Shutdown();
     mGeolocation = nullptr;
-  }
-
-  if (mNotification) {
-    mNotification->Shutdown();
-    mNotification = nullptr;
   }
 
   if (mBatteryManager) {
@@ -285,10 +276,6 @@ Navigator::Invalidate()
   }
 }
 
-//*****************************************************************************
-//    Navigator::nsIDOMNavigator
-//*****************************************************************************
-
 void
 Navigator::GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
                         ErrorResult& aRv) const
@@ -317,20 +304,26 @@ Navigator::GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
   }
 }
 
-NS_IMETHODIMP
-Navigator::GetAppCodeName(nsAString& aAppCodeName)
+void
+Navigator::GetAppCodeName(nsAString& aAppCodeName, ErrorResult& aRv)
 {
   nsresult rv;
 
   nsCOMPtr<nsIHttpProtocolHandler>
     service(do_GetService(NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "http", &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return;
+  }
 
   nsAutoCString appName;
   rv = service->GetAppName(appName);
-  CopyASCIItoUTF16(appName, aAppCodeName);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return;
+  }
 
-  return rv;
+  CopyASCIItoUTF16(appName, aAppCodeName);
 }
 
 void
@@ -414,7 +407,7 @@ Navigator::GetAcceptLanguages(nsTArray<nsString>& aLanguages)
  * See RFC 2616, Section 15.1.4 "Privacy Issues Connected to Accept Headers" for
  * the reasons why.
  */
-NS_IMETHODIMP
+void
 Navigator::GetLanguage(nsAString& aLanguage)
 {
   nsTArray<nsString> languages;
@@ -424,8 +417,6 @@ Navigator::GetLanguage(nsAString& aLanguage)
   } else {
     aLanguage.Truncate();
   }
-
-  return NS_OK;
 }
 
 void
@@ -488,33 +479,29 @@ Navigator::GetOscpu(nsAString& aOSCPU, CallerType aCallerType,
   CopyASCIItoUTF16(oscpu, aOSCPU);
 }
 
-NS_IMETHODIMP
+void
 Navigator::GetVendor(nsAString& aVendor)
 {
   aVendor.Truncate();
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 Navigator::GetVendorSub(nsAString& aVendorSub)
 {
   aVendorSub.Truncate();
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 Navigator::GetProduct(nsAString& aProduct)
 {
   aProduct.AssignLiteral("Gecko");
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 Navigator::GetProductSub(nsAString& aProductSub)
 {
   // Legacy build ID hardcoded for backward compatibility (bug 776376)
   aProductSub.AssignLiteral(LEGACY_BUILD_ID);
-  return NS_OK;
 }
 
 nsMimeTypeArray*
@@ -667,7 +654,7 @@ Navigator::GetBuildID(nsAString& aBuildID, CallerType aCallerType,
   AppendASCIItoUTF16(buildID, aBuildID);
 }
 
-NS_IMETHODIMP
+void
 Navigator::GetDoNotTrack(nsAString &aResult)
 {
   bool doNotTrack = nsContentUtils::DoNotTrackEnabled();
@@ -681,8 +668,6 @@ Navigator::GetDoNotTrack(nsAString &aResult)
   } else {
     aResult.AssignLiteral("unspecified");
   }
-
-  return NS_OK;
 }
 
 bool
@@ -1171,6 +1156,7 @@ Navigator::SendBeaconInternal(const nsAString& aUrl,
                      doc,
                      securityFlags,
                      nsIContentPolicy::TYPE_BEACON,
+                     nullptr, // aPerformanceStorage
                      nullptr, // aLoadGroup
                      nullptr, // aCallbacks
                      loadFlags);
@@ -1314,22 +1300,6 @@ Navigator::MozGetUserMediaDevices(const MediaStreamConstraints& aConstraints,
   MediaManager* manager = MediaManager::Get();
   aRv = manager->GetUserMediaDevices(mWindow, aConstraints, onsuccess, onerror,
                                      aInnerWindowID, aCallID);
-}
-
-DesktopNotificationCenter*
-Navigator::GetMozNotification(ErrorResult& aRv)
-{
-  if (mNotification) {
-    return mNotification;
-  }
-
-  if (!mWindow || !mWindow->GetDocShell()) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-
-  mNotification = new DesktopNotificationCenter(mWindow);
-  return mNotification;
 }
 
 //*****************************************************************************
@@ -1511,16 +1481,11 @@ Navigator::RequestVRPresentation(VRDisplay& aDisplay)
   win->DispatchVRDisplayActivate(aDisplay.DisplayId(), VRDisplayEventReason::Requested);
 }
 
-//*****************************************************************************
-//    Navigator::nsIMozNavigatorNetwork
-//*****************************************************************************
-
-NS_IMETHODIMP
-Navigator::GetProperties(nsINetworkProperties** aProperties)
+nsINetworkProperties*
+Navigator::GetNetworkProperties()
 {
-  ErrorResult rv;
-  NS_IF_ADDREF(*aProperties = GetConnection(rv));
-  return NS_OK;
+  IgnoredErrorResult rv;
+  return GetConnection(rv);
 }
 
 network::Connection*

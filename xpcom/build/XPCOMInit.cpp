@@ -103,6 +103,7 @@ extern nsresult nsStringInputStreamConstructor(nsISupports*, REFNSIID, void**);
 #include "nsMemoryInfoDumper.h"
 #include "nsSecurityConsoleMessage.h"
 #include "nsMessageLoop.h"
+#include "nss.h"
 
 #include <locale.h>
 #include "mozilla/Services.h"
@@ -544,10 +545,6 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
   }
 #endif
 
-#if defined(XP_UNIX)
-  NS_StartupNativeCharsetUtils();
-#endif
-
   NS_StartupLocalFile();
 
   nsDirectoryService::RealInit();
@@ -983,9 +980,6 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
 
   // Shutdown nsLocalFile string conversion
   NS_ShutdownLocalFile();
-#ifdef XP_UNIX
-  NS_ShutdownNativeCharsetUtils();
-#endif
 
   // Shutdown xpcom. This will release all loaders and cause others holding
   // a refcount to the component manager to release it.
@@ -1010,6 +1004,22 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
     // Shut down the JS engine.
     JS_ShutDown();
     sInitializedJS = false;
+  }
+
+  // After all threads have been joined and the component manager has been shut
+  // down, any remaining objects that could be holding NSS resources (should)
+  // have been released, so we can safely shut down NSS.
+  if (NSS_IsInitialized()) {
+    // It would be nice to enforce that this succeeds, at least on debug builds.
+    // This would alert us to NSS resource leaks. Unfortunately there are some
+    // architectural roadblocks in the way. Some tests (e.g. pkix gtests) need
+    // to be re-worked to release their NSS resources when they're done. In the
+    // meantime, just emit a warning. Chasing down these leaks is tracked in
+    // bug 1230312.
+    if (NSS_Shutdown() != SECSuccess) {
+      NS_WARNING("NSS_Shutdown failed - some NSS resources are still in use "
+                 "(see bugs 1417680 and 1230312)");
+    }
   }
 
   // Release our own singletons

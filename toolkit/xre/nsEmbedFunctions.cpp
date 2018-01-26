@@ -90,9 +90,8 @@
 #include "mozilla/Preferences.h"
 #endif
 
-#if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
+#if defined(XP_LINUX) && defined(MOZ_SANDBOX)
 #include "mozilla/Sandbox.h"
-#include "mozilla/SandboxInfo.h"
 #endif
 
 #if defined(XP_LINUX)
@@ -114,6 +113,10 @@ using mozilla::_ipdltest::IPDLUnitTestProcessChild;
 
 #ifdef MOZ_JPROF
 #include "jprof.h"
+#endif
+
+#if defined(XP_WIN) && defined(MOZ_ENABLE_SKIA_PDF)
+#include "mozilla/widget/PDFiumProcessChild.h"
 #endif
 
 using namespace mozilla;
@@ -347,8 +350,8 @@ XRE_InitChildProcess(int aArgc,
   MOZ_ASSERT(aChildData);
 
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX)
-    // This has to happen while we're still single-threaded.
-    mozilla::SandboxEarlyInit(XRE_GetProcessType());
+  // This has to happen before glib thread pools are started.
+  mozilla::SandboxEarlyInit();
 #endif
 
 #ifdef MOZ_JPROF
@@ -511,9 +514,6 @@ XRE_InitChildProcess(int aArgc,
 #ifdef MOZ_X11
   XInitThreads();
 #endif
-#if MOZ_WIDGET_GTK == 2
-  XRE_GlibInit();
-#endif
 #ifdef MOZ_WIDGET_GTK
   // Setting the name here avoids the need to pass this through to gtk_init().
   g_set_prgname(aArgv[0]);
@@ -527,7 +527,8 @@ XRE_InitChildProcess(int aArgc,
       printf_stderr("Could not allow ptrace from any process.\n");
     }
 #endif
-    printf_stderr("\n\nCHILDCHILDCHILDCHILD\n  debug me @ %d\n\n",
+    printf_stderr("\n\nCHILDCHILDCHILDCHILD (process type %s)\n  debug me @ %d\n\n",
+                  XRE_ChildProcessTypeToString(XRE_GetProcessType()),
                   base::GetCurrentProcId());
     sleep(GetDebugChildPauseTime());
   }
@@ -537,7 +538,8 @@ XRE_InitChildProcess(int aArgc,
                   "Invoking NS_DebugBreak() to debug child process",
                   nullptr, __FILE__, __LINE__);
   } else if (PR_GetEnv("MOZ_DEBUG_CHILD_PAUSE")) {
-    printf_stderr("\n\nCHILDCHILDCHILDCHILD\n  debug me @ %d\n\n",
+    printf_stderr("\n\nCHILDCHILDCHILDCHILD (process type %s)\n  debug me @ %d\n\n",
+                  XRE_ChildProcessTypeToString(XRE_GetProcessType()),
                   base::GetCurrentProcId());
     ::Sleep(GetDebugChildPauseTime());
   }
@@ -605,6 +607,7 @@ XRE_InitChildProcess(int aArgc,
       uiLoopType = MessageLoop::TYPE_MOZILLA_CHILD;
       break;
   case GeckoProcessType_GMPlugin:
+  case GeckoProcessType_PDFium:
       uiLoopType = MessageLoop::TYPE_DEFAULT;
       break;
   default:
@@ -652,6 +655,11 @@ XRE_InitChildProcess(int aArgc,
         process = new gmp::GMPProcessChild(parentPID);
         break;
 
+#if defined(XP_WIN) && defined(MOZ_ENABLE_SKIA_PDF)
+      case GeckoProcessType_PDFium:
+        process = new widget::PDFiumProcessChild(parentPID);
+        break;
+#endif
       case GeckoProcessType_GPU:
         process = new gfx::GPUProcessImpl(parentPID);
         break;
@@ -965,7 +973,7 @@ XRE_ShutdownTestShell()
 void
 XRE_InstallX11ErrorHandler()
 {
-#if (MOZ_WIDGET_GTK == 3)
+#ifdef MOZ_WIDGET_GTK
   InstallGdkErrorHandler();
 #else
   InstallX11ErrorHandler();

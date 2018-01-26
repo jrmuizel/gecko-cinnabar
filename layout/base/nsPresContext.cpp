@@ -443,6 +443,7 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(nsPresContext)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsPresContext)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnimationManager);
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTransitionManager);
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument);
   // NS_IMPL_CYCLE_COLLECTION_TRAVERSE_RAWPTR(mDeviceContext); // not xpcom
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEffectCompositor);
@@ -457,6 +458,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsPresContext)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAnimationManager);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mTransitionManager);
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument);
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDeviceContext); // worth bothering?
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mEffectCompositor);
@@ -1293,9 +1295,9 @@ void nsPresContext::SetImgAnimations(nsIContent *aParent, uint16_t aMode)
     SetImgAnimModeOnImgReq(imgReq, aMode);
   }
 
-  uint32_t count = aParent->GetChildCount();
-  for (uint32_t i = 0; i < count; ++i) {
-    SetImgAnimations(aParent->GetChildAt(i), aMode);
+  for (nsIContent* childContent = aParent->GetFirstChild();
+       childContent; childContent = childContent->GetNextSibling()) {
+    SetImgAnimations(childContent, aMode);
   }
 }
 
@@ -1689,19 +1691,7 @@ nsPresContext::GetBidi() const
 bool
 nsPresContext::IsTopLevelWindowInactive()
 {
-  nsCOMPtr<nsIDocShellTreeItem> treeItem(mContainer);
-  if (!treeItem)
-    return false;
-
-  nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  treeItem->GetRootTreeItem(getter_AddRefs(rootItem));
-  if (!rootItem) {
-    return false;
-  }
-
-  nsCOMPtr<nsPIDOMWindowOuter> domWindow = rootItem->GetWindow();
-
-  return domWindow && !domWindow->IsActive();
+  return Document()->IsTopLevelWindowInactive();
 }
 
 void
@@ -2367,7 +2357,7 @@ public:
   }
   virtual ~CounterStyleCleaner() {}
 
-  void DidRefresh() final
+  void DidRefresh() final override
   {
     mRefreshDriver->RemovePostRefreshObserver(this);
     mCounterStyleManager->CleanRetiredStyles();
@@ -3188,8 +3178,7 @@ nsPresContext::RebuildFontFeatureValues()
 
 nsRootPresContext::nsRootPresContext(nsIDocument* aDocument,
                                      nsPresContextType aType)
-  : nsPresContext(aDocument, aType),
-    mDOMGeneration(0)
+  : nsPresContext(aDocument, aType)
 {
 }
 

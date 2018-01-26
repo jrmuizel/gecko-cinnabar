@@ -71,8 +71,6 @@ ifdef MOZ_CODE_COVERAGE
 	@echo 'Generating chrome-map for coverage data...'
 	$(topsrcdir)/mach build-backend -b ChromeMap
 	@echo 'Packaging code coverage data...'
-	# Package code coverage gcno tree
-	@echo 'Packaging code coverage data...'
 	$(RM) $(CODE_COVERAGE_ARCHIVE_BASENAME).zip
 	$(PYTHON) -mmozbuild.codecoverage.packager \
 		--output-file='$(DIST)/$(PKG_PATH)$(CODE_COVERAGE_ARCHIVE_BASENAME).zip'
@@ -121,7 +119,7 @@ make-buildinfo-file:
 	$(PYTHON) $(MOZILLA_DIR)/toolkit/mozapps/installer/informulate.py \
 		$(MOZ_BUILDINFO_FILE) \
 		BUILDID=$(BUILDID) \
-		$(addprefix MOZ_SOURCE_REPO=,MOZ_SOURCE_REPO=$(shell awk '$$2 == "MOZ_SOURCE_REPO" {print $$3}' $(DEPTH)/source-repo.h)) \
+		$(addprefix MOZ_SOURCE_REPO=,$(shell awk '$$2 == "MOZ_SOURCE_REPO" {print $$3}' $(DEPTH)/source-repo.h)) \
 		MOZ_SOURCE_STAMP=$(shell awk '$$2 == "MOZ_SOURCE_STAMP" {print $$3}' $(DEPTH)/source-repo.h) \
 		MOZ_PKG_PLATFORM=$(MOZ_PKG_PLATFORM)
 	echo "buildID=$(BUILDID)" > $(MOZ_BUILDID_INFO_TXT_FILE)
@@ -206,14 +204,14 @@ endif
 # and places it in dist/bin/res - it should be used when packaging a build.
 multilocale.json: LOCALES?=$(MOZ_CHROME_MULTILOCALE)
 multilocale.json:
-	$(call py_action,file_generate,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main $(MULTILOCALE_DIR)/multilocale.json $(MDDEPDIR)/multilocale.json.pp $(ALL_LOCALES))
+	$(call py_action,file_generate,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.json' $(MDDEPDIR)/multilocale.json.pp $(ALL_LOCALES))
 
 # This version of the target uses AB_CD to build multilocale.json and places it
 # in the $(XPI_NAME)/res dir - it should be used when repackaging a build.
 multilocale.json-%: LOCALES?=$(AB_CD)
 multilocale.json-%: MULTILOCALE_DIR=$(DIST)/xpi-stage/$(XPI_NAME)/res
 multilocale.json-%:
-	$(call py_action,file_generate,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main $(MULTILOCALE_DIR)/multilocale.json $(MDDEPDIR)/multilocale.json.pp $(ALL_LOCALES))
+	$(call py_action,file_generate,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.json' $(MDDEPDIR)/multilocale.json.pp $(ALL_LOCALES))
 
 locale-manifest.in: LOCALES?=$(MOZ_CHROME_MULTILOCALE)
 locale-manifest.in: $(GLOBAL_DEPS) FORCE

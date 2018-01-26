@@ -28,7 +28,8 @@ public:
   ScaledFontMac(CGFontRef aFont, const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
                 bool aOwnsFont = false,
                 const Color &aFontSmoothingBackgroundColor = Color(),
-                bool aUseFontSmoothing = true, bool aApplySyntheticBold = false);
+                bool aUseFontSmoothing = true,
+                bool aApplySyntheticBold = false);
   ~ScaledFontMac();
 
   FontType GetType() const override { return FontType::MAC; }

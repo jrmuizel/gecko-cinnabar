@@ -122,7 +122,7 @@ function getTempFile(leafName) {
  */
 function promiseExecuteSoon() {
   return new Promise(resolve => {
-    do_execute_soon(resolve);
+    executeSoon(resolve);
   });
 }
 
@@ -158,11 +158,16 @@ function promiseWaitForVisit(aUrl) {
       QueryInterface: XPCOMUtils.generateQI([Ci.nsINavHistoryObserver]),
       onBeginUpdateBatch() {},
       onEndUpdateBatch() {},
-      onVisit(aURI, aVisitID, aTime, aSessionID, aReferringID,
-                        aTransitionType, aGUID, aHidden) {
-        if (aURI.equals(uri)) {
+      onVisits(aVisits) {
+        Assert.equal(aVisits.length, 1);
+        let {
+          uri: visitUri,
+          time,
+          transitionType,
+        } = aVisits[0];
+        if (visitUri.equals(uri)) {
           PlacesUtils.history.removeObserver(this);
-          resolve([aTime, aTransitionType]);
+          resolve([time, transitionType]);
         }
       },
       onTitleChanged() {},
@@ -171,27 +176,6 @@ function promiseWaitForVisit(aUrl) {
       onPageChanged() {},
       onDeleteVisits() {},
     });
-
-  });
-}
-
-/**
- * Check browsing history to see whether the given URI has been visited.
- *
- * @param aUrl
- *        String containing the URI that will be visited.
- *
- * @return {Promise}
- * @resolves Boolean indicating whether the URI has been visited.
- * @rejects JavaScript exception.
- */
-function promiseIsURIVisited(aUrl) {
-  return new Promise(resolve => {
-
-    PlacesUtils.asyncHistory.isURIVisited(NetUtil.newURI(aUrl),
-      function(aURI, aIsVisited) {
-        resolve(aIsVisited);
-      });
 
   });
 }
@@ -267,7 +251,7 @@ function promiseStartLegacyDownload(aSourceUrl, aOptions) {
   }
 
   if (aOptions && aOptions.launcherPath) {
-    do_check_true(mimeInfo != null);
+    Assert.ok(mimeInfo != null);
 
     let localHandlerApp = Cc["@mozilla.org/uriloader/local-handler-app;1"]
                             .createInstance(Ci.nsILocalHandlerApp);
@@ -278,7 +262,7 @@ function promiseStartLegacyDownload(aSourceUrl, aOptions) {
   }
 
   if (aOptions && aOptions.launchWhenSucceeded) {
-    do_check_true(mimeInfo != null);
+    Assert.ok(mimeInfo != null);
 
     mimeInfo.preferredAction = Ci.nsIMIMEInfo.useHelperApp;
   }
@@ -499,17 +483,17 @@ function promiseVerifyContents(aPath, aExpectedContents) {
       NetUtil.asyncFetch(
         { uri: NetUtil.newURI(file), loadUsingSystemPrincipal: true },
         function(aInputStream, aStatus) {
-          do_check_true(Components.isSuccessCode(aStatus));
+          Assert.ok(Components.isSuccessCode(aStatus));
           let contents = NetUtil.readInputStreamToString(aInputStream,
                                                          aInputStream.available());
           if (contents.length > TEST_DATA_SHORT.length * 2 ||
               /[^\x20-\x7E]/.test(contents)) {
             // Do not print the entire content string to the test log.
-            do_check_eq(contents.length, aExpectedContents.length);
-            do_check_true(contents == aExpectedContents);
+            Assert.equal(contents.length, aExpectedContents.length);
+            Assert.ok(contents == aExpectedContents);
           } else {
             // Print the string if it is short and made of printable characters.
-            do_check_eq(contents, aExpectedContents);
+            Assert.equal(contents, aExpectedContents);
           }
           resolve();
         });
@@ -565,7 +549,7 @@ function mustInterruptResponses() {
   // on the client side anymore.
   _gDeferResponses.resolve();
 
-  do_print("Interruptible responses will be blocked midway.");
+  info("Interruptible responses will be blocked midway.");
   _gDeferResponses = Promise.defer();
 }
 
@@ -573,7 +557,7 @@ function mustInterruptResponses() {
  * Allows all the current and future interruptible requests to complete.
  */
 function continueResponses() {
-  do_print("Interruptible responses are now allowed to continue.");
+  info("Interruptible responses are now allowed to continue.");
   _gDeferResponses.resolve();
 }
 
@@ -591,7 +575,7 @@ function continueResponses() {
  */
 function registerInterruptibleHandler(aPath, aFirstPartFn, aSecondPartFn) {
   gHttpServer.registerPathHandler(aPath, function(aRequest, aResponse) {
-    do_print("Interruptible request started.");
+    info("Interruptible request started.");
 
     // Process the first part of the response.
     aResponse.processAsync();
@@ -601,7 +585,7 @@ function registerInterruptibleHandler(aPath, aFirstPartFn, aSecondPartFn) {
     _gDeferResponses.promise.then(function RIH_onSuccess() {
       aSecondPartFn(aRequest, aResponse);
       aResponse.finish();
-      do_print("Interruptible request finished.");
+      info("Interruptible request finished.");
     }).catch(Cu.reportError);
   });
 }
@@ -629,7 +613,7 @@ add_task(function test_common_initialize() {
   gHttpServer = new HttpServer();
   gHttpServer.registerDirectory("/", do_get_file("../data"));
   gHttpServer.start(-1);
-  do_register_cleanup(() => {
+  registerCleanupFunction(() => {
     return new Promise(resolve => {
       // Ensure all the pending HTTP requests have a chance to finish.
       continueResponses();
@@ -642,7 +626,7 @@ add_task(function test_common_initialize() {
   gHttpServer.identity.setPrimary("http", "www.example.com",
                                   gHttpServer.identity.primaryPort);
   Services.prefs.setCharPref("network.dns.localDomains", "www.example.com");
-  do_register_cleanup(function() {
+  registerCleanupFunction(function() {
     Services.prefs.clearUserPref("network.dns.localDomains");
   });
 
@@ -650,7 +634,7 @@ add_task(function test_common_initialize() {
   // this may block tests that use the interruptible handlers.
   Services.prefs.setBoolPref("browser.cache.disk.enable", false);
   Services.prefs.setBoolPref("browser.cache.memory.enable", false);
-  do_register_cleanup(function() {
+  registerCleanupFunction(function() {
     Services.prefs.clearUserPref("browser.cache.disk.enable");
     Services.prefs.clearUserPref("browser.cache.memory.enable");
   });
@@ -792,7 +776,7 @@ add_task(function test_common_initialize() {
   };
 
   let cid = MockRegistrar.register("@mozilla.org/helperapplauncherdialog;1", mock);
-  do_register_cleanup(() => {
+  registerCleanupFunction(() => {
     MockRegistrar.unregister(cid);
   });
 });

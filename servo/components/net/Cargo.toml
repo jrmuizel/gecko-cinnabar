@@ -8,6 +8,8 @@ publish = false
 [lib]
 name = "net"
 path = "lib.rs"
+test = false
+doctest = false
 
 [dependencies]
 base64 = "0.6"
@@ -18,7 +20,7 @@ flate2 = "0.2.0"
 hyper = "0.10"
 hyper_serde = "0.8"
 hyper-openssl = "0.2.2"
-immeta = "0.3.1"
+immeta = "0.3.6"
 ipc-channel = "0.9"
 lazy_static = "1"
 log = "0.3.5"
@@ -43,3 +45,7 @@ webrender_api = {git = "https://github.com/servo/webrender", features = ["ipc"]}
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
 tinyfiledialogs = "2.5.9"
+
+[[test]]
+name = "main"
+path = "tests/main.rs"

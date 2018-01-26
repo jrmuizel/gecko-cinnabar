@@ -250,9 +250,10 @@ private:
     uint32_t mMaxPayloadSize;
   };
 
-  int32_t Encode_g(const webrtc::VideoFrame* aInputImage,
-                   const webrtc::CodecSpecificInfo* aCodecSpecificInfo,
-                   const std::vector<webrtc::FrameType>* aFrameTypes);
+  static
+  void Encode_g(RefPtr<WebrtcGmpVideoEncoder>& aEncoder,
+                webrtc::VideoFrame aInputImage,
+                std::vector<webrtc::FrameType> aFrameTypes);
   void RegetEncoderForResolutionChange(
       uint32_t aWidth,
       uint32_t aHeight,
@@ -456,7 +457,7 @@ private:
     {
     }
 
-    virtual void Done(GMPVideoDecoderProxy* aGMP, GMPVideoHost* aHost)
+    virtual void Done(GMPVideoDecoderProxy* aGMP, GMPVideoHost* aHost) override
     {
       std::string errorOut;
       int32_t result = mDecoder->GmpInitDone(aGMP, aHost, &errorOut);

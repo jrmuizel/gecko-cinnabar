@@ -16,6 +16,7 @@
 #include "InputData.h"                  // for InputData, etc
 #include "Layers.h"                     // for Layer, etc
 #include "mozilla/dom/Touch.h"          // for Touch
+#include "mozilla/gfx/gfxVars.h"        // for gfxVars
 #include "mozilla/gfx/GPUParent.h"      // for GPUParent
 #include "mozilla/gfx/Logging.h"        // for gfx::TreeLog
 #include "mozilla/gfx/Point.h"          // for Point
@@ -78,6 +79,8 @@ struct APZCTreeManager::TreeBuildingState {
   {
   }
 
+  typedef std::unordered_map<AsyncPanZoomController*, gfx::Matrix4x4> DeferredTransformMap;
+
   // State that doesn't change as we recurse in the tree building
   const LayerTreeState* const mLayerTreeState;
   const bool mIsFirstPaint;
@@ -100,6 +103,16 @@ struct APZCTreeManager::TreeBuildingState {
   // to facilitate re-using the same APZC for different layers that scroll
   // together (and thus have the same ScrollableLayerGuid).
   std::unordered_map<ScrollableLayerGuid, AsyncPanZoomController*, ScrollableLayerGuidHash> mApzcMap;
+
+  // As the tree is traversed, the top element of this stack tracks whether
+  // the parent scroll node has a perspective transform.
+  std::stack<bool> mParentHasPerspective;
+
+  // During the tree building process, the perspective transform component
+  // of the ancestor transforms of some APZCs can be "deferred" to their
+  // children, meaning they are added to the children's ancestor transforms
+  // instead. Those deferred transforms are tracked here.
+  DeferredTransformMap mPerspectiveTransformsDeferredToChildren;
 };
 
 class APZCTreeManager::CheckerboardFlushObserver : public nsIObserver {
@@ -321,11 +334,12 @@ APZCTreeManager::UpdateHitTestingTreeImpl(uint64_t aRootLayerTreeId,
 
   if (aRoot) {
     std::stack<gfx::TreeAutoIndent> indents;
-    std::stack<gfx::Matrix4x4> ancestorTransforms;
+    std::stack<AncestorTransform> ancestorTransforms;
     HitTestingTreeNode* parent = nullptr;
     HitTestingTreeNode* next = nullptr;
     uint64_t layersId = aRootLayerTreeId;
-    ancestorTransforms.push(Matrix4x4());
+    ancestorTransforms.push(AncestorTransform());
+    state.mParentHasPerspective.push(false);
 
     state.mLayersIdsToDestroy.erase(aRootLayerTreeId);
 
@@ -353,9 +367,8 @@ APZCTreeManager::UpdateHitTestingTreeImpl(uint64_t aRootLayerTreeId,
           // transform to layer L when we recurse into the children below. If we are at a layer
           // with an APZC, such as P, then we reset the ancestorTransform to just PC, to start
           // the new accumulation as we go down.
-          // If a transform is a perspective transform, it's ignored for this purpose
-          // (see bug 1168263).
-          Matrix4x4 currentTransform = aLayerMetrics.TransformIsPerspective() ? Matrix4x4() : aLayerMetrics.GetTransform();
+          AncestorTransform currentTransform{aLayerMetrics.GetTransform(),
+                                             aLayerMetrics.TransformIsPerspective()};
           if (!apzc) {
             currentTransform = currentTransform * ancestorTransforms.top();
           }
@@ -376,6 +389,7 @@ APZCTreeManager::UpdateHitTestingTreeImpl(uint64_t aRootLayerTreeId,
           }
 
           indents.push(gfx::TreeAutoIndent(mApzcTreeLog));
+          state.mParentHasPerspective.push(aLayerMetrics.TransformIsPerspective());
         },
         [&](ScrollNode aLayerMetrics)
         {
@@ -384,9 +398,41 @@ APZCTreeManager::UpdateHitTestingTreeImpl(uint64_t aRootLayerTreeId,
           layersId = next->GetLayersId();
           ancestorTransforms.pop();
           indents.pop();
+          state.mParentHasPerspective.pop();
         });
 
     mApzcTreeLog << "[end]\n";
+
+    // If we have perspective transforms deferred to children, do another
+    // walk of the tree and actually apply them to the children.
+    // We can't do this "as we go" in the previous traversal, because by the
+    // time we realize we need to defer a perspective transform for an APZC,
+    // we may already have processed a previous layer (including children
+    // found in its subtree) that shares that APZC.
+    if (!state.mPerspectiveTransformsDeferredToChildren.empty()) {
+      ForEachNode<ReverseIterator>(mRootNode.get(),
+          [&state](HitTestingTreeNode* aNode) {
+            AsyncPanZoomController* apzc = aNode->GetApzc();
+            if (!apzc) {
+              return;
+            }
+            if (!aNode->IsPrimaryHolder()) {
+              return;
+            }
+
+            AsyncPanZoomController* parent = apzc->GetParent();
+            if (!parent) {
+              return;
+            }
+
+            auto it = state.mPerspectiveTransformsDeferredToChildren.find(parent);
+            if (it != state.mPerspectiveTransformsDeferredToChildren.end()) {
+              apzc->SetAncestorTransform(AncestorTransform{
+                it->second * apzc->GetAncestorTransform(), false
+              });
+            }
+          });
+    }
   }
 
   // We do not support tree structures where the root node has siblings.
@@ -450,13 +496,11 @@ APZCTreeManager::UpdateHitTestingTree(uint64_t aRootLayerTreeId,
 }
 
 bool
-APZCTreeManager::PushStateToWR(wr::WebRenderAPI* aWrApi,
+APZCTreeManager::PushStateToWR(wr::TransactionBuilder& aTxn,
                                const TimeStamp& aSampleTime,
                                nsTArray<wr::WrTransformProperty>& aTransformArray)
 {
   APZThreadUtils::AssertOnCompositorThread();
-  MOZ_ASSERT(aWrApi);
-  MOZ_ASSERT(aWrApi == RefPtr<wr::WebRenderAPI>(GetWebRenderAPI()).get());
 
   MutexAutoLock lock(mTreeLock);
 
@@ -513,7 +557,7 @@ APZCTreeManager::PushStateToWR(wr::WebRenderAPI* aWrApi,
         // scroll delta here, we want to negate the translation.
         ParentLayerPoint asyncScrollDelta = -layerTranslation;
         // XXX figure out what zoom-related conversions need to happen here.
-        aWrApi->UpdateScrollPosition(lastPipelineId, apzc->GetGuid().mScrollId,
+        aTxn.UpdateScrollPosition(lastPipelineId, apzc->GetGuid().mScrollId,
             wr::ToLayoutPoint(LayoutDevicePoint::FromUnknownPoint(asyncScrollDelta.ToUnknownPoint())));
 
         apzc->ReportCheckerboard(aSampleTime);
@@ -710,24 +754,26 @@ APZCTreeManager::StopAutoscroll(const ScrollableLayerGuid& aGuid)
 void
 APZCTreeManager::NotifyScrollbarDragRejected(const ScrollableLayerGuid& aGuid) const
 {
-  const LayerTreeState* state = CompositorBridgeParent::GetIndirectShadowTree(aGuid.mLayersId);
-  MOZ_ASSERT(state && state->mController);
-  state->mController->NotifyAsyncScrollbarDragRejected(aGuid.mScrollId);
+  RefPtr<GeckoContentController> controller =
+    GetContentController(aGuid.mLayersId);
+  MOZ_ASSERT(controller);
+  controller->NotifyAsyncScrollbarDragRejected(aGuid.mScrollId);
 }
 
 void
 APZCTreeManager::NotifyAutoscrollRejected(const ScrollableLayerGuid& aGuid) const
 {
-  const LayerTreeState* state = CompositorBridgeParent::GetIndirectShadowTree(aGuid.mLayersId);
-  MOZ_ASSERT(state && state->mController);
-  state->mController->NotifyAsyncAutoscrollRejected(aGuid.mScrollId);
+  RefPtr<GeckoContentController> controller =
+    GetContentController(aGuid.mLayersId);
+  MOZ_ASSERT(controller);
+  controller->NotifyAsyncAutoscrollRejected(aGuid.mScrollId);
 }
 
 template<class ScrollNode> HitTestingTreeNode*
 APZCTreeManager::PrepareNodeForLayer(const ScrollNode& aLayer,
                                      const FrameMetrics& aMetrics,
                                      uint64_t aLayersId,
-                                     const gfx::Matrix4x4& aAncestorTransform,
+                                     const AncestorTransform& aAncestorTransform,
                                      HitTestingTreeNode* aParent,
                                      HitTestingTreeNode* aNextSibling,
                                      TreeBuildingState& aState)
@@ -744,6 +790,8 @@ APZCTreeManager::PrepareNodeForLayer(const ScrollNode& aLayer,
     needsApzc = false;
   }
 
+  bool parentHasPerspective = aState.mParentHasPerspective.top();
+
   RefPtr<HitTestingTreeNode> node = nullptr;
   if (!needsApzc) {
     // Note: if layer properties must be propagated to nodes, RecvUpdate in
@@ -755,7 +803,9 @@ APZCTreeManager::PrepareNodeForLayer(const ScrollNode& aLayer,
         GetEventRegions(aLayer),
         aLayer.GetVisibleRegion(),
         aLayer.GetTransformTyped(),
-        aLayer.GetClipRect() ? Some(ParentLayerIntRegion(*aLayer.GetClipRect())) : Nothing(),
+        (!parentHasPerspective && aLayer.GetClipRect())
+          ? Some(ParentLayerIntRegion(*aLayer.GetClipRect()))
+          : Nothing(),
         GetEventRegionsOverride(aParent, aLayer));
     node->SetScrollbarData(aLayer.GetScrollbarTargetContainerId(),
                            aLayer.GetScrollbarAnimationId(),
@@ -862,12 +912,14 @@ APZCTreeManager::PrepareNodeForLayer(const ScrollNode& aLayer,
     // or not, depending on whether it went through the newApzc branch above.
     MOZ_ASSERT(node->IsPrimaryHolder() && node->GetApzc() && node->GetApzc()->Matches(guid));
 
-    ParentLayerIntRegion clipRegion = ComputeClipRegion(state->mController, aLayer);
+    Maybe<ParentLayerIntRegion> clipRegion = parentHasPerspective
+      ? Nothing()
+      : Some(ComputeClipRegion(state->mController, aLayer));
     node->SetHitTestData(
         GetEventRegions(aLayer),
         aLayer.GetVisibleRegion(),
         aLayer.GetTransformTyped(),
-        Some(clipRegion),
+        clipRegion,
         GetEventRegionsOverride(aParent, aLayer));
     apzc->SetAncestorTransform(aAncestorTransform);
 
@@ -937,14 +989,36 @@ APZCTreeManager::PrepareNodeForLayer(const ScrollNode& aLayer,
     // Due to floating point inaccuracies those transforms can end up not quite
     // canceling each other. That's why we're using a fuzzy comparison here
     // instead of an exact one.
-    MOZ_ASSERT(aAncestorTransform.FuzzyEqualsMultiplicative(apzc->GetAncestorTransform()));
+    // In addition, two ancestor transforms are allowed to differ if one of
+    // them contains a perspective transform component and the other does not.
+    // This represents situations where some content in a scrollable frame
+    // is subject to a perspective transform and other content does not.
+    // In such cases, go with the one that does not include the perspective
+    // component; the perspective transform is remembered and applied to the
+    // children instead.
+    if (!aAncestorTransform.CombinedTransform().FuzzyEqualsMultiplicative(apzc->GetAncestorTransform())) {
+      typedef TreeBuildingState::DeferredTransformMap::value_type PairType;
+      if (!aAncestorTransform.ContainsPerspectiveTransform() &&
+          !apzc->AncestorTransformContainsPerspective()) {
+        MOZ_ASSERT(false, "Two layers that scroll together have different ancestor transforms");
+      } else if (!aAncestorTransform.ContainsPerspectiveTransform()) {
+        aState.mPerspectiveTransformsDeferredToChildren.insert(
+            PairType{apzc, apzc->GetAncestorTransformPerspective()});
+        apzc->SetAncestorTransform(aAncestorTransform);
+      } else {
+        aState.mPerspectiveTransformsDeferredToChildren.insert(
+            PairType{apzc, aAncestorTransform.GetPerspectiveTransform()});
+      }
+    }
 
-    ParentLayerIntRegion clipRegion = ComputeClipRegion(state->mController, aLayer);
+    Maybe<ParentLayerIntRegion> clipRegion = parentHasPerspective
+      ? Nothing()
+      : Some(ComputeClipRegion(state->mController, aLayer));
     node->SetHitTestData(
         GetEventRegions(aLayer),
         aLayer.GetVisibleRegion(),
         aLayer.GetTransformTyped(),
-        Some(clipRegion),
+        clipRegion,
         GetEventRegionsOverride(aParent, aLayer));
   }
 
@@ -978,12 +1052,11 @@ APZCTreeManager::FlushApzRepaints(uint64_t aLayersId)
   // ensure any pending paints were flushed. Now, paints are flushed
   // immediately, so it is safe to simply send a notification now.
   APZCTM_LOG("Flushing repaints for layers id 0x%" PRIx64 "\n", aLayersId);
-  const LayerTreeState* state =
-    CompositorBridgeParent::GetIndirectShadowTree(aLayersId);
-  MOZ_ASSERT(state && state->mController);
-  state->mController->DispatchToRepaintThread(
+  RefPtr<GeckoContentController> controller = GetContentController(aLayersId);
+  MOZ_ASSERT(controller);
+  controller->DispatchToRepaintThread(
     NewRunnableMethod("layers::GeckoContentController::NotifyFlushComplete",
-                      state->mController,
+                      controller,
                       &GeckoContentController::NotifyFlushComplete));
 }
 
@@ -1060,9 +1133,10 @@ APZCTreeManager::ReceiveInputEvent(InputData& aEvent,
       if (apzc) {
         if (gfxPrefs::APZTestLoggingEnabled() && mouseInput.mType == MouseInput::MOUSE_HITTEST) {
           ScrollableLayerGuid guid = apzc->GetGuid();
-          if (LayerTreeState* state = CompositorBridgeParent::GetIndirectShadowTree(guid.mLayersId)) {
-            state->mApzTestData.RecordHitResult(mouseInput.mOrigin, hitResult, guid.mScrollId);
-          }
+          CompositorBridgeParent::CallWithIndirectShadowTree(guid.mLayersId,
+            [&](LayerTreeState& aState) -> void {
+              aState.mApzTestData.RecordHitResult(mouseInput.mOrigin, hitResult, guid.mScrollId);
+            });
         }
 
         bool targetConfirmed = (hitResult != CompositorHitTestInfo::eInvisibleToHitTest)
@@ -2219,7 +2293,7 @@ APZCTreeManager::GetTargetAPZC(const ScreenPoint& aPoint,
   CompositorHitTestInfo hitResult = CompositorHitTestInfo::eInvisibleToHitTest;
   HitTestingTreeNode* scrollbarNode = nullptr;
   RefPtr<AsyncPanZoomController> target;
-  if (gfxPrefs::WebRenderHitTest()) {
+  if (gfx::gfxVars::UseWebRender() && gfxPrefs::WebRenderHitTest()) {
     target = GetAPZCAtPointWR(aPoint, &hitResult, &scrollbarNode);
   } else {
     target = GetAPZCAtPoint(mRootNode, aPoint, &hitResult, &scrollbarNode);
@@ -2245,6 +2319,13 @@ APZCTreeManager::GetAPZCAtPointWR(const ScreenPoint& aHitTestPoint,
   RefPtr<AsyncPanZoomController> result;
   RefPtr<wr::WebRenderAPI> wr = GetWebRenderAPI();
   if (!wr) {
+    // If WebRender isn't running, fall back to the root APZC.
+    // This is mostly for the benefit of GTests which do not
+    // run a WebRender instance, but gracefully falling back
+    // here allows those tests which are not specifically
+    // testing the hit-test algorithm to still work.
+    result = FindRootApzcForLayersId(mRootLayersId);
+    *aOutHitResult = CompositorHitTestInfo::eVisibleToHitTest;
     return result.forget();
   }
 
@@ -2371,7 +2452,8 @@ void
 APZCTreeManager::SetLongTapEnabled(bool aLongTapEnabled)
 {
   APZThreadUtils::RunOnControllerThread(
-    NewRunnableFunction(GestureEventListener::SetLongTapEnabled, aLongTapEnabled));
+    NewRunnableFunction("SetLongTapEnabledRunnable",
+                        GestureEventListener::SetLongTapEnabled, aLongTapEnabled));
 }
 
 RefPtr<HitTestingTreeNode>
@@ -2838,12 +2920,24 @@ already_AddRefed<wr::WebRenderAPI>
 APZCTreeManager::GetWebRenderAPI() const
 {
   RefPtr<wr::WebRenderAPI> api;
-  if (LayerTreeState* state = CompositorBridgeParent::GetIndirectShadowTree(mRootLayersId)) {
-    if (state->mWrBridge) {
-      api = state->mWrBridge->GetWebRenderAPI();
-    }
-  }
+  CompositorBridgeParent::CallWithIndirectShadowTree(mRootLayersId,
+    [&](LayerTreeState& aState) -> void {
+      if (aState.mWrBridge) {
+        api = aState.mWrBridge->GetWebRenderAPI();
+      }
+    });
   return api.forget();
+}
+
+already_AddRefed<GeckoContentController>
+APZCTreeManager::GetContentController(uint64_t aLayersId) const
+{
+  RefPtr<GeckoContentController> controller;
+  CompositorBridgeParent::CallWithIndirectShadowTree(aLayersId,
+    [&](LayerTreeState& aState) -> void {
+      controller = aState.mController;
+    });
+  return controller.forget();
 }
 
 #if defined(MOZ_WIDGET_ANDROID)

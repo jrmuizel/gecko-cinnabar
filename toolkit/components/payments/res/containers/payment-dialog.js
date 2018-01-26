@@ -23,6 +23,9 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
     this._cancelButton = contents.querySelector("#cancel");
     this._cancelButton.addEventListener("click", this.cancelRequest);
 
+    this._payButton = contents.querySelector("#pay");
+    this._payButton.addEventListener("click", this.pay);
+
     this.appendChild(contents);
 
     super.connectedCallback();
@@ -30,6 +33,7 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
 
   disconnectedCallback() {
     this._cancelButtonEl.removeEventListener("click", this.cancelRequest);
+    this._cancelButtonEl.removeEventListener("click", this.pay);
     super.disconnectedCallback();
   }
 
@@ -37,7 +41,27 @@ class PaymentDialog extends PaymentStateSubscriberMixin(HTMLElement) {
     PaymentRequest.cancel();
   }
 
-  setLoadingState(state) {
+  pay() {
+    PaymentRequest.pay({
+      methodName: "basic-card",
+      methodData: {
+        cardholderName: "John Doe",
+        cardNumber: "9999999999",
+        expiryMonth: "01",
+        expiryYear: "9999",
+        cardSecurityCode: "999",
+      },
+    });
+  }
+
+  /**
+   * Set some state from the privileged parent process.
+   * Other elements that need to set state should use their own `this.requestStore.setState`
+   * method provided by the `PaymentStateSubscriberMixin`.
+   *
+   * @param {object} state - See `PaymentsStore.setState`
+   */
+  setStateFromParent(state) {
     this.requestStore.setState(state);
   }
 

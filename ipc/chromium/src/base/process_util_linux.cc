@@ -34,9 +34,9 @@ bool LaunchApp(const std::vector<std::string>& argv,
   fd_shuffle1.reserve(options.fds_to_remap.size());
   fd_shuffle2.reserve(options.fds_to_remap.size());
 
-  EnvironmentArray envp = BuildEnvironmentArray(options.environ);
+  EnvironmentArray envp = BuildEnvironmentArray(options.env_map);
 
-  pid_t pid = fork();
+  pid_t pid = options.fork_delegate ? options.fork_delegate->Fork() : fork();
   if (pid < 0)
     return false;
 

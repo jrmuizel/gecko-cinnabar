@@ -10,6 +10,7 @@
 #include "mozilla/Omnijar.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "mozilla/intl/MozLocale.h"
 #include "mozilla/intl/OSPreferences.h"
 #include "nsIObserverService.h"
 #include "nsIToolkitChromeRegistry.h"
@@ -81,14 +82,12 @@ ReadRequestedLocales(nsTArray<nsCString>& aRetVal)
     if (str.Length() > 0) {
       for (const nsACString& part : str.Split(',')) {
         nsAutoCString locale(part);
-        if (SanitizeForBCP47(locale, true)) {
-          // This is a hack required for us to handle the special Mozilla `ja-JP-mac`
-          // locales. We sanitize the input to normalize the case etc. but in result
-          // the `ja-JP-mac` will get turned into a BCP47 tag. Here we're turning it
-          // back into the form expected by Gecko resources.
-          if (locale.EqualsLiteral("ja-JP-x-lvariant-mac")) {
-            locale.Assign("ja-JP-mac");
+        if (locale.EqualsLiteral("ja-JP-mac")) {
+          // This is a hack required to handle the special Mozilla `ja-JP-mac` locale.
+          if (!aRetVal.Contains(locale)) {
+            aRetVal.AppendElement(locale);
           }
+        } else if (SanitizeForBCP47(locale, true)) {
           if (!aRetVal.Contains(locale)) {
             aRetVal.AppendElement(locale);
           }
@@ -806,149 +805,6 @@ LocaleService::NegotiateLanguages(const char** aRequested,
   return NS_OK;
 }
 
-LocaleService::Locale::Locale(const nsCString& aLocale, bool aRange)
-  : mLocaleStr(aLocale)
-{
-  int32_t partNum = 0;
-
-  nsAutoCString normLocale(aLocale);
-  normLocale.ReplaceChar('_', '-');
-
-  for (const nsACString& part : normLocale.Split('-')) {
-    switch (partNum) {
-      case 0:
-        if (part.EqualsLiteral("*") ||
-            part.Length() == 2 || part.Length() == 3) {
-          mLanguage.Assign(part);
-        }
-        break;
-      case 1:
-        if (part.EqualsLiteral("*") || part.Length() == 4) {
-          mScript.Assign(part);
-          break;
-        }
-
-        // fallover to region case
-        partNum++;
-        MOZ_FALLTHROUGH;
-      case 2:
-        if (part.EqualsLiteral("*") || part.Length() == 2) {
-          mRegion.Assign(part);
-        }
-        break;
-      case 3:
-        if (part.EqualsLiteral("*") || part.Length() == 3) {
-          mVariant.Assign(part);
-        }
-        break;
-    }
-    partNum++;
-  }
-
-  if (aRange) {
-    if (mLanguage.IsEmpty()) {
-      mLanguage.AssignLiteral("*");
-    }
-    if (mScript.IsEmpty()) {
-      mScript.AssignLiteral("*");
-    }
-    if (mRegion.IsEmpty()) {
-      mRegion.AssignLiteral("*");
-    }
-    if (mVariant.IsEmpty()) {
-      mVariant.AssignLiteral("*");
-    }
-  }
-}
-
-static bool
-SubtagMatches(const nsCString& aSubtag1, const nsCString& aSubtag2)
-{
-  return aSubtag1.EqualsLiteral("*") ||
-         aSubtag2.EqualsLiteral("*") ||
-         aSubtag1.Equals(aSubtag2, nsCaseInsensitiveCStringComparator());
-}
-
-bool
-LocaleService::Locale::Matches(const LocaleService::Locale& aLocale) const
-{
-  return SubtagMatches(mLanguage, aLocale.mLanguage) &&
-         SubtagMatches(mScript, aLocale.mScript) &&
-         SubtagMatches(mRegion, aLocale.mRegion) &&
-         SubtagMatches(mVariant, aLocale.mVariant);
-}
-
-bool
-LocaleService::Locale::LanguageMatches(const LocaleService::Locale& aLocale) const
-{
-  return SubtagMatches(mLanguage, aLocale.mLanguage) &&
-         SubtagMatches(mScript, aLocale.mScript);
-}
-
-void
-LocaleService::Locale::SetVariantRange()
-{
-  mVariant.AssignLiteral("*");
-}
-
-void
-LocaleService::Locale::SetRegionRange()
-{
-  mRegion.AssignLiteral("*");
-}
-
-bool
-LocaleService::Locale::AddLikelySubtags()
-{
-  return AddLikelySubtagsForLocale(mLocaleStr);
-}
-
-bool
-LocaleService::Locale::AddLikelySubtagsWithoutRegion()
-{
-  nsAutoCString locale(mLanguage);
-
-  if (!mScript.IsEmpty()) {
-    locale.Append("-");
-    locale.Append(mScript);
-  }
-
-  // We don't add variant here because likelySubtag doesn't care about it.
-
-  return AddLikelySubtagsForLocale(locale);
-}
-
-bool
-LocaleService::Locale::AddLikelySubtagsForLocale(const nsACString& aLocale)
-{
-  const int32_t kLocaleMax = 160;
-  char maxLocale[kLocaleMax];
-  nsAutoCString locale(aLocale);
-
-  UErrorCode status = U_ZERO_ERROR;
-  uloc_addLikelySubtags(locale.get(), maxLocale, kLocaleMax, &status);
-
-  if (U_FAILURE(status)) {
-    return false;
-  }
-
-  nsDependentCString maxLocStr(maxLocale);
-  Locale loc = Locale(maxLocStr, false);
-
-  if (loc == *this) {
-    return false;
-  }
-
-  mLanguage = loc.mLanguage;
-  mScript = loc.mScript;
-  mRegion = loc.mRegion;
-
-  // We don't update variant from likelySubtag since it's not going to
-  // provide it and we want to preserve the range
-
-  return true;
-}
-
 NS_IMETHODIMP
 LocaleService::GetRequestedLocales(uint32_t* aCount, char*** aOutArray)
 {
@@ -992,13 +848,10 @@ LocaleService::SetRequestedLocales(const char** aRequested,
 
   for (uint32_t i = 0; i < aRequestedCount; i++) {
     nsAutoCString locale(aRequested[i]);
-    if (!SanitizeForBCP47(locale, true)) {
+    if (!locale.EqualsLiteral("ja-JP-mac") &&
+        !SanitizeForBCP47(locale, true)) {
       NS_ERROR("Invalid language tag provided to SetRequestedLocales!");
       return NS_ERROR_INVALID_ARG;
-    }
-    if (locale.EqualsLiteral("ja-JP-x-lvariant-mac")) {
-      // This is a hack for our code to handle `ja-JP-mac` special case.
-      locale.Assign("ja-JP-mac");
     }
 
     if (i > 0) {

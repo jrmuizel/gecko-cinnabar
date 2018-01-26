@@ -102,23 +102,14 @@ int32_t LiveMappedBufferCount();
 
 class ArrayBufferObjectMaybeShared;
 
-uint32_t AnyArrayBufferByteLength(const ArrayBufferObjectMaybeShared* buf);
 mozilla::Maybe<uint32_t> WasmArrayBufferMaxSize(const ArrayBufferObjectMaybeShared* buf);
 size_t WasmArrayBufferMappedSize(const ArrayBufferObjectMaybeShared* buf);
-bool WasmArrayBufferGrowForWasm(ArrayBufferObjectMaybeShared* buf, uint32_t delta);
-bool AnyArrayBufferIsPreparedForAsmJS(const ArrayBufferObjectMaybeShared* buf);
-bool AnyArrayBufferIsWasm(const ArrayBufferObjectMaybeShared* buf);
-ArrayBufferObjectMaybeShared& AsAnyArrayBuffer(HandleValue val);
 
 class ArrayBufferObjectMaybeShared : public NativeObject
 {
   public:
-    uint32_t byteLength() {
-        return AnyArrayBufferByteLength(this);
-    }
-
+    inline uint32_t byteLength();
     inline bool isDetached() const;
-
     inline SharedMem<uint8_t*> dataPointerEither();
 
     // WebAssembly support:
@@ -135,13 +126,8 @@ class ArrayBufferObjectMaybeShared : public NativeObject
     uint32_t wasmBoundsCheckLimit() const;
 #endif
 
-    bool isPreparedForAsmJS() const {
-        return AnyArrayBufferIsPreparedForAsmJS(this);
-    }
-
-    bool isWasm() const {
-        return AnyArrayBufferIsWasm(this);
-    }
+    inline bool isPreparedForAsmJS() const;
+    inline bool isWasm() const;
 };
 
 typedef Rooted<ArrayBufferObjectMaybeShared*> RootedArrayBufferObjectMaybeShared;
@@ -293,6 +279,12 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared
     // initialize()d to become a real, content-visible ArrayBufferObject.
     static ArrayBufferObject* createEmpty(JSContext* cx);
 
+    // Create an ArrayBufferObject using the provided buffer and size.  Assumes
+    // ownership of |buffer| even in case of failure, i.e. on failure |buffer|
+    // is deallocated.
+    static ArrayBufferObject*
+    createFromNewRawBuffer(JSContext* cx, WasmArrayRawBuffer* buffer, uint32_t initialSize);
+
     static void copyData(Handle<ArrayBufferObject*> toBuffer, uint32_t toIndex,
                          Handle<ArrayBufferObject*> fromBuffer, uint32_t fromIndex,
                          uint32_t count);
@@ -371,7 +363,6 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared
     // WebAssembly support:
     static MOZ_MUST_USE bool prepareForAsmJS(JSContext* cx, Handle<ArrayBufferObject*> buffer,
                                              bool needGuard);
-    void initializeRawBuffer(JSContext* cx, WasmArrayRawBuffer* buffer, uint32_t byteLength);
     size_t wasmMappedSize() const;
     mozilla::Maybe<uint32_t> wasmMaxSize() const;
     static MOZ_MUST_USE bool wasmGrowToSizeInPlace(uint32_t newSize,
@@ -428,15 +419,6 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared
         setFlags(0);
         setFirstView(nullptr);
         setDataPointer(contents, ownsState);
-    }
-
-    // Note: initialize() may be called after initEmpty(); initEmpty() must
-    // only initialize the ArrayBufferObject to a safe, finalizable state.
-    void initEmpty() {
-        setByteLength(0);
-        setFlags(0);
-        setFirstView(nullptr);
-        setDataPointer(BufferContents::createPlain(nullptr), DoesntOwnData);
     }
 };
 

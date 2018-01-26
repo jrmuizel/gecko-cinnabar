@@ -614,16 +614,17 @@ BufferTextureHost::PushDisplayItems(wr::DisplayListBuilder& aBuilder,
 {
   if (GetFormat() != gfx::SurfaceFormat::YUV) {
     MOZ_ASSERT(aImageKeys.length() == 1);
-    aBuilder.PushImage(aBounds, aClip, true, aFilter, aImageKeys[0]);
+    aBuilder.PushImage(aBounds, aClip, true, aFilter, aImageKeys[0], !(mFlags & TextureFlags::NON_PREMULTIPLIED));
   } else {
     MOZ_ASSERT(aImageKeys.length() == 3);
+    const YCbCrDescriptor& desc = mDescriptor.get_YCbCrDescriptor();
     aBuilder.PushYCbCrPlanarImage(aBounds,
                                   aClip,
                                   true,
                                   aImageKeys[0],
                                   aImageKeys[1],
                                   aImageKeys[2],
-                                  wr::WrYuvColorSpace::Rec601,
+                                  wr::ToWrYuvColorSpace(desc.yUVColorSpace()),
                                   aFilter);
   }
 }

@@ -165,6 +165,22 @@ void TlsConnectTestBase::CheckShares(
   EXPECT_EQ(shares.len(), i);
 }
 
+void TlsConnectTestBase::CheckEpochs(uint16_t client_epoch,
+                                     uint16_t server_epoch) const {
+  uint16_t read_epoch = 0;
+  uint16_t write_epoch = 0;
+
+  EXPECT_EQ(SECSuccess,
+            SSLInt_GetEpochs(client_->ssl_fd(), &read_epoch, &write_epoch));
+  EXPECT_EQ(server_epoch, read_epoch) << "client read epoch";
+  EXPECT_EQ(client_epoch, write_epoch) << "client write epoch";
+
+  EXPECT_EQ(SECSuccess,
+            SSLInt_GetEpochs(server_->ssl_fd(), &read_epoch, &write_epoch));
+  EXPECT_EQ(client_epoch, read_epoch) << "server read epoch";
+  EXPECT_EQ(server_epoch, write_epoch) << "server write epoch";
+}
+
 void TlsConnectTestBase::ClearStats() {
   // Clear statistics.
   SSL3Statistics* stats = SSL_GetStatistics();
@@ -214,7 +230,9 @@ void TlsConnectTestBase::Reset() {
 
 void TlsConnectTestBase::Reset(const std::string& server_name,
                                const std::string& client_name) {
+  auto token = client_->GetResumptionToken();
   client_.reset(new TlsAgent(client_name, TlsAgent::CLIENT, variant_));
+  client_->SetResumptionToken(token);
   server_.reset(new TlsAgent(server_name, TlsAgent::SERVER, variant_));
   if (skip_version_checks_) {
     client_->SkipVersionChecks();
@@ -274,6 +292,7 @@ void TlsConnectTestBase::EnableExtendedMasterSecret() {
 void TlsConnectTestBase::Connect() {
   server_->StartConnect(server_model_ ? server_model_->ssl_fd() : nullptr);
   client_->StartConnect(client_model_ ? client_model_->ssl_fd() : nullptr);
+  client_->MaybeSetResumptionToken();
   Handshake();
   CheckConnected();
 }
@@ -386,13 +405,13 @@ void TlsConnectTestBase::CheckKeys(SSLKEAType kea_type,
       break;
     case ssl_auth_rsa_sign:
       if (version_ >= SSL_LIBRARY_VERSION_TLS_1_2) {
-        scheme = ssl_sig_rsa_pss_sha256;
+        scheme = ssl_sig_rsa_pss_rsae_sha256;
       } else {
         scheme = ssl_sig_rsa_pkcs1_sha256;
       }
       break;
     case ssl_auth_rsa_pss:
-      scheme = ssl_sig_rsa_pss_sha256;
+      scheme = ssl_sig_rsa_pss_rsae_sha256;
       break;
     case ssl_auth_ecdsa:
       scheme = ssl_sig_ecdsa_secp256r1_sha256;
@@ -593,10 +612,12 @@ void TlsConnectTestBase::CheckSrtp() const {
   server_->CheckSrtp();
 }
 
-void TlsConnectTestBase::SendReceive() {
-  client_->SendData(50);
-  server_->SendData(50);
-  Receive(50);
+void TlsConnectTestBase::SendReceive(size_t total) {
+  ASSERT_GT(total, client_->received_bytes());
+  ASSERT_GT(total, server_->received_bytes());
+  client_->SendData(total - server_->received_bytes());
+  server_->SendData(total - client_->received_bytes());
+  Receive(total);  // Receive() is cumulative
 }
 
 // Do a first connection so we can do 0-RTT on the second one.
@@ -652,7 +673,8 @@ void TlsConnectTestBase::ZeroRttSendReceive(
     EXPECT_EQ(k0RttDataLen, rv);
   } else {
     EXPECT_EQ(SECFailure, rv);
-    EXPECT_EQ(PR_WOULD_BLOCK_ERROR, PORT_GetError());
+    EXPECT_EQ(PR_WOULD_BLOCK_ERROR, PORT_GetError())
+        << "Unexpected error: " << PORT_ErrorToName(PORT_GetError());
   }
 
   // Do a second read. this should fail.
@@ -735,6 +757,16 @@ TlsConnectTls12Plus::TlsConnectTls12Plus()
 
 TlsConnectTls13::TlsConnectTls13()
     : TlsConnectTestBase(GetParam(), SSL_LIBRARY_VERSION_TLS_1_3) {}
+
+TlsConnectGenericResumption::TlsConnectGenericResumption()
+    : TlsConnectTestBase(std::get<0>(GetParam()), std::get<1>(GetParam())),
+      external_cache_(std::get<2>(GetParam())) {}
+
+TlsConnectTls13ResumptionToken::TlsConnectTls13ResumptionToken()
+    : TlsConnectTestBase(GetParam(), SSL_LIBRARY_VERSION_TLS_1_3) {}
+
+TlsConnectGenericResumptionToken::TlsConnectGenericResumptionToken()
+    : TlsConnectTestBase(std::get<0>(GetParam()), std::get<1>(GetParam())) {}
 
 void TlsKeyExchangeTest::EnsureKeyShareSetup() {
   EnsureTlsSetup();

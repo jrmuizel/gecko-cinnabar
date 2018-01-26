@@ -36,6 +36,7 @@
 #include "jit/MacroAssembler-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/NativeObject-inl.h"
+#include "vm/TypeInference-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -98,7 +99,8 @@ BaselineCompiler::compile()
     AutoTraceLog logScript(logger, scriptEvent);
     AutoTraceLog logCompile(logger, TraceLogger_BaselineCompilation);
 
-    if (!script->ensureHasTypes(cx) || !script->ensureHasAnalyzedArgsUsage(cx))
+    AutoKeepTypeScripts keepTypes(cx);
+    if (!script->ensureHasTypes(cx, keepTypes) || !script->ensureHasAnalyzedArgsUsage(cx))
         return Method_Error;
 
     // When code coverage is only enabled for optimizations, or when a Debugger
@@ -3547,7 +3549,7 @@ BaselineCompiler::emit_JSOP_OPTIMIZE_SPREADCALL()
 
 typedef bool (*ImplicitThisFn)(JSContext*, HandleObject, HandlePropertyName,
                                MutableHandleValue);
-static const VMFunction ImplicitThisInfo =
+const VMFunction jit::ImplicitThisInfo =
     FunctionInfo<ImplicitThisFn>(ImplicitThisOperation, "ImplicitThisOperation");
 
 bool
@@ -4798,8 +4800,9 @@ BaselineCompiler::emit_JSOP_RESUME()
 
     // Store the arguments object if there is one.
     Label noArgsObj;
-    masm.unboxObject(Address(genObj, GeneratorObject::offsetOfArgsObjSlot()), scratch2);
-    masm.branchTestPtr(Assembler::Zero, scratch2, scratch2, &noArgsObj);
+    Address argsObjSlot(genObj, GeneratorObject::offsetOfArgsObjSlot());
+    masm.branchTestUndefined(Assembler::Equal, argsObjSlot, &noArgsObj);
+    masm.unboxObject(argsObjSlot, scratch2);
     {
         masm.storePtr(scratch2, frame.addressOfArgsObj());
         masm.or32(Imm32(BaselineFrame::HAS_ARGS_OBJ), frame.addressOfFlags());
@@ -5007,10 +5010,10 @@ bool
 BaselineCompiler::emit_JSOP_BUILTINPROTO()
 {
     // The builtin prototype is a constant for a given global.
-    RootedObject builtin(cx);
     JSProtoKey key = static_cast<JSProtoKey>(GET_UINT8(pc));
     MOZ_ASSERT(key < JSProto_LIMIT);
-    if (!GetBuiltinPrototype(cx, key, &builtin))
+    JSObject* builtin = GlobalObject::getOrCreatePrototype(cx, key);
+    if (!builtin)
         return false;
     frame.push(ObjectValue(*builtin));
     return true;

@@ -39,15 +39,18 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Vector.h"
 #include "GeckoProfiler.h"
+#include "VTuneProfiler.h"
 #include "GeckoProfilerReporter.h"
 #include "ProfilerIOInterposeObserver.h"
 #include "mozilla/AutoProfilerLabel.h"
+#include "mozilla/ExtensionPolicyService.h"
 #include "mozilla/Scheduler.h"
 #include "mozilla/StackWalk.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/extensions/WebExtensionPolicy.h"
 #include "ThreadInfo.h"
 #include "nsIHttpProtocolHandler.h"
 #include "nsIObserverService.h"
@@ -1544,6 +1547,41 @@ StreamMetaJSCustomObject(PSLockRef aLock, SpliceableJSONWriter& aWriter,
     if (!NS_FAILED(res))
       aWriter.StringProperty("product", string.Data());
   }
+
+  aWriter.StartObjectProperty("extensions");
+  {
+    {
+      JSONSchemaWriter schema(aWriter);
+      schema.WriteField("id");
+      schema.WriteField("name");
+      schema.WriteField("baseURL");
+    }
+
+    aWriter.StartArrayProperty("data");
+    {
+      nsTArray<RefPtr<WebExtensionPolicy>> exts;
+      ExtensionPolicyService::GetSingleton().GetAll(exts);
+
+      for (auto& ext : exts) {
+        aWriter.StartArrayElement(JSONWriter::SingleLineStyle);
+
+        nsAutoString id;
+        ext->GetId(id);
+        aWriter.StringElement(NS_ConvertUTF16toUTF8(id).get());
+
+        aWriter.StringElement(NS_ConvertUTF16toUTF8(ext->Name()).get());
+
+        auto url = ext->GetURL(NS_LITERAL_STRING(""));
+        if (url.isOk()) {
+          aWriter.StringElement(NS_ConvertUTF16toUTF8(url.unwrap()).get());
+        }
+
+        aWriter.EndArray();
+      }
+    }
+    aWriter.EndArray();
+  }
+  aWriter.EndObject();
 }
 
 #if defined(GP_OS_android)
@@ -2145,6 +2183,8 @@ locked_register_thread(PSLockRef aLock, const char* aName, void* aStackTop)
 
   MOZ_RELEASE_ASSERT(!FindLiveThreadInfo(aLock));
 
+  VTUNE_REGISTER_THREAD(aName);
+
   if (!TLSInfo::Init(aLock)) {
     return;
   }
@@ -2259,6 +2299,8 @@ void
 profiler_init(void* aStackTop)
 {
   LOG("profiler_init");
+
+  VTUNE_INIT();
 
   MOZ_RELEASE_ASSERT(!CorePS::Exists());
 
@@ -2407,6 +2449,8 @@ void
 profiler_shutdown()
 {
   LOG("profiler_shutdown");
+
+  VTUNE_SHUTDOWN();
 
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
   MOZ_RELEASE_ASSERT(CorePS::Exists());
@@ -3246,11 +3290,53 @@ profiler_add_marker(const char* aMarkerName)
   profiler_add_marker(aMarkerName, nullptr);
 }
 
+// This logic needs to add a marker for a different thread, so we actually need
+// to lock here.
+void
+profiler_add_marker_for_thread(int aThreadId,
+                               const char* aMarkerName,
+                               UniquePtr<ProfilerMarkerPayload> aPayload)
+{
+  MOZ_RELEASE_ASSERT(CorePS::Exists());
+
+  // Create the ProfilerMarker which we're going to store.
+  TimeStamp origin = (aPayload && !aPayload->GetStartTime().IsNull())
+                   ? aPayload->GetStartTime()
+                   : TimeStamp::Now();
+  TimeDuration delta = origin - CorePS::ProcessStartTime();
+  ProfilerMarker* marker =
+    new ProfilerMarker(aMarkerName, aThreadId, Move(aPayload),
+                       delta.ToMilliseconds());
+
+  PSAutoLock lock(gPSMutex);
+
+#ifdef DEBUG
+  // Assert that our thread ID makes sense
+  bool realThread = false;
+  const CorePS::ThreadVector& liveThreads = CorePS::LiveThreads(lock);
+  for (uint32_t i = 0; i < liveThreads.size(); i++) {
+    ThreadInfo* info = liveThreads.at(i);
+    if (info->ThreadId() == aThreadId) {
+      realThread = true;
+      break;
+    }
+  }
+  MOZ_ASSERT(realThread, "Invalid thread id");
+#endif
+
+  // Insert the marker into the buffer
+  ProfileBuffer& buffer = ActivePS::Buffer(lock);
+  buffer.AddStoredMarker(marker);
+  buffer.AddEntry(ProfileBufferEntry::Marker(marker));
+}
+
 void
 profiler_tracing(const char* aCategory, const char* aMarkerName,
                  TracingKind aKind)
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
+
+  VTUNE_TRACING(aMarkerName, aKind);
 
   // This function is hot enough that we use RacyFeatures, notActivePS.
   if (!RacyFeatures::IsActiveWithoutPrivacy()) {
@@ -3266,6 +3352,8 @@ profiler_tracing(const char* aCategory, const char* aMarkerName,
                  TracingKind aKind, UniqueProfilerBacktrace aCause)
 {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
+
+  VTUNE_TRACING(aMarkerName, aKind);
 
   // This function is hot enough that we use RacyFeatures, notActivePS.
   if (!RacyFeatures::IsActiveWithoutPrivacy()) {

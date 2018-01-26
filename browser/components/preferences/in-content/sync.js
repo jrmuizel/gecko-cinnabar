@@ -28,6 +28,17 @@ const FXA_LOGIN_UNVERIFIED = 1;
 // We are logged in locally, but the server rejected our credentials.
 const FXA_LOGIN_FAILED = 2;
 
+Preferences.addAll([
+  { id: "engine.addons", name: "services.sync.engine.addons", type: "bool" },
+  { id: "engine.bookmarks", name: "services.sync.engine.bookmarks", type: "bool" },
+  { id: "engine.history", name: "services.sync.engine.history", type: "bool" },
+  { id: "engine.tabs", name: "services.sync.engine.tabs", type: "bool" },
+  { id: "engine.prefs", name: "services.sync.engine.prefs", type: "bool" },
+  { id: "engine.passwords", name: "services.sync.engine.passwords", type: "bool" },
+  { id: "engine.addresses", name: "services.sync.engine.addresses", type: "bool" },
+  { id: "engine.creditcards", name: "services.sync.engine.creditcards", type: "bool" },
+]);
+
 var gSyncPane = {
   get page() {
     return document.getElementById("weavePrefsDeck").selectedIndex;
@@ -128,12 +139,20 @@ var gSyncPane = {
       return Services.strings.createBundle("chrome://browser/locale/accounts.properties");
     });
 
+    // Links for mobile devices before the user is logged in.
     let url = Services.prefs.getCharPref("identity.mobilepromo.android") + "sync-preferences";
     document.getElementById("fxaMobilePromo-android").setAttribute("href", url);
-    document.getElementById("fxaMobilePromo-android-hasFxaAccount").setAttribute("href", url);
     url = Services.prefs.getCharPref("identity.mobilepromo.ios") + "sync-preferences";
     document.getElementById("fxaMobilePromo-ios").setAttribute("href", url);
-    document.getElementById("fxaMobilePromo-ios-hasFxaAccount").setAttribute("href", url);
+
+    // Links for mobile devices shown after the user is logged in.
+    fxAccounts.promiseAccountsConnectDeviceURI(this._getEntryPoint()).then(connectURI => {
+      document.getElementById("mobilePromo-singledevice").setAttribute("href", connectURI);
+    });
+
+    fxAccounts.promiseAccountsManageDevicesURI(this._getEntryPoint()).then(manageURI => {
+      document.getElementById("mobilePromo-multidevice").setAttribute("href", manageURI);
+    });
 
     document.getElementById("tosPP-small-ToS").setAttribute("href", Weave.Svc.Prefs.get("fxa.termsURL"));
     document.getElementById("tosPP-small-PP").setAttribute("href", Weave.Svc.Prefs.get("fxa.privacyURL"));
@@ -310,6 +329,10 @@ var gSyncPane = {
     fxAccounts.promiseAccountsManageURI(this._getEntryPoint()).then(accountsManageURI => {
       document.getElementById("verifiedManage").setAttribute("href", accountsManageURI);
     });
+    // The mobile promo links - which one is shown depends on the number of devices.
+    let isMultiDevice = Weave.Service.clientsEngine.stats.numClients > 1;
+    document.getElementById("mobilePromo-singledevice").hidden = isMultiDevice;
+    document.getElementById("mobilePromo-multidevice").hidden = !isMultiDevice;
   },
 
   _getEntryPoint() {

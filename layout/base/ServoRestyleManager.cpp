@@ -107,7 +107,9 @@ ExpectedOwnerForChild(const nsIFrame& aFrame)
       // Handle :-moz-table and :-moz-inline-table.
       parent = IsAnonBox(*tableFrame) ? parent->GetParent() : tableFrame;
     } else {
-      parent = parent->GetParent();
+      // We get the in-flow parent here so that we can handle the OOF anonymous
+      // boxed to get the correct parent.
+      parent = parent->GetInFlowParent();
     }
     parent = FirstContinuationOrPartOfIBSplit(parent);
   }
@@ -909,7 +911,6 @@ ServoRestyleManager::ProcessPostTraversal(
 
     if (styleFrame) {
       UpdateAdditionalStyleContexts(styleFrame, aRestyleState);
-      styleFrame->UpdateStyleOfOwnedAnonBoxes(childrenRestyleState);
     }
 
     if (!aElement->GetParent()) {
@@ -973,6 +974,10 @@ ServoRestyleManager::ProcessPostTraversal(
     childrenRestyleState.ProcessWrapperRestyles(styleFrame);
 
     if (wasRestyled) {
+      // Make sure to update anon boxes and pseudo bits after updating text,
+      // otherwise we could clobber first-letter styles from
+      // ProcessPostTraversalForText, for example.
+      styleFrame->UpdateStyleOfOwnedAnonBoxes(childrenRestyleState);
       UpdateFramePseudoElementStyles(styleFrame, childrenRestyleState);
     } else if (traverseElementChildren &&
                styleFrame->IsFrameOfType(nsIFrame::eBlockFrame)) {
@@ -1088,13 +1093,18 @@ ServoRestyleManager::SnapshotFor(Element* aElement)
 void
 ServoRestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags)
 {
-  MOZ_ASSERT(PresContext()->Document(), "No document?  Pshaw!");
+  nsPresContext* presContext = PresContext();
+
+  MOZ_ASSERT(presContext->Document(), "No document?  Pshaw!");
+  MOZ_ASSERT(!presContext->HasPendingMediaQueryUpdates(),
+             "Someone forgot to update media queries?");
   MOZ_ASSERT(!nsContentUtils::IsSafeToRunScript(), "Missing a script blocker!");
   MOZ_ASSERT(!mInStyleRefresh, "Reentrant call?");
 
-  if (MOZ_UNLIKELY(!PresContext()->PresShell()->DidInitialize())) {
+
+  if (MOZ_UNLIKELY(!presContext->PresShell()->DidInitialize())) {
     // PresShell::FlushPendingNotifications doesn't early-return in the case
-    // where the PreShell hasn't yet been initialized (and therefore we haven't
+    // where the PresShell hasn't yet been initialized (and therefore we haven't
     // yet done the initial style traversal of the DOM tree). We should arguably
     // fix up the callers and assert against this case, but we just detect and
     // handle it for now.
@@ -1107,11 +1117,11 @@ ServoRestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags)
   AnimationsWithDestroyedFrame animationsWithDestroyedFrame(this);
 
   ServoStyleSet* styleSet = StyleSet();
-  nsIDocument* doc = PresContext()->Document();
+  nsIDocument* doc = presContext->Document();
 
   // Ensure the refresh driver is active during traversal to avoid mutating
   // mActiveTimer and mMostRecentRefresh time.
-  PresContext()->RefreshDriver()->MostRecentRefresh();
+  presContext->RefreshDriver()->MostRecentRefresh();
 
 
   // Perform the Servo traversal, and the post-traversal if required. We do this
@@ -1135,7 +1145,7 @@ ServoRestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags)
     // Recreate style contexts, and queue up change hints (which also handle
     // lazy frame construction).
     {
-      AutoRestyleTimelineMarker marker(mPresContext->GetDocShell(), false);
+      AutoRestyleTimelineMarker marker(presContext->GetDocShell(), false);
       DocumentStyleRootIterator iter(doc->GetServoRestyleRoot());
       while (Element* root = iter.GetNextStyleRoot()) {
         nsTArray<nsIFrame*> wrappersToRestyle;
@@ -1154,7 +1164,7 @@ ServoRestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags)
     // iterate until there's nothing left.
     {
       AutoTimelineMarker marker(
-        mPresContext->GetDocShell(), "StylesApplyChanges");
+        presContext->GetDocShell(), "StylesApplyChanges");
       ReentrantChangeList newChanges;
       mReentrantChanges = &newChanges;
       while (!currentChanges.IsEmpty()) {

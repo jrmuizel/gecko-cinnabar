@@ -31,17 +31,13 @@ jobs:
             platform: linux64/debug
         worker-type: aws-provisioner-v1/gecko-{level}-b-linux
         worker:
-            docker-image: {in-tree: desktop-build}
             max-run-time: 36000
-            env:
-                TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/linux64/releng.manifest"
         run:
             using: mozharness
             actions: [clobber build]
             config:
                 - builds/releng_base_firefox.py
                 - builds/releng_sub_linux_configs/64_searchfox_and_debug.py
-                - balrog/production.py
             script: "mozharness/scripts/fx_desktop_build.py"
             tooltool-downloads: public
             keep-artifacts: false
@@ -57,7 +53,6 @@ jobs:
             platform: osx-cross/debug
         worker-type: aws-provisioner-v1/gecko-{level}-b-macosx64
         worker:
-            docker-image: {in-tree: desktop-build}
             max-run-time: 36000
             env:
                 TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
@@ -67,7 +62,6 @@ jobs:
             config:
                 - builds/releng_base_firefox.py
                 - builds/releng_base_mac_64_cross_builds.py
-                - balrog/production.py
             script: "mozharness/scripts/fx_desktop_build.py"
             custom-build-variant-cfg: cross-debug-searchfox
             secrets: true
@@ -78,28 +72,32 @@ jobs:
             - linux64-clang
             - linux64-hfsplus
             - linux64-libdmg
+            - linux64-llvm-dsymutil
             - linux64-rust-macos
 
     # NOTE: Windows Searchfox jobs aren't working quite yet (bug 1418415).
 
-    win32-searchfox/debug:
-        description: "Win32 Searchfox Debug (clang-cl)"
+    win64-searchfox/debug:
+        description: "Win64 Searchfox Debug (clang-cl)"
         index:
             product: firefox
-            job-name: win32-searchfox-debug
+            job-name: win64-searchfox-debug
         treeherder:
-            platform: windows2012-32/debug
+            platform: windows2012-64/debug
         worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
         worker:
             max-run-time: 7200
             env:
-                TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win32/releng.manifest"
+                TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/win64/releng.manifest"
         run:
             using: mozharness
+            options: [append-env-variables-from-configs]
             script: mozharness/scripts/fx_desktop_build.py
             config:
                 - builds/releng_base_firefox.py
-                - builds/taskcluster_firefox_win32_clang_searchfox_debug.py
+                - builds/taskcluster_base_windows.py
+                - builds/taskcluster_base_win64.py
+                - builds/taskcluster_sub_win64/searchfox_debug.py
         toolchains:
-            - win32-clang-cl
-            - win32-rust
+            - win64-clang-cl
+            - win64-rust

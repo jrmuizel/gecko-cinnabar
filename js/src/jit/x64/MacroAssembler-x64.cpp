@@ -73,172 +73,6 @@ MacroAssemblerX64::loadConstantSimd128Float(const SimdConstant&v, FloatRegister 
 }
 
 void
-MacroAssemblerX64::convertInt64ToDouble(Register64 input, FloatRegister output)
-{
-    // Zero the output register to break dependencies, see convertInt32ToDouble.
-    zeroDouble(output);
-
-    vcvtsq2sd(input.reg, output, output);
-}
-
-void
-MacroAssemblerX64::convertInt64ToFloat32(Register64 input, FloatRegister output)
-{
-    // Zero the output register to break dependencies, see convertInt32ToDouble.
-    zeroFloat32(output);
-
-    vcvtsq2ss(input.reg, output, output);
-}
-
-bool
-MacroAssemblerX64::convertUInt64ToDoubleNeedsTemp()
-{
-    return true;
-}
-
-void
-MacroAssemblerX64::convertUInt64ToDouble(Register64 input, FloatRegister output, Register temp)
-{
-    // Zero the output register to break dependencies, see convertInt32ToDouble.
-    zeroDouble(output);
-
-    // If the input's sign bit is not set we use vcvtsq2sd directly.
-    // Else, we divide by 2 and keep the LSB, convert to double, and multiply
-    // the result by 2.
-    Label done;
-    Label isSigned;
-
-    testq(input.reg, input.reg);
-    j(Assembler::Signed, &isSigned);
-    vcvtsq2sd(input.reg, output, output);
-    jump(&done);
-
-    bind(&isSigned);
-
-    ScratchRegisterScope scratch(asMasm());
-    mov(input.reg, scratch);
-    mov(input.reg, temp);
-    shrq(Imm32(1), scratch);
-    andq(Imm32(1), temp);
-    orq(temp, scratch);
-
-    vcvtsq2sd(scratch, output, output);
-    vaddsd(output, output, output);
-
-    bind(&done);
-}
-
-void
-MacroAssemblerX64::convertUInt64ToFloat32(Register64 input, FloatRegister output, Register temp)
-{
-    // Zero the output register to break dependencies, see convertInt32ToDouble.
-    zeroFloat32(output);
-
-    // See comment in convertUInt64ToDouble.
-    Label done;
-    Label isSigned;
-
-    testq(input.reg, input.reg);
-    j(Assembler::Signed, &isSigned);
-    vcvtsq2ss(input.reg, output, output);
-    jump(&done);
-
-    bind(&isSigned);
-
-    ScratchRegisterScope scratch(asMasm());
-    mov(input.reg, scratch);
-    mov(input.reg, temp);
-    shrq(Imm32(1), scratch);
-    andq(Imm32(1), temp);
-    orq(temp, scratch);
-
-    vcvtsq2ss(scratch, output, output);
-    vaddss(output, output, output);
-
-    bind(&done);
-}
-
-void
-MacroAssemblerX64::wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                             Label* oolRejoin, FloatRegister tempReg)
-{
-    vcvttsd2sq(input, output.reg);
-    cmpq(Imm32(1), output.reg);
-    j(Assembler::Overflow, oolEntry);
-    bind(oolRejoin);
-}
-
-void
-MacroAssemblerX64::wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                              Label* oolRejoin, FloatRegister tempReg)
-{
-    vcvttss2sq(input, output.reg);
-    cmpq(Imm32(1), output.reg);
-    j(Assembler::Overflow, oolEntry);
-    bind(oolRejoin);
-}
-
-void
-MacroAssemblerX64::wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                              Label* oolRejoin, FloatRegister tempReg)
-{
-    // If the input < INT64_MAX, vcvttsd2sq will do the right thing, so
-    // we use it directly. Else, we subtract INT64_MAX, convert to int64,
-    // and then add INT64_MAX to the result.
-
-    Label isLarge;
-
-    ScratchDoubleScope scratch(asMasm());
-    loadConstantDouble(double(0x8000000000000000), scratch);
-    asMasm().branchDouble(Assembler::DoubleGreaterThanOrEqual, input, scratch, &isLarge);
-    vcvttsd2sq(input, output.reg);
-    testq(output.reg, output.reg);
-    j(Assembler::Signed, oolEntry);
-    jump(oolRejoin);
-
-    bind(&isLarge);
-
-    moveDouble(input, tempReg);
-    vsubsd(scratch, tempReg, tempReg);
-    vcvttsd2sq(tempReg, output.reg);
-    testq(output.reg, output.reg);
-    j(Assembler::Signed, oolEntry);
-    asMasm().or64(Imm64(0x8000000000000000), output);
-
-    bind(oolRejoin);
-}
-
-void
-MacroAssemblerX64::wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                               Label* oolRejoin, FloatRegister tempReg)
-{
-    // If the input < INT64_MAX, vcvttss2sq will do the right thing, so
-    // we use it directly. Else, we subtract INT64_MAX, convert to int64,
-    // and then add INT64_MAX to the result.
-
-    Label isLarge;
-
-    ScratchFloat32Scope scratch(asMasm());
-    loadConstantFloat32(float(0x8000000000000000), scratch);
-    asMasm().branchFloat(Assembler::DoubleGreaterThanOrEqual, input, scratch, &isLarge);
-    vcvttss2sq(input, output.reg);
-    testq(output.reg, output.reg);
-    j(Assembler::Signed, oolEntry);
-    jump(oolRejoin);
-
-    bind(&isLarge);
-
-    moveFloat32(input, tempReg);
-    vsubss(scratch, tempReg, tempReg);
-    vcvttss2sq(tempReg, output.reg);
-    testq(output.reg, output.reg);
-    j(Assembler::Signed, oolEntry);
-    asMasm().or64(Imm64(0x8000000000000000), output);
-
-    bind(oolRejoin);
-}
-
-void
 MacroAssemblerX64::bindOffsets(const MacroAssemblerX86Shared::UsesVector& uses)
 {
     for (CodeOffset use : uses) {
@@ -722,7 +556,7 @@ MacroAssembler::storeUnboxedValue(const ConstantOrRegister& value, MIRType value
 void
 MacroAssembler::wasmLoad(const wasm::MemoryAccessDesc& access, Operand srcAddr, AnyRegister out)
 {
-    memoryBarrier(access.barrierBefore());
+    memoryBarrierBefore(access.sync());
 
     size_t loadOffset = size();
     switch (access.type()) {
@@ -784,13 +618,13 @@ MacroAssembler::wasmLoad(const wasm::MemoryAccessDesc& access, Operand srcAddr, 
     }
     append(access, loadOffset, framePushed());
 
-    memoryBarrier(access.barrierAfter());
+    memoryBarrierAfter(access.sync());
 }
 
 void
 MacroAssembler::wasmLoadI64(const wasm::MemoryAccessDesc& access, Operand srcAddr, Register64 out)
 {
-    memoryBarrier(access.barrierBefore());
+    memoryBarrierBefore(access.sync());
 
     MOZ_ASSERT(!access.isSimd());
 
@@ -831,13 +665,13 @@ MacroAssembler::wasmLoadI64(const wasm::MemoryAccessDesc& access, Operand srcAdd
     }
     append(access, loadOffset, framePushed());
 
-    memoryBarrier(access.barrierAfter());
+    memoryBarrierAfter(access.sync());
 }
 
 void
 MacroAssembler::wasmStore(const wasm::MemoryAccessDesc& access, AnyRegister value, Operand dstAddr)
 {
-    memoryBarrier(access.barrierBefore());
+    memoryBarrierBefore(access.sync());
 
     size_t storeOffset = size();
     switch (access.type()) {
@@ -896,7 +730,7 @@ MacroAssembler::wasmStore(const wasm::MemoryAccessDesc& access, AnyRegister valu
     }
     append(access, storeOffset, framePushed());
 
-    memoryBarrier(access.barrierAfter());
+    memoryBarrierAfter(access.sync());
 }
 
 void
@@ -921,6 +755,273 @@ MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output
     move32(Imm32(0xffffffff), scratch);
     cmpq(scratch, output);
     j(Assembler::Above, oolEntry);
+}
+
+void
+MacroAssembler::wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                          Label* oolRejoin, FloatRegister tempReg)
+{
+    vcvttsd2sq(input, output.reg);
+    cmpq(Imm32(1), output.reg);
+    j(Assembler::Overflow, oolEntry);
+    bind(oolRejoin);
+}
+
+void
+MacroAssembler::wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                           Label* oolRejoin, FloatRegister tempReg)
+{
+    vcvttss2sq(input, output.reg);
+    cmpq(Imm32(1), output.reg);
+    j(Assembler::Overflow, oolEntry);
+    bind(oolRejoin);
+}
+
+void
+MacroAssembler::wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                           Label* oolRejoin, FloatRegister tempReg)
+{
+    // If the input < INT64_MAX, vcvttsd2sq will do the right thing, so
+    // we use it directly. Else, we subtract INT64_MAX, convert to int64,
+    // and then add INT64_MAX to the result.
+
+    Label isLarge;
+
+    ScratchDoubleScope scratch(*this);
+    loadConstantDouble(double(0x8000000000000000), scratch);
+    branchDouble(Assembler::DoubleGreaterThanOrEqual, input, scratch, &isLarge);
+    vcvttsd2sq(input, output.reg);
+    testq(output.reg, output.reg);
+    j(Assembler::Signed, oolEntry);
+    jump(oolRejoin);
+
+    bind(&isLarge);
+
+    moveDouble(input, tempReg);
+    vsubsd(scratch, tempReg, tempReg);
+    vcvttsd2sq(tempReg, output.reg);
+    testq(output.reg, output.reg);
+    j(Assembler::Signed, oolEntry);
+    or64(Imm64(0x8000000000000000), output);
+
+    bind(oolRejoin);
+}
+
+void
+MacroAssembler::wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
+                                            Label* oolRejoin, FloatRegister tempReg)
+{
+    // If the input < INT64_MAX, vcvttss2sq will do the right thing, so
+    // we use it directly. Else, we subtract INT64_MAX, convert to int64,
+    // and then add INT64_MAX to the result.
+
+    Label isLarge;
+
+    ScratchFloat32Scope scratch(*this);
+    loadConstantFloat32(float(0x8000000000000000), scratch);
+    branchFloat(Assembler::DoubleGreaterThanOrEqual, input, scratch, &isLarge);
+    vcvttss2sq(input, output.reg);
+    testq(output.reg, output.reg);
+    j(Assembler::Signed, oolEntry);
+    jump(oolRejoin);
+
+    bind(&isLarge);
+
+    moveFloat32(input, tempReg);
+    vsubss(scratch, tempReg, tempReg);
+    vcvttss2sq(tempReg, output.reg);
+    testq(output.reg, output.reg);
+    j(Assembler::Signed, oolEntry);
+    or64(Imm64(0x8000000000000000), output);
+
+    bind(oolRejoin);
+}
+
+// ========================================================================
+// Convert floating point.
+
+void
+MacroAssembler::convertInt64ToDouble(Register64 input, FloatRegister output)
+{
+    // Zero the output register to break dependencies, see convertInt32ToDouble.
+    zeroDouble(output);
+
+    vcvtsq2sd(input.reg, output, output);
+}
+
+void
+MacroAssembler::convertInt64ToFloat32(Register64 input, FloatRegister output)
+{
+    // Zero the output register to break dependencies, see convertInt32ToDouble.
+    zeroFloat32(output);
+
+    vcvtsq2ss(input.reg, output, output);
+}
+
+bool
+MacroAssembler::convertUInt64ToDoubleNeedsTemp()
+{
+    return true;
+}
+
+void
+MacroAssembler::convertUInt64ToDouble(Register64 input, FloatRegister output, Register temp)
+{
+    // Zero the output register to break dependencies, see convertInt32ToDouble.
+    zeroDouble(output);
+
+    // If the input's sign bit is not set we use vcvtsq2sd directly.
+    // Else, we divide by 2 and keep the LSB, convert to double, and multiply
+    // the result by 2.
+    Label done;
+    Label isSigned;
+
+    testq(input.reg, input.reg);
+    j(Assembler::Signed, &isSigned);
+    vcvtsq2sd(input.reg, output, output);
+    jump(&done);
+
+    bind(&isSigned);
+
+    ScratchRegisterScope scratch(*this);
+    mov(input.reg, scratch);
+    mov(input.reg, temp);
+    shrq(Imm32(1), scratch);
+    andq(Imm32(1), temp);
+    orq(temp, scratch);
+
+    vcvtsq2sd(scratch, output, output);
+    vaddsd(output, output, output);
+
+    bind(&done);
+}
+
+void
+MacroAssembler::convertUInt64ToFloat32(Register64 input, FloatRegister output, Register temp)
+{
+    // Zero the output register to break dependencies, see convertInt32ToDouble.
+    zeroFloat32(output);
+
+    // See comment in convertUInt64ToDouble.
+    Label done;
+    Label isSigned;
+
+    testq(input.reg, input.reg);
+    j(Assembler::Signed, &isSigned);
+    vcvtsq2ss(input.reg, output, output);
+    jump(&done);
+
+    bind(&isSigned);
+
+    ScratchRegisterScope scratch(*this);
+    mov(input.reg, scratch);
+    mov(input.reg, temp);
+    shrq(Imm32(1), scratch);
+    andq(Imm32(1), temp);
+    orq(temp, scratch);
+
+    vcvtsq2ss(scratch, output, output);
+    vaddss(output, output, output);
+
+    bind(&done);
+}
+
+// ========================================================================
+// Primitive atomic operations.
+
+void
+MacroAssembler::compareExchange64(const Synchronization&, const Address& mem, Register64 expected,
+                                  Register64 replacement, Register64 output)
+{
+    MOZ_ASSERT(output.reg == rax);
+    if (expected != output)
+        movq(expected.reg, output.reg);
+    lock_cmpxchgq(replacement.reg, Operand(mem));
+}
+
+void
+MacroAssembler::compareExchange64(const Synchronization&, const BaseIndex& mem, Register64 expected,
+                                  Register64 replacement, Register64 output)
+{
+    MOZ_ASSERT(output.reg == rax);
+    if (expected != output)
+        movq(expected.reg, output.reg);
+    lock_cmpxchgq(replacement.reg, Operand(mem));
+}
+
+void
+MacroAssembler::atomicExchange64(const Synchronization& sync, const Address& mem, Register64 value, Register64 output)
+{
+    if (value != output)
+        movq(value.reg, output.reg);
+    xchgq(output.reg, Operand(mem));
+}
+
+void
+MacroAssembler::atomicExchange64(const Synchronization& sync, const BaseIndex& mem, Register64 value, Register64 output)
+{
+    if (value != output)
+        movq(value.reg, output.reg);
+    xchgq(output.reg, Operand(mem));
+}
+
+template<typename T>
+static void
+AtomicFetchOp64(MacroAssembler& masm, AtomicOp op, Register value, const T& mem, Register temp,
+                Register output)
+{
+    if (op == AtomicFetchAddOp) {
+        if (value != output)
+            masm.movq(value, output);
+        masm.lock_xaddq(output, Operand(mem));
+    } else if (op == AtomicFetchSubOp) {
+        if (value != output)
+            masm.movq(value, output);
+        masm.negq(output);
+        masm.lock_xaddq(output, Operand(mem));
+    } else {
+        Label again;
+        MOZ_ASSERT(output == rax);
+        masm.movq(Operand(mem), rax);
+        masm.bind(&again);
+        masm.movq(rax, temp);
+        switch (op) {
+          case AtomicFetchAndOp: masm.andq(value, temp); break;
+          case AtomicFetchOrOp:  masm.orq(value, temp); break;
+          case AtomicFetchXorOp: masm.xorq(value, temp); break;
+          default:               MOZ_CRASH();
+        }
+        masm.lock_cmpxchgq(temp, Operand(mem));
+        masm.j(MacroAssembler::NonZero, &again);
+    }
+}
+
+void
+MacroAssembler::atomicFetchOp64(const Synchronization&, AtomicOp op, Register64 value,
+                                const Address& mem, Register64 temp, Register64 output)
+{
+    AtomicFetchOp64(*this, op, value.reg, mem, temp.reg, output.reg);
+}
+
+void
+MacroAssembler::atomicFetchOp64(const Synchronization&, AtomicOp op, Register64 value,
+                                const BaseIndex& mem, Register64 temp, Register64 output)
+{
+    AtomicFetchOp64(*this, op, value.reg, mem, temp.reg, output.reg);
+}
+
+void
+MacroAssembler::atomicEffectOp64(const Synchronization&, AtomicOp op, Register64 value,
+                                 const BaseIndex& mem)
+{
+    switch (op) {
+      case AtomicFetchAddOp: lock_addq(value.reg, Operand(mem)); break;
+      case AtomicFetchSubOp: lock_subq(value.reg, Operand(mem)); break;
+      case AtomicFetchAndOp: lock_andq(value.reg, Operand(mem)); break;
+      case AtomicFetchOrOp:  lock_orq(value.reg, Operand(mem)); break;
+      case AtomicFetchXorOp: lock_xorq(value.reg, Operand(mem)); break;
+      default:               MOZ_CRASH();
+    }
 }
 
 //}}} check_macroassembler_style

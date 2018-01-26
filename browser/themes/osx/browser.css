@@ -91,7 +91,7 @@
 
 /* The fullscreen button doesnt show on Yosemite(10.10) or above so dont give it a
    border there */
-@media not all and (-moz-mac-yosemite-theme) {
+@media (-moz-mac-yosemite-theme: 0) {
   .titlebar-placeholder[type="fullscreen-button"] {
     margin-right: 4px;
   }
@@ -846,20 +846,6 @@ html|span.ac-emphasize-text-url {
   }
 }
 
-/**
- * In-tab close button
- */
-
-.tab-close-button > .toolbarbutton-icon {
-  margin-inline-end: 0px !important;
-}
-
-.tab-close-button {
-  border: none !important;
-  background: none;
-  cursor: default;
-}
-
 /* Bookmarks toolbar */
 #PlacesToolbarDropIndicator {
   list-style-image: url(chrome://browser/skin/places/toolbarDropMarker.png);
@@ -1150,8 +1136,8 @@ html|*.addon-webext-perm-list {
 
 /* Private browsing and accessibility indicators */
 
-:root[accessibilitymode][tabsintitlebar]:not([inFullscreen]) > #tab-view-deck > #browser-panel > #navigator-toolbox > #TabsToolbar > .accessibility-indicator,
-:root[privatebrowsingmode=temporary][tabsintitlebar]:not([inFullscreen]) > #tab-view-deck > #browser-panel > #navigator-toolbox > #TabsToolbar > .private-browsing-indicator,
+:root[accessibilitymode][tabsintitlebar]:not([inFullscreen]) > #navigator-toolbox > #TabsToolbar > .accessibility-indicator,
+:root[privatebrowsingmode=temporary][tabsintitlebar]:not([inFullscreen]) > #navigator-toolbox > #TabsToolbar > .private-browsing-indicator,
 :root[accessibilitymode]:not([tabsintitlebar]) > #titlebar > #titlebar-content > #titlebar-secondary-buttonbox > .accessibility-indicator,
 :root[privatebrowsingmode=temporary]:not([tabsintitlebar]) > #titlebar > #titlebar-content > #titlebar-secondary-buttonbox > .private-browsing-indicator {
   display: none;

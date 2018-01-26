@@ -34,36 +34,6 @@ namespace jit {
 
 //{{{ check_macroassembler_style
 // ===============================================================
-// Frame manipulation functions.
-
-uint32_t
-MacroAssembler::framePushed() const
-{
-    return framePushed_;
-}
-
-void
-MacroAssembler::setFramePushed(uint32_t framePushed)
-{
-    framePushed_ = framePushed;
-}
-
-void
-MacroAssembler::adjustFrame(int32_t value)
-{
-    MOZ_ASSERT_IF(value < 0, framePushed_ >= uint32_t(-value));
-    setFramePushed(framePushed_ + value);
-}
-
-void
-MacroAssembler::implicitPop(uint32_t bytes)
-{
-    MOZ_ASSERT(bytes % sizeof(intptr_t) == 0);
-    MOZ_ASSERT(bytes <= INT32_MAX);
-    adjustFrame(-int32_t(bytes));
-}
-
-// ===============================================================
 // Stack manipulation functions.
 
 CodeOffset
@@ -471,8 +441,10 @@ MacroAssembler::branchIfFunctionHasNoScript(Register fun, Label* label)
 {
     // 16-bit loads are slow and unaligned 32-bit loads may be too so
     // perform an aligned 32-bit load and adjust the bitmask accordingly.
-    MOZ_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
-    MOZ_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
+    static_assert(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0,
+                  "The code in this function and the ones below must change");
+    static_assert(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2,
+                  "The code in this function and the ones below must change");
     Address address(fun, JSFunction::offsetOfNargs());
     int32_t bit = IMM32_16ADJ(JSFunction::INTERPRETED);
     branchTest32(Assembler::Zero, address, Imm32(bit), label);
@@ -483,8 +455,6 @@ MacroAssembler::branchIfInterpreted(Register fun, Label* label)
 {
     // 16-bit loads are slow and unaligned 32-bit loads may be too so
     // perform an aligned 32-bit load and adjust the bitmask accordingly.
-    MOZ_ASSERT(JSFunction::offsetOfNargs() % sizeof(uint32_t) == 0);
-    MOZ_ASSERT(JSFunction::offsetOfFlags() == JSFunction::offsetOfNargs() + 2);
     Address address(fun, JSFunction::offsetOfNargs());
     int32_t bit = IMM32_16ADJ(JSFunction::INTERPRETED);
     branchTest32(Assembler::NonZero, address, Imm32(bit), label);
@@ -830,9 +800,20 @@ MacroAssembler::storeCallBoolResult(Register reg)
 }
 
 void
-MacroAssembler::storeCallResultValue(AnyRegister dest)
+MacroAssembler::storeCallInt32Result(Register reg)
 {
-    unboxValue(JSReturnOperand, dest);
+#if JS_BITS_PER_WORD == 32
+    storeCallPointerResult(reg);
+#else
+    // Ensure the upper 32 bits are cleared.
+    move32(ReturnReg, reg);
+#endif
+}
+
+void
+MacroAssembler::storeCallResultValue(AnyRegister dest, JSValueType type)
+{
+    unboxValue(JSReturnOperand, dest, type);
 }
 
 void
@@ -841,7 +822,7 @@ MacroAssembler::storeCallResultValue(TypedOrValueRegister dest)
     if (dest.hasValue())
         storeCallResultValue(dest.valueReg());
     else
-        storeCallResultValue(dest.typedReg());
+        storeCallResultValue(dest.typedReg(), ValueTypeFromMIRType(dest.type()));
 }
 
 } // namespace jit

@@ -27,7 +27,7 @@ function test() {
   initNetMonitor(SIMPLE_SJS).then(async ({ tab, monitor }) => {
     info("Starting test... ");
 
-    let { document, store, windowRequire } = monitor.panelWin;
+    let { document, store, windowRequire, connector } = monitor.panelWin;
     let Actions = windowRequire("devtools/client/netmonitor/src/actions/index");
     let { EVENTS } = windowRequire("devtools/client/netmonitor/src/constants");
     let {
@@ -174,9 +174,9 @@ function test() {
 
       ok(requestItem.responseHeaders,
         "There should be a responseHeaders data available.");
-      is(requestItem.responseHeaders.headers.length, 10,
+      is(requestItem.responseHeaders.headers.length, 13,
         "The responseHeaders data has an incorrect |headers| property.");
-      is(requestItem.responseHeaders.headersSize, 330,
+      is(requestItem.responseHeaders.headersSize, 335,
         "The responseHeaders data has an incorrect |headersSize| property.");
 
       verifyRequestItemTarget(
@@ -228,7 +228,7 @@ function test() {
         "The status data has an incorrect value.");
       is(requestItem.statusText, "Och Aye",
         "The statusText data has an incorrect value.");
-      is(requestItem.headersSize, 330,
+      is(requestItem.headersSize, 335,
         "The headersSize data has an incorrect value.");
 
       let requestListItem = document.querySelector(".request-list-item");
@@ -261,7 +261,7 @@ function test() {
 
       let requestItem = getSortedRequests(store.getState()).get(0);
 
-      is(requestItem.transferredSize, "342",
+      is(requestItem.transferredSize, "347",
         "The transferredSize data has an incorrect value.");
       is(requestItem.contentSize, "12",
         "The contentSize data has an incorrect value.");
@@ -347,7 +347,18 @@ function test() {
       );
     });
 
+    let wait = waitForNetworkEvents(monitor, 1);
     tab.linkedBrowser.reload();
+    await wait;
+
+    let requestItem = getSortedRequests(store.getState()).get(0);
+
+    if (!requestItem.requestHeaders) {
+      connector.requestData(requestItem.id, "requestHeaders");
+    }
+    if (!requestItem.responseHeaders) {
+      connector.requestData(requestItem.id, "responseHeaders");
+    }
 
     await Promise.all(promiseList);
     await teardown(monitor);

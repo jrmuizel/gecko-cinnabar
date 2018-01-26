@@ -13,7 +13,7 @@ try {
 } catch (ex) {}
 
 Components.utils.import("resource://gre/modules/Services.jsm");
-Components.utils.import("resource:///modules/E10SUtils.jsm");
+Components.utils.import("resource://gre/modules/E10SUtils.jsm");
 
 var NUM_CYCLES = 5;
 var numPageCycles = 1;
@@ -38,6 +38,7 @@ var forceCC = true;
 
 var useMozAfterPaint = false;
 var useFNBPaint = false;
+var useHero = false;
 var gPaintWindow = window;
 var gPaintListener = false;
 var loadNoCache = false;
@@ -136,6 +137,7 @@ function plInit() {
     numPageCycles = Services.prefs.getIntPref("talos.tppagecycles", 1);
     timeout = Services.prefs.getIntPref("talos.tptimeout", -1);
     useMozAfterPaint = Services.prefs.getBoolPref("talos.tpmozafterpaint", false);
+    useHero = Services.prefs.getBoolPref("talos.tphero", false);
     useFNBPaint = Services.prefs.getBoolPref("talos.fnbpaint", false);
     loadNoCache = Services.prefs.getBoolPref("talos.tploadnocache", false);
     scrollTest = Services.prefs.getBoolPref("talos.tpscrolltest", false);
@@ -230,69 +232,20 @@ function plInit() {
         browserWindow.resizeTo(winWidth, winHeight);
         browserWindow.moveTo(0, 0);
         browserWindow.focus();
-
         content = browserWindow.getBrowser();
+        content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/utils.js", false, true);
 
-        // Load the frame script for e10s / IPC message support
-        let contentScript = "data:,function _contentLoadHandler(e) { " +
-          "  if (e.originalTarget.defaultView == content) { " +
-          "    content.wrappedJSObject.tpRecordTime = function(t, s, n) { sendAsyncMessage('PageLoader:RecordTime', { time: t, startTime: s, testName: n }); }; ";
-        // setup idle-callback
-        contentScript += "" +
-        "var idleCallbackHandle; " +
-        "function _idleCallbackHandler() { " +
-        "  content.window.cancelIdleCallback(idleCallbackHandle); " +
-        "  sendAsyncMessage('PageLoader:IdleCallbackReceived', {}); " +
-        "}; " +
-        "function _setIdleCallback() { " +
-        "  idleCallbackHandle = content.window.requestIdleCallback(_idleCallbackHandler); " +
-        "  sendAsyncMessage('PageLoader:IdleCallbackSet', {}); " +
-        "}; ";
+        // pick the right load handler
         if (useFNBPaint) {
-          contentScript += "" +
-          "var gRetryCounter = 0; " +
-          "function _contentFNBPaintHandler() { " +
-          "  x = content.window.performance.timing.timeToNonBlankPaint; " +
-          "  if (typeof x == 'undefined') { " +
-          "    sendAsyncMessage('PageLoader:FNBPaintError', {}); " +
-          "  } " +
-          "  if (x > 0) { " +
-          "    sendAsyncMessage('PageLoader:LoadEvent', { 'fnbpaint': x }); " +
-          "  } else { " +
-          "    gRetryCounter += 1; " +
-          "    if (gRetryCounter <= 10) { " +
-          "      dump('fnbpaint is not yet available (0), retry number ' + gRetryCounter + '...\\n'); " +
-          "      content.setTimeout(_contentFNBPaintHandler, 100); " +
-          "    } else { " +
-          "      dump('unable to get a value for fnbpaint after ' + gRetryCounter + ' retries\\n'); " +
-          "      sendAsyncMessage('PageLoader:FNBPaintError', {}); " +
-          "    } " +
-          "  } " +
-          "}; " +
-          "content.setTimeout(_contentFNBPaintHandler, 0); ";
+          content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/lh_fnbpaint.js", false, true);
         } else if (useMozAfterPaint) {
-          contentScript += "" +
-          "function _contentPaintHandler() { " +
-          "  var utils = content.QueryInterface(Components.interfaces.nsIInterfaceRequestor).getInterface(Components.interfaces.nsIDOMWindowUtils); " +
-          "  if (utils.isMozAfterPaintPending) { " +
-          "    addEventListener('MozAfterPaint', function(e) { " +
-          "      removeEventListener('MozAfterPaint', arguments.callee, true); " +
-          "      sendAsyncMessage('PageLoader:LoadEvent', {}); " +
-          "    }, true); " +
-          "  } else { " +
-          "    sendAsyncMessage('PageLoader:LoadEvent', {}); " +
-          "  } " +
-          "}; " +
-          "content.setTimeout(_contentPaintHandler, 0); ";
+          content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/lh_moz.js", false, true);
+        } else if (useHero) {
+          content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/lh_hero.js", false, true);
         } else {
-          contentScript += "    sendAsyncMessage('PageLoader:LoadEvent', {}); ";
+          content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/lh_dummy.js", false, true);
+
         }
-        contentScript += "" +
-          "  content.setTimeout(_setIdleCallback, 0); " +
-          "  }" +
-          "} " +
-          "addEventListener('load', _contentLoadHandler, true); ";
-        content.selectedBrowser.messageManager.loadFrameScript(contentScript, false, true);
         content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/talos-content.js", false);
         content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/tscroll.js", false, true);
         content.selectedBrowser.messageManager.loadFrameScript("chrome://pageloader/content/Profiler.js", false, true);
@@ -316,7 +269,7 @@ var ContentListener = {
   receiveMessage(message) {
     switch (message.name) {
       case "PageLoader:LoadEvent": return plLoadHandlerMessage(message);
-      case "PageLoader:FNBPaintError": return plFNBPaintErrorMessage(message);
+      case "PageLoader:Error": return plErrorMessage(message);
       case "PageLoader:RecordTime": return plRecordTimeMessage(message);
       case "PageLoader:IdleCallbackSet": return plIdleCallbackSet();
       case "PageLoader:IdleCallbackReceived": return plIdleCallbackReceived();
@@ -351,18 +304,14 @@ function plLoadPage() {
   mm.addMessageListener("PageLoader:RecordTime", ContentListener);
   mm.addMessageListener("PageLoader:IdleCallbackSet", ContentListener);
   mm.addMessageListener("PageLoader:IdleCallbackReceived", ContentListener);
-  if (useFNBPaint) {
-    mm.addMessageListener("PageLoader:FNBPaintError", ContentListener);
-  }
+  mm.addMessageListener("PageLoader:Error", ContentListener);
 
   removeLastAddedMsgListener = function() {
     mm.removeMessageListener("PageLoader:LoadEvent", ContentListener);
     mm.removeMessageListener("PageLoader:RecordTime", ContentListener);
     mm.removeMessageListener("PageLoader:IdleCallbackSet", ContentListener);
     mm.removeMessageListener("PageLoader:IdleCallbackReceived", ContentListener);
-    if (useFNBPaint) {
-      mm.removeMessageListener("PageLoader:FNBPaintError", ContentListener);
-    }
+    mm.removeMessageListener("PageLoader:Error", ContentListener);
   };
   failTimeout.register(loadFail, timeout);
   // record which page we are about to open
@@ -397,9 +346,15 @@ function getTestName() { // returns tp5n
 }
 
 function getCurrentPageShortName() {
+  // this is also used by gecko profiling for the profile
+  // file name; so ensure it is valid on Windows/Linux/OSX
   var pageName = pages[pageIndex].url.spec;
   let parts = pageName.split("/");
   if (parts.length > 5) {
+    if (parts[5].indexOf("?" != -1)) {
+      // page name is something like 'tpaint.html?auto=1'
+      return parts[5].split("?")[0];
+    }
     return parts[5];
   }
   return "page_" + pageIndex;
@@ -663,19 +618,18 @@ function plPainted() {
   _loadHandler();
 }
 
-function _loadHandler(fnbpaint = 0) {
+function _loadHandler(paint_time = 0) {
   failTimeout.clear();
   var end_time = 0;
 
-  if (fnbpaint !== 0) {
+  if (paint_time !== 0) {
     // window.performance.timing.timeToNonBlankPaint is a timestamp
-    end_time = fnbpaint;
+    end_time = paint_time;
   } else {
     end_time = Date.now();
   }
 
   var duration = (end_time - start_time);
-
   TalosParentProfiler.pause("Bubbling load handler fired.");
 
   // does this page want to do its own timing?
@@ -691,9 +645,12 @@ function _loadHandler(fnbpaint = 0) {
 
 // the core handler
 function plLoadHandlerMessage(message) {
-  let fnbpaint = 0;
-  if (message.json.fnbpaint !== undefined) {
-    fnbpaint = message.json.fnbpaint;
+  let paint_time = 0;
+  // XXX message.json.name contains the name
+  // of the load handler, so in future versions
+  // we can record several times per load.
+  if (message.json.time !== undefined) {
+      paint_time = message.json.time;
   }
   failTimeout.clear();
 
@@ -720,7 +677,7 @@ function plLoadHandlerMessage(message) {
       plNextPage();
     }
   } else {
-    _loadHandler(fnbpaint);
+    _loadHandler(paint_time);
   }
 }
 
@@ -736,11 +693,15 @@ function plRecordTimeMessage(message) {
   _loadHandlerCapturing();
 }
 
-// error retrieving fnbpaint
-function plFNBPaintErrorMessage(message) {
-  dumpLine("Abort: firstNonBlankPaint value is not available after loading the page");
+
+// error
+function plErrorMessage(message) {
+  if (message.json.msg) {
+    dumpLine(message.json.msg);
+  }
   plStop(true);
 }
+
 
 function plStop(force) {
   plStopAll(force);
@@ -778,16 +739,12 @@ function plStopAll(force) {
     let mm = content.selectedBrowser.messageManager;
     mm.removeMessageListener("PageLoader:LoadEvent", ContentListener);
     mm.removeMessageListener("PageLoader:RecordTime", ContentListener);
-
-    if (useFNBPaint) {
-      mm.removeMessageListener("PageLoader:FNBPaintError", ContentListener);
-    }
+    mm.removeMessageListener("PageLoader:Error", ContentListener);
 
     if (isIdleCallbackPending) {
       mm.removeMessageListener("PageLoader:IdleCallbackSet", ContentListener);
       mm.removeMessageListener("PageLoader:IdleCallbackReceived", ContentListener);
     }
-
     mm.loadFrameScript("data:,removeEventListener('load', _contentLoadHandler, true);", false, true);
   }
 

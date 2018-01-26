@@ -97,6 +97,18 @@ tabbrowser {
   -moz-binding: url("chrome://browser/content/tabbrowser.xml#tabbrowser-tabs");
 }
 
+@supports -moz-bool-pref("layout.css.emulate-moz-box-with-flex") {
+  #tabbrowser-tabs {
+    /* Without this, the tabs container width extends beyond the window width */
+    width: 0;
+  }
+  .tab-stack {
+    /* Without this, pinned tabs get a bit too tall when the tabstrip overflows. */
+    vertical-align: top;
+  }
+}
+
+
 #tabbrowser-tabs:not([overflow="true"]) ~ #alltabs-button,
 #tabbrowser-tabs[hasadjacentnewtabbutton]:not([overflow="true"]) ~ #new-tab-button,
 #tabbrowser-tabs[overflow="true"] > .tabbrowser-arrowscrollbox > .tabs-newtab-button,
@@ -134,6 +146,7 @@ tabbrowser {
 }
 
 .tab-close-button,
+.tabbrowser-tab::after,
 .tab-background {
   /* Explicitly set the visibility to override the value (collapsed)
    * we inherit from #TabsToolbar[collapsed] upon opening a browser window. */
@@ -141,12 +154,14 @@ tabbrowser {
 }
 
 .tab-close-button[fadein],
+.tabbrowser-tab[fadein]::after,
 .tab-background[fadein] {
   /* This transition is only wanted for opening tabs. */
   transition: visibility 0ms 25ms;
 }
 
 .tab-close-button:not([fadein]),
+.tabbrowser-tab:not([fadein])::after,
 .tab-background:not([fadein]) {
   visibility: hidden;
 }
@@ -359,7 +374,7 @@ toolbarpaletteitem {
   }
 
   .webextension-menuitem {
-    list-style-image: var(--webextension-menuitem-image, inherit);
+    list-style-image: var(--webextension-menuitem-image, inherit) !important;
   }
 }
 
@@ -391,7 +406,7 @@ toolbarpaletteitem {
   }
 
   .webextension-menuitem {
-    list-style-image: var(--webextension-menuitem-image-2x, inherit);
+    list-style-image: var(--webextension-menuitem-image-2x, inherit) !important;
   }
 }
 
@@ -406,7 +421,7 @@ toolbarpaletteitem[removable="false"] {
 
 %ifndef XP_MACOSX
 toolbarpaletteitem[place="palette"],
-toolbarpaletteitem[place="panel"],
+toolbarpaletteitem[place="menu-panel"],
 toolbarpaletteitem[place="toolbar"] {
   -moz-user-focus: normal;
 }
@@ -634,14 +649,6 @@ html|input.urlbar-input[textoverflow]:not([focused]) {
 
 #PopupSearchAutoComplete {
   -moz-binding: url("chrome://browser/content/search/search.xml#browser-search-autocomplete-result-popup");
-}
-
-/* Overlay a badge on top of the icon of additional open search providers
-   in the search panel. */
-.addengine-item > .button-box > .button-icon,
-.addengine-item[type="menu"] > .button-box > .box-inherit > .button-icon {
-  -moz-binding: url("chrome://browser/content/search/search.xml#addengine-icon");
-  display: -moz-stack;
 }
 
 #PopupAutoCompleteRichResult {
@@ -908,35 +915,6 @@ html|*#fullscreen-exit-button {
 }
 
 /* ::::: Ctrl-Tab Panel ::::: */
-
-.ctrlTab-preview > html|img,
-.ctrlTab-preview > html|canvas {
-  min-width: inherit;
-  max-width: inherit;
-  min-height: inherit;
-  max-height: inherit;
-}
-
-.ctrlTab-favicon-container {
-  -moz-box-align: start;
-%ifdef XP_MACOSX
-  -moz-box-pack: end;
-%else
-  -moz-box-pack: start;
-%endif
-}
-
-.ctrlTab-favicon {
-  width: 16px;
-  height: 16px;
-}
-
-/* Apply crisp rendering for favicons at exactly 2dppx resolution */
-@media (resolution: 2dppx) {
-  .ctrlTab-favicon {
-    image-rendering: -moz-crisp-edges;
-  }
-}
 
 .ctrlTab-preview {
   -moz-binding: url("chrome://browser/content/browser-tabPreviews.xml#ctrlTab-preview");

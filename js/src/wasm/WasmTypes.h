@@ -41,8 +41,6 @@
 
 namespace js {
 
-class PropertyName;
-class WasmFunctionCallObject;
 namespace jit {
     struct BaselineScript;
     enum class RoundingMode;
@@ -101,7 +99,6 @@ typedef float F32x4[4];
 class Code;
 class DebugState;
 class GeneratedSourceMap;
-class GlobalSegment;
 class Memory;
 class Module;
 class Instance;
@@ -937,6 +934,52 @@ enum class Trap
     Limit
 };
 
+// A wrapper around the bytecode offset of a wasm instruction within a whole
+// module, used for trap offsets or call offsets. These offsets should refer to
+// the first byte of the instruction that triggered the trap / did the call and
+// should ultimately derive from OpIter::bytecodeOffset.
+
+struct BytecodeOffset
+{
+    static const uint32_t INVALID = -1;
+    uint32_t offset;
+
+    BytecodeOffset() : offset(INVALID) {}
+    explicit BytecodeOffset(uint32_t offset) : offset(offset) {}
+
+    bool isValid() const { return offset != INVALID; }
+};
+
+// A TrapSite (in the TrapSiteVector for a given Trap code) represents a wasm
+// instruction at a given bytecode offset that can fault at the given pc offset.
+// When such a fault occurs, a signal/exception handler looks up the TrapSite to
+// confirm the fault is intended/safe and redirects pc to the trap stub.
+
+struct TrapSite
+{
+    uint32_t pcOffset;
+    BytecodeOffset bytecode;
+
+    TrapSite() : pcOffset(-1), bytecode() {}
+    TrapSite(uint32_t pcOffset, BytecodeOffset bytecode) : pcOffset(pcOffset), bytecode(bytecode) {}
+
+    void offsetBy(uint32_t offset) {
+        pcOffset += offset;
+    }
+};
+
+WASM_DECLARE_POD_VECTOR(TrapSite, TrapSiteVector)
+
+struct TrapSiteVectorArray : EnumeratedArray<Trap, Trap::Limit, TrapSiteVector>
+{
+    bool empty() const;
+    void clear();
+    void swap(TrapSiteVectorArray& rhs);
+    void podResizeToFit();
+
+    WASM_DECLARE_SERIALIZABLE(TrapSiteVectorArray)
+};
+
 // The (,Callable,Func)Offsets classes are used to record the offsets of
 // different key points in a CodeRange during compilation.
 
@@ -1014,6 +1057,7 @@ class CodeRange
         ImportInterpExit,  // slow-path calling from wasm into C++ interp
         BuiltinThunk,      // fast-path calling from wasm into a C++ native
         TrapExit,          // calls C++ to report and jumps to throw stub
+        OldTrapExit,       // calls C++ to report and jumps to throw stub
         DebugTrap,         // calls C++ to handle debug event
         FarJumpIsland,     // inserted to connect otherwise out-of-range insns
         OutOfBoundsExit,   // stub jumped to by non-standard asm.js SIMD/Atomics
@@ -1089,7 +1133,7 @@ class CodeRange
         return kind() == ImportJitExit;
     }
     bool isTrapExit() const {
-        return kind() == TrapExit;
+        return kind() == OldTrapExit || kind() == TrapExit;
     }
     bool isDebugTrap() const {
         return kind() == DebugTrap;
@@ -1103,7 +1147,7 @@ class CodeRange
     // the return instruction to calculate the frame pointer.
 
     bool hasReturn() const {
-        return isFunction() || isImportExit() || isTrapExit() || isDebugTrap();
+        return isFunction() || isImportExit() || kind() == OldTrapExit || isDebugTrap();
     }
     uint32_t ret() const {
         MOZ_ASSERT(hasReturn());
@@ -1181,22 +1225,6 @@ WASM_DECLARE_POD_VECTOR(CodeRange, CodeRangeVector)
 extern const CodeRange*
 LookupInSorted(const CodeRangeVector& codeRanges, CodeRange::OffsetInCode target);
 
-// A wrapper around the bytecode offset of a wasm instruction within a whole
-// module, used for trap offsets or call offsets. These offsets should refer to
-// the first byte of the instruction that triggered the trap / did the call and
-// should ultimately derive from OpIter::bytecodeOffset.
-
-struct BytecodeOffset
-{
-    static const uint32_t INVALID = -1;
-    uint32_t bytecodeOffset;
-
-    BytecodeOffset() : bytecodeOffset(INVALID) {}
-    explicit BytecodeOffset(uint32_t bytecodeOffset) : bytecodeOffset(bytecodeOffset) {}
-
-    bool isValid() const { return bytecodeOffset != INVALID; }
-};
-
 // While the frame-pointer chain allows the stack to be unwound without
 // metadata, Error.stack still needs to know the line/column of every call in
 // the chain. A CallSiteDesc describes a single callsite to which CallSite adds
@@ -1212,7 +1240,7 @@ class CallSiteDesc
         Func,       // pc-relative call to a specific function
         Dynamic,    // dynamic callee called via register
         Symbolic,   // call to a single symbolic callee
-        TrapExit,   // call to a trap exit
+        OldTrapExit,// call to a trap exit (being removed)
         EnterFrame, // call to a enter frame handler
         LeaveFrame, // call to a leave frame handler
         Breakpoint  // call to instruction breakpoint
@@ -1336,6 +1364,7 @@ enum class SymbolicAddress
     HandleDebugTrap,
     HandleThrow,
     ReportTrap,
+    OldReportTrap,
     ReportOutOfBounds,
     ReportUnalignedAccess,
     CallImport_Void,
@@ -1452,15 +1481,6 @@ struct TableDesc
 
 typedef Vector<TableDesc, 0, SystemAllocPolicy> TableDescVector;
 
-// ExportArg holds the unboxed operands to the wasm entry trampoline which can
-// be called through an ExportFuncPtr.
-
-struct ExportArg
-{
-    uint64_t lo;
-    uint64_t hi;
-};
-
 // TLS data for a single module instance.
 //
 // Every WebAssembly function expects to be passed a hidden TLS pointer argument
@@ -1502,7 +1522,27 @@ struct TlsData
     MOZ_ALIGNED_DECL(char globalArea, 16);
 };
 
-static_assert(offsetof(TlsData, globalArea) % 16 == 0, "aligned");
+static const size_t TlsDataAlign = 16;  // = Simd128DataSize
+static_assert(offsetof(TlsData, globalArea) % TlsDataAlign == 0, "aligned");
+
+struct TlsDataDeleter
+{
+    void operator()(TlsData* tlsData) { js_free(tlsData); }
+};
+
+typedef UniquePtr<TlsData, TlsDataDeleter> UniqueTlsData;
+
+extern UniqueTlsData
+CreateTlsData(uint32_t globalDataLength);
+
+// ExportArg holds the unboxed operands to the wasm entry trampoline which can
+// be called through an ExportFuncPtr.
+
+struct ExportArg
+{
+    uint64_t lo;
+    uint64_t hi;
+};
 
 typedef int32_t (*ExportFuncPtr)(ExportArg* args, TlsData* tls);
 
@@ -1881,6 +1921,7 @@ class DebugFrame
     Frame frame_;
 
   public:
+    static DebugFrame* from(Frame* fp);
     Frame& frame() { return frame_; }
     uint32_t funcIndex() const { return funcIndex_; }
     Instance* instance() const { return frame_.instance(); }

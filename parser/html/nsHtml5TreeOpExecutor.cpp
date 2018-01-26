@@ -16,6 +16,7 @@
 #include "nsIDocShellTreeItem.h"
 #include "nsIDocShell.h"
 #include "nsIDOMDocument.h"
+#include "nsINestedURI.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIWebShellServices.h"
 #include "nsContentUtils.h"
@@ -999,15 +1000,17 @@ nsHtml5TreeOpExecutor::PreloadScript(const nsAString& aURL,
                                      const nsAString& aIntegrity,
                                      bool aScriptFromHead,
                                      bool aAsync,
-                                     bool aDefer)
+                                     bool aDefer,
+                                     bool aNoModule)
 {
   nsCOMPtr<nsIURI> uri = ConvertIfNotPreloadedYet(aURL);
   if (!uri) {
     return;
   }
   mDocument->ScriptLoader()->PreloadURI(uri, aCharset, aType, aCrossOrigin,
-                                           aIntegrity, aScriptFromHead, aAsync, aDefer,
-                                           mSpeculationReferrerPolicy);
+                                        aIntegrity, aScriptFromHead, aAsync,
+                                        aDefer, aNoModule,
+                                        mSpeculationReferrerPolicy);
 }
 
 void

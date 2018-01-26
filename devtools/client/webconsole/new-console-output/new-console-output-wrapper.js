@@ -88,8 +88,8 @@ NewConsoleOutputWrapper.prototype = {
           }]));
         },
         hudProxy: hud.proxy,
-        openLink: url => {
-          hud.owner.openLink(url);
+        openLink: (url, e) => {
+          hud.owner.openLink(url, e);
         },
         createElement: nodename => {
           return this.document.createElement(nodename);
@@ -119,11 +119,23 @@ NewConsoleOutputWrapper.prototype = {
             ? messageVariable.textContent : null;
 
         // Retrieve closes actor id from the DOM.
-        let actorEl = target.closest("[data-link-actor-id]");
+        let actorEl = target.closest("[data-link-actor-id]") ||
+                      target.querySelector("[data-link-actor-id]");
         let actor = actorEl ? actorEl.dataset.linkActorId : null;
 
+        let rootObjectInspector = target.closest(".object-inspector");
+        let rootActor = rootObjectInspector ?
+                        rootObjectInspector.querySelector("[data-link-actor-id]") : null;
+        let rootActorId = rootActor ? rootActor.dataset.linkActorId : null;
+
+        let sidebarTogglePref = store.getState().prefs.sidebarToggle;
+        let openSidebar = sidebarTogglePref ? (messageId) => {
+          store.dispatch(actions.showObjectInSidebar(rootActorId, messageId));
+        } : null;
+
         let menu = createContextMenu(this.jsterm, this.parentNode,
-          { actor, clipboardText, variableText, message, serviceContainer });
+          { actor, clipboardText, variableText, message,
+            serviceContainer, openSidebar, rootActorId });
 
         // Emit the "menu-open" event for testing.
         menu.once("open", () => this.emit("menu-open"));
@@ -199,8 +211,8 @@ NewConsoleOutputWrapper.prototype = {
         { store },
         dom.div(
           {className: "webconsole-output-wrapper"},
-          consoleOutput,
           filterBar,
+          consoleOutput,
           sideBar
         ));
       this.body = ReactDOM.render(provider, this.parentNode);
@@ -209,7 +221,7 @@ NewConsoleOutputWrapper.prototype = {
     });
   },
 
-  dispatchMessageAdd: function (message, waitForResponse) {
+  dispatchMessageAdd: function (packet, waitForResponse) {
     // Wait for the message to render to resolve with the DOM node.
     // This is just for backwards compatibility with old tests, and should
     // be removed once it's not needed anymore.
@@ -217,11 +229,15 @@ NewConsoleOutputWrapper.prototype = {
     let promise;
     // Also, do not expect any update while the panel is in background.
     if (waitForResponse && document.visibilityState === "visible") {
+      const timeStampToMatch = packet.message
+        ? packet.message.timeStamp
+        : packet.timestamp;
+
       promise = new Promise(resolve => {
         let jsterm = this.jsterm;
         jsterm.hud.on("new-messages", function onThisMessage(e, messages) {
           for (let m of messages) {
-            if (m.timeStamp === message.timestamp) {
+            if (m.timeStamp === timeStampToMatch) {
               resolve(m.node);
               jsterm.hud.off("new-messages", onThisMessage);
               return;
@@ -233,7 +249,7 @@ NewConsoleOutputWrapper.prototype = {
       promise = Promise.resolve();
     }
 
-    this.batchedMessagesAdd(message);
+    this.batchedMessagesAdd(packet);
     return promise;
   },
 
@@ -268,6 +284,10 @@ NewConsoleOutputWrapper.prototype = {
 
   dispatchRequestUpdate: function (id, data) {
     this.batchedRequestUpdates({ id, data });
+  },
+
+  dispatchSidebarClose: function () {
+    store.dispatch(actions.sidebarClose());
   },
 
   batchedMessageUpdates: function (info) {

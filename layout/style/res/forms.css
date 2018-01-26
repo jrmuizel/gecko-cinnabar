@@ -185,6 +185,7 @@ input > .anonymous-div.inherit-overflow {
 textarea > .anonymous-div.inherit-scroll-behavior,
 input > .anonymous-div.inherit-scroll-behavior {
   scroll-behavior: inherit;
+  overscroll-behavior: inherit;
 }
 
 input::placeholder,
@@ -419,6 +420,13 @@ optgroup:before {
    */
   border: 1px outset black !important;
   border-inline-start-width: 2px ! important;
+}
+
+@supports -moz-bool-pref("dom.select_popup_in_content.enabled") {
+  *|*::-moz-dropdown-list {
+    -moz-top-layer: top !important;
+    position: absolute !important;
+  }
 }
 
 input:disabled,

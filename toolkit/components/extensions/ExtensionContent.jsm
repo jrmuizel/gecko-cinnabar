@@ -1,7 +1,8 @@
+/* -*- Mode: indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* vim: set sts=2 sw=2 et tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 "use strict";
 
 this.EXPORTED_SYMBOLS = ["ExtensionContent"];
@@ -72,13 +73,14 @@ const CONTENT_SCRIPT_INJECTION_HISTOGRAM = "WEBEXT_CONTENT_SCRIPT_INJECTION_MS";
 
 var apiManager = new class extends SchemaAPIManager {
   constructor() {
-    super("content");
+    super("content", Schemas);
     this.initialized = false;
   }
 
   lazyInit() {
     if (!this.initialized) {
       this.initialized = true;
+      this.initGlobal();
       for (let [/* name */, value] of XPCOMUtils.enumerateCategoryEntries(CATEGORY_EXTENSION_SCRIPTS_CONTENT)) {
         this.loadScript(value);
       }
@@ -425,7 +427,7 @@ class ContentScriptContextChild extends BaseContext {
       // enables us to create the APIs object in this sandbox object and then
       // copying it into the iframe's window.  See bug 1214658.
       this.sandbox = Cu.Sandbox(contentWindow, {
-        sandboxName: `Content Script ExtensionPage ${this.extension.id}`,
+        sandboxName: `Web-Accessible Extension Page ${extension.policy.debugName}`,
         sandboxPrototype: contentWindow,
         sameZoneAs: contentWindow,
         wantXrays: false,
@@ -442,7 +444,7 @@ class ContentScriptContextChild extends BaseContext {
 
       this.sandbox = Cu.Sandbox(principal, {
         metadata,
-        sandboxName: `Content Script ${this.extension.id}`,
+        sandboxName: `Content Script ${extension.policy.debugName}`,
         sandboxPrototype: contentWindow,
         sameZoneAs: contentWindow,
         wantXrays: true,
@@ -479,7 +481,7 @@ class ContentScriptContextChild extends BaseContext {
     defineLazyGetter(this, "chromeObj", () => {
       let chromeObj = Cu.createObjectIn(this.sandbox);
 
-      Schemas.inject(chromeObj, this.childManager);
+      this.childManager.inject(chromeObj);
       return chromeObj;
     });
 

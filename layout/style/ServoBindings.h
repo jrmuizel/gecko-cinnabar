@@ -75,6 +75,12 @@ class nsStyleCoord;
 struct nsStyleDisplay;
 class nsXBLBinding;
 
+#ifdef NIGHTLY_BUILD
+const bool GECKO_IS_NIGHTLY = true;
+#else
+const bool GECKO_IS_NIGHTLY = false;
+#endif
+
 namespace mozilla {
   #define STYLE_STRUCT(name_, checkdata_cb_) struct Gecko##name_ {nsStyle##name_ gecko;};
   #include "nsStyleStructList.h"
@@ -142,8 +148,9 @@ struct FontSizePrefs
 };
 
 // DOM Traversal.
-bool Gecko_IsInDocument(RawGeckoNodeBorrowed node);
-bool Gecko_FlattenedTreeParentIsParent(RawGeckoNodeBorrowed node);
+void Gecko_RecordTraversalStatistics(uint32_t total, uint32_t parallel,
+                                     uint32_t total_t, uint32_t parallel_t,
+                                     uint32_t total_s, uint32_t parallel_s);
 bool Gecko_IsSignificantChild(RawGeckoNodeBorrowed node,
                               bool text_is_significant,
                               bool whitespace_is_significant);
@@ -285,9 +292,6 @@ const uint16_t* Gecko_GetAtomAsUTF16(nsAtom* aAtom, uint32_t* aLength);
 bool Gecko_AtomEqualsUTF8(nsAtom* aAtom, const char* aString, uint32_t aLength);
 bool Gecko_AtomEqualsUTF8IgnoreCase(nsAtom* aAtom, const char* aString, uint32_t aLength);
 
-// Border style
-void Gecko_EnsureMozBorderColors(nsStyleBorder* aBorder);
-
 // Font style
 void Gecko_CopyFontFamilyFrom(nsFont* dst, const nsFont* src);
 void Gecko_nsTArray_FontFamilyName_AppendNamed(nsTArray<FontFamilyName>* aNames, nsAtom* aName, bool aQuoted);
@@ -404,8 +408,6 @@ uint32_t Gecko_CalcStyleDifference(ServoStyleContextBorrowed old_style,
 const ServoElementSnapshot*
 Gecko_GetElementSnapshot(const mozilla::ServoElementSnapshotTable* table,
                          RawGeckoElementBorrowed element);
-
-void Gecko_DropElementSnapshot(ServoElementSnapshotOwned snapshot);
 
 // Have we seen this pointer before?
 bool
@@ -642,10 +644,6 @@ bool Gecko_IsDocumentBody(RawGeckoElementBorrowed element);
 nscolor Gecko_GetLookAndFeelSystemColor(int32_t color_id,
                                         RawGeckoPresContextBorrowed pres_context);
 
-bool Gecko_MatchStringArgPseudo(RawGeckoElementBorrowed element,
-                                mozilla::CSSPseudoClassType type,
-                                const char16_t* ident);
-
 void Gecko_AddPropertyToSet(nsCSSPropertyIDSetBorrowedMut, nsCSSPropertyID);
 
 // Register a namespace and get a namespace id.
@@ -714,6 +712,16 @@ void Gecko_ContentList_AppendAll(nsSimpleContentList* aContentList,
 const nsTArray<mozilla::dom::Element*>* Gecko_GetElementsWithId(
     const nsIDocument* aDocument,
     nsAtom* aId);
+
+// Check the value of the given bool preference. The pref name needs to
+// be null-terminated.
+bool Gecko_GetBoolPrefValue(const char* pref_name);
+
+// Returns true if we're currently performing the servo traversal.
+bool Gecko_IsInServoTraversal();
+
+// Returns true if we're currently on the main thread.
+bool Gecko_IsMainThread();
 
 } // extern "C"
 

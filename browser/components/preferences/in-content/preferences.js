@@ -11,6 +11,7 @@
 /* import-globals-from sync.js */
 /* import-globals-from findInPage.js */
 /* import-globals-from ../../../base/content/utilityOverlay.js */
+/* import-globals-from ../../../../toolkit/content/preferencesBindings.js */
 
 "use strict";
 
@@ -23,12 +24,17 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionSettingsStore",
-                                  "resource://gre/modules/ExtensionSettingsStore.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
                                   "resource://gre/modules/AddonManager.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
+                                  "resource://gre/modules/BrowserUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ExtensionSettingsStore",
+                                  "resource://gre/modules/ExtensionSettingsStore.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "formAutofillParent",
                                   "resource://formautofill/FormAutofillParent.jsm");
+
+XPCOMUtils.defineLazyPreferenceGetter(this, "trackingprotectionUiEnabled",
+                                      "privacy.trackingprotection.ui.enabled");
 
 var gLastHash = "";
 
@@ -57,7 +63,7 @@ function register_module(categoryName, categoryObject) {
 document.addEventListener("DOMContentLoaded", init_all, {once: true});
 
 function init_all() {
-  document.documentElement.instantApply = true;
+  Preferences.forceEnableInstantApply();
 
   gSubDialog.init();
   register_module("paneGeneral", gMainPane);
@@ -318,14 +324,6 @@ function scrollContentTo(element) {
   });
 }
 
-function helpButtonCommand() {
-  let pane = history.state;
-  let categories = document.getElementById("categories");
-  let helpTopic = categories.querySelector(".category[value=" + pane + "]")
-                            .getAttribute("helpTopic");
-  openHelpLink(helpTopic);
-}
-
 function friendlyPrefCategoryNameToInternalName(aName) {
   if (aName.startsWith("pane"))
     return aName;
@@ -425,11 +423,22 @@ function appendSearchKeywords(aId, keywords) {
   element.setAttribute("searchkeywords", keywords.join(" "));
 }
 
+const PREF_SETTING_TYPE = "prefs";
+
 let extensionControlledContentIds = {
   "privacy.containers": "browserContainersExtensionContent",
   "homepage_override": "browserHomePageExtensionContent",
   "newTabURL": "browserNewTabExtensionContent",
   "defaultSearch": "browserDefaultSearchExtensionContent",
+  get "websites.trackingProtectionMode"() {
+    return {
+      button: "trackingProtectionExtensionContentButton",
+      section:
+        trackingprotectionUiEnabled ?
+          "trackingProtectionExtensionContentLabel" :
+          "trackingProtectionPBMExtensionContentLabel",
+    };
+  }
 };
 
 let extensionControlledIds = {};
@@ -442,8 +451,17 @@ async function getControllingExtensionInfo(type, settingName) {
   return ExtensionSettingsStore.getSetting(type, settingName);
 }
 
-function getControllingExtensionEl(settingName) {
-  return document.getElementById(extensionControlledContentIds[settingName]);
+function getControllingExtensionEls(settingName) {
+  let idInfo = extensionControlledContentIds[settingName];
+  let section = document.getElementById(idInfo.section || idInfo);
+  let button = idInfo.button ?
+    document.getElementById(idInfo.button) :
+    section.querySelector("button");
+  return {
+    section,
+    button,
+    description: section.querySelector("description"),
+  };
 }
 
 async function handleControllingExtension(type, settingName) {
@@ -460,7 +478,10 @@ async function handleControllingExtension(type, settingName) {
     extensionControlledIds[settingName] = info.id;
     showControllingExtension(settingName, addon);
   } else {
-    if (extensionControlledIds[settingName] && !document.hidden) {
+    let elements = getControllingExtensionEls(settingName);
+    if (extensionControlledIds[settingName]
+        && !document.hidden
+        && elements.button) {
       showEnableExtensionMessage(settingName);
     } else {
       hideControllingExtension(settingName);
@@ -473,14 +494,10 @@ async function handleControllingExtension(type, settingName) {
 
 async function showControllingExtension(settingName, addon) {
   // Tell the user what extension is controlling the setting.
-  let extensionControlledContent = getControllingExtensionEl(settingName);
-  extensionControlledContent.classList.remove("extension-controlled-disabled");
-  const defaultIcon = "chrome://mozapps/skin/extensions/extensionGeneric.svg";
-  let stringParts = document
-    .getElementById("bundlePreferences")
-    .getString(`extensionControlled.${settingName}`)
-    .split("%S");
-  let description = extensionControlledContent.querySelector("description");
+  let elements = getControllingExtensionEls(settingName);
+
+  elements.section.classList.remove("extension-controlled-disabled");
+  let description = elements.description;
 
   // Remove the old content from the description.
   while (description.firstChild) {
@@ -488,46 +505,59 @@ async function showControllingExtension(settingName, addon) {
   }
 
   // Populate the description.
-  description.appendChild(document.createTextNode(stringParts[0]));
+  let msg = document.getElementById("bundlePreferences")
+                    .getString(`extensionControlled.${settingName}`);
   let image = document.createElement("image");
+  const defaultIcon = "chrome://mozapps/skin/extensions/extensionGeneric.svg";
   image.setAttribute("src", addon.iconURL || defaultIcon);
   image.classList.add("extension-controlled-icon");
-  description.appendChild(image);
-  description.appendChild(document.createTextNode(` ${addon.name}`));
-  description.appendChild(document.createTextNode(stringParts[1]));
+  let addonBit = document.createDocumentFragment();
+  addonBit.appendChild(image);
+  addonBit.appendChild(document.createTextNode(" " + addon.name));
+  let fragment = BrowserUtils.getLocalizedFragment(document, msg, addonBit);
+  description.appendChild(fragment);
 
-  let disableButton = extensionControlledContent.querySelector("button");
-  if (disableButton) {
-    disableButton.hidden = false;
+  if (elements.button) {
+    elements.button.hidden = false;
   }
 
   // Show the controlling extension row and hide the old label.
-  extensionControlledContent.hidden = false;
+  elements.section.hidden = false;
 }
 
 function hideControllingExtension(settingName) {
-  getControllingExtensionEl(settingName).hidden = true;
+  let elements = getControllingExtensionEls(settingName);
+  elements.section.hidden = true;
+  if (elements.button) {
+    elements.button.hidden = true;
+  }
 }
 
 function showEnableExtensionMessage(settingName) {
-  let extensionControlledContent = getControllingExtensionEl(settingName);
-  extensionControlledContent.classList.add("extension-controlled-disabled");
-  let icon = url => `<image src="${url}" class="extension-controlled-icon"/>`;
+  let elements = getControllingExtensionEls(settingName);
+
+  elements.button.hidden = true;
+  elements.section.classList.add("extension-controlled-disabled");
+  let icon = url => {
+    let img = document.createElement("image");
+    img.src = url;
+    img.className = "extension-controlled-icon";
+    return img;
+  };
   let addonIcon = icon("chrome://mozapps/skin/extensions/extensionGeneric-16.svg");
   let toolbarIcon = icon("chrome://browser/skin/menu.svg");
-  let message = document
-    .getElementById("bundlePreferences")
-    .getFormattedString("extensionControlled.enable", [addonIcon, toolbarIcon]);
-  let description = extensionControlledContent.querySelector("description");
-  // eslint-disable-next-line no-unsanitized/property
-  description.innerHTML = message;
+  let message = document.getElementById("bundlePreferences")
+                        .getString("extensionControlled.enable");
+  let frag = BrowserUtils.getLocalizedFragment(document, message, addonIcon, toolbarIcon);
+  elements.description.innerHTML = "";
+  elements.description.appendChild(frag);
   let dismissButton = document.createElement("image");
   dismissButton.setAttribute("class", "extension-controlled-icon close-icon");
   dismissButton.addEventListener("click", function dismissHandler() {
     hideControllingExtension(settingName);
     dismissButton.removeEventListener("click", dismissHandler);
   });
-  description.appendChild(dismissButton);
+  elements.description.appendChild(dismissButton);
 }
 
 function makeDisableControllingExtension(type, settingName) {

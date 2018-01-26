@@ -16,9 +16,9 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 function checkService(service, interface) {
-  do_print("Checking that Services." + service + " is an " + interface);
-  do_check_true(service in Services);
-  do_check_true(Services[service] instanceof interface);
+  info("Checking that Services." + service + " is an " + interface);
+  Assert.ok(service in Services);
+  Assert.ok(Services[service] instanceof interface);
 }
 
 // Tests
@@ -70,6 +70,10 @@ function run_test() {
   if ("nsIAndroidBridge" in Ci) {
     checkService("androidBridge", Ci.nsIAndroidBridge);
   }
+  if ("@mozilla.org/browser/enterprisepolicies;1" in Cc) {
+    checkService("policies", Ci.nsIEnterprisePolicies);
+  }
+
 
   // In xpcshell tests, the "@mozilla.org/xre/app-info;1" component implements
   // only the nsIXULRuntime interface, but not nsIXULAppInfo.  To test the

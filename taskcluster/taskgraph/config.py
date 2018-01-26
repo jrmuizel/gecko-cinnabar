@@ -15,12 +15,22 @@ graph_config_schema = Schema({
         # Mapping of treeherder group symbols to descriptive names
         Required('group-names'): {basestring: basestring}
     },
+    Required('index'): {
+
+        Required('products'): [basestring],
+    },
     Required('try'): {
         # We have a few platforms for which we want to do some "extra" builds, or at
         # least build-ish things.  Sort of.  Anyway, these other things are implemented
         # as different "platforms".  These do *not* automatically ride along with "-p
         # all"
         Required('ridealong-builds', default={}): {basestring: [basestring]},
+    },
+    Required('scriptworker'): {
+        # Prefix to add to scopes controlling scriptworkers
+        Required('scope-prefix'): basestring,
+        # Mapping of scriptworker types to scopes they accept
+        Required('worker-types'): {basestring: [basestring]}
     },
 })
 

@@ -36,6 +36,7 @@
 #include <limits>
 #include <algorithm>
 #include "gfxPoint.h"
+#include "nsClassHashtable.h"
 
 class gfxContext;
 class nsPresContext;
@@ -81,6 +82,7 @@ class Element;
 class HTMLImageElement;
 class HTMLCanvasElement;
 class HTMLVideoElement;
+class InspectorFontFace;
 class OffscreenCanvas;
 class Selection;
 } // namespace dom
@@ -156,7 +158,7 @@ class nsLayoutUtils
   typedef mozilla::gfx::Matrix4x4 Matrix4x4;
   typedef mozilla::gfx::RectCornerRadii RectCornerRadii;
   typedef mozilla::gfx::StrokeOptions StrokeOptions;
-  typedef mozilla::image::DrawResult DrawResult;
+  typedef mozilla::image::ImgDrawResult ImgDrawResult;
 
 public:
   typedef mozilla::layers::FrameMetrics FrameMetrics;
@@ -1806,7 +1808,7 @@ public:
    *   @param aImageFlags       Image flags of the imgIContainer::FLAG_* variety.
    *   @param aExtendMode       How to extend the image over the dest rect.
    */
-  static DrawResult DrawBackgroundImage(gfxContext&         aContext,
+  static ImgDrawResult DrawBackgroundImage(gfxContext&         aContext,
                                         nsIFrame*           aForFrame,
                                         nsPresContext*      aPresContext,
                                         imgIContainer*      aImage,
@@ -1839,7 +1841,7 @@ public:
    *   @param aDirty            Pixels outside this area may be skipped.
    *   @param aImageFlags       Image flags of the imgIContainer::FLAG_* variety
    */
-  static DrawResult DrawImage(gfxContext&         aContext,
+  static ImgDrawResult DrawImage(gfxContext&         aContext,
                               nsStyleContext*     aStyleContext,
                               nsPresContext*      aPresContext,
                               imgIContainer*      aImage,
@@ -1867,7 +1869,7 @@ public:
    *                            in appunits. For best results it should
    *                            be aligned with image pixels.
    */
-  static DrawResult DrawSingleUnscaledImage(gfxContext&          aContext,
+  static ImgDrawResult DrawSingleUnscaledImage(gfxContext&          aContext,
                                             nsPresContext*       aPresContext,
                                             imgIContainer*       aImage,
                                             const SamplingFilter aSamplingFilter,
@@ -1902,7 +1904,7 @@ public:
    *                            in appunits. For best results it should
    *                            be aligned with image pixels.
    */
-  static DrawResult DrawSingleImage(gfxContext&         aContext,
+  static ImgDrawResult DrawSingleImage(gfxContext&         aContext,
                                     nsPresContext*      aPresContext,
                                     imgIContainer*      aImage,
                                     const SamplingFilter aSamplingFilter,
@@ -2251,8 +2253,8 @@ public:
    *  <body><p contenteditable="true"></p></body>
    *    returns nullptr because <body> isn't editable.
    */
-  static nsIContent*
-    GetEditableRootContentByContentEditable(nsIDocument* aDocument);
+  static mozilla::dom::Element*
+  GetEditableRootContentByContentEditable(nsIDocument* aDocument);
 
   static void AddExtraBackgroundItems(nsDisplayListBuilder& aBuilder,
                                       nsDisplayList& aList,
@@ -2267,12 +2269,15 @@ public:
    */
   static bool NeedsPrintPreviewBackground(nsPresContext* aPresContext);
 
+  typedef nsClassHashtable<nsPtrHashKey<gfxFontEntry>,
+                           mozilla::dom::InspectorFontFace> UsedFontFaceTable;
+
   /**
    * Adds all font faces used in the frame tree starting from aFrame
    * to the list aFontFaceList.
    */
   static nsresult GetFontFacesForFrames(nsIFrame* aFrame,
-                                        nsFontFaceList* aFontFaceList);
+                                        UsedFontFaceTable& aResult);
 
   /**
    * Adds all font faces used within the specified range of text in aFrame,
@@ -2284,7 +2289,7 @@ public:
                                       int32_t aStartOffset,
                                       int32_t aEndOffset,
                                       bool aFollowContinuations,
-                                      nsFontFaceList* aFontFaceList);
+                                      UsedFontFaceTable& aResult);
 
   /**
    * Walks the frame tree starting at aFrame looking for textRuns.
@@ -2340,6 +2345,11 @@ public:
   static bool IsAnimationLoggingEnabled();
 
   /**
+   * Checks if retained display lists are enabled.
+   */
+  static bool AreRetainedDisplayListsEnabled();
+
+  /**
    * Find a suitable scale for a element (aFrame's content) over the course of any
    * animations and transitions of the CSS transform property on the
    * element that run on the compositor thread.
@@ -2385,6 +2395,11 @@ public:
    * Checks whether support for inter-character ruby is enabled.
    */
   static bool IsInterCharacterRubyEnabled();
+
+  /**
+   * Checks whether content-select is enabled.
+   */
+  static bool IsContentSelectEnabled();
 
   static bool InterruptibleReflowEnabled()
   {

@@ -171,12 +171,13 @@ public:
   // Called when the document is going away
   void DropDocumentReference();
 
-  nsIContent* FindNestedInsertionPoint(nsIContent* aContainer,
-                                       nsIContent* aChild);
-
   nsIContent* FindNestedSingleInsertionPoint(nsIContent* aContainer, bool* aMulti);
 
-  bool AnyBindingHasDocumentStateDependency(mozilla::EventStates aStateMask);
+  // Enumerate each bound content's bindings (including its base bindings)
+  // in mBoundContentSet. Return false from the callback to stop enumeration.
+  using BoundContentBindingCallback = std::function<bool (nsXBLBinding*)>;
+  bool EnumerateBoundContentBindings(
+    const BoundContentBindingCallback& aCallback) const;
 
 protected:
   nsIXPConnectWrappedJS* GetWrappedJS(nsIContent* aContent);
@@ -198,14 +199,7 @@ protected:
   // Call PostProcessAttachedQueueEvent() on a timer.
   static void PostPAQEventCallback(nsITimer* aTimer, void* aClosure);
 
-  // Enumerate each bound content's bindings (including its base bindings)
-  // in mBoundContentSet. Return false from the callback to stop enumeration.
-  using BoundContentBindingCallback = std::function<bool (nsXBLBinding*)>;
-  bool EnumerateBoundContentBindings(
-    const BoundContentBindingCallback& aCallback) const;
-
 // MEMBER VARIABLES
-protected:
   // A set of nsIContent that currently have a binding installed.
   nsAutoPtr<nsTHashtable<nsRefPtrHashKey<nsIContent> > > mBoundContentSet;
 

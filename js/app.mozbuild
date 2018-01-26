@@ -13,6 +13,11 @@ else:
         '/js/src/tests',
     ]
 
+if CONFIG['JS_STANDALONE'] and CONFIG['OS_ARCH'] != 'WINNT':
+    DIRS += [
+        '/build/unix',
+    ]
+
 DIRS += [
     '/config/external/fdlibm',
     '/config/external/nspr',
@@ -29,5 +34,10 @@ if CONFIG['USE_ICU']:
 if CONFIG['COMPILE_ENVIRONMENT'] and CONFIG['BUILD_CTYPES']:
     DIRS += [
         '/config/external/ffi',
+    ]
+
+if CONFIG['JS_STANDALONE'] and CONFIG['FUZZING']:
+    DIRS += [
+        '/tools/fuzzing/',
     ]
 

@@ -1522,6 +1522,40 @@ gfxFont::SupportsSubSuperscript(uint32_t aSubSuperscript,
 }
 
 bool
+gfxFont::FeatureWillHandleChar(Script aRunScript, uint32_t aFeature,
+                               uint32_t aUnicode)
+{
+    if (!SupportsFeature(aRunScript, aFeature)) {
+        return false;
+    }
+
+    // xxx - for graphite, don't really know how to sniff lookups so bail
+    if (mGraphiteShaper && gfxPlatform::GetPlatform()->UseGraphiteShaping()) {
+        return true;
+    }
+
+    if (!mHarfBuzzShaper) {
+        mHarfBuzzShaper = MakeUnique<gfxHarfBuzzShaper>(this);
+    }
+    gfxHarfBuzzShaper* shaper =
+        static_cast<gfxHarfBuzzShaper*>(mHarfBuzzShaper.get());
+    if (!shaper->Initialize()) {
+        return false;
+    }
+
+    // get the hbset containing input glyphs for the feature
+    const hb_set_t *inputGlyphs =
+        mFontEntry->InputsForOpenTypeFeature(aRunScript, aFeature);
+
+    if (aUnicode == 0xa0) {
+        aUnicode = ' ';
+    }
+
+    hb_codepoint_t gid = shaper->GetNominalGlyph(aUnicode);
+    return hb_set_has(inputGlyphs, gid);
+}
+
+bool
 gfxFont::HasFeatureSet(uint32_t aFeature, bool& aFeatureOn)
 {
     aFeatureOn = false;
@@ -1839,8 +1873,8 @@ gfxFont::DrawGlyphs(const gfxShapedText*     aShapedText,
         &aShapedText->GetCharacterGlyphs()[aOffset];
 
     if (S == SpacingT::HasSpacing) {
-        float space = aBuffer.mRunParams.spacing[0].mBefore;
-        inlineCoord += aBuffer.mRunParams.isRTL ? - space : space;
+        float space = aBuffer.mRunParams.spacing[0].mBefore * aBuffer.mFontParams.advanceDirection;
+        inlineCoord += space;
     }
 
     // Allocate buffer space for the run, assuming all simple glyphs.
@@ -1851,9 +1885,9 @@ gfxFont::DrawGlyphs(const gfxShapedText*     aShapedText,
 
     for (uint32_t i = 0; i < aCount; ++i, ++glyphData) {
         if (glyphData->IsSimpleGlyph()) {
-            float advance = glyphData->GetSimpleAdvance();
+            float advance = glyphData->GetSimpleAdvance() * aBuffer.mFontParams.advanceDirection;
             if (aBuffer.mRunParams.isRTL) {
-                inlineCoord -= advance;
+                inlineCoord += advance;
             }
             DrawOneGlyph<FC>(glyphData->GetSimpleGlyph(), *aPt, aBuffer,
                              &emittedGlyphs);
@@ -1869,9 +1903,9 @@ gfxFont::DrawGlyphs(const gfxShapedText*     aShapedText,
                     aShapedText->GetDetailedGlyphs(aOffset + i);
                 MOZ_ASSERT(details, "missing DetailedGlyph!");
                 for (uint32_t j = 0; j < glyphCount; ++j, ++details) {
-                    float advance = details->mAdvance;
+                    float advance = details->mAdvance * aBuffer.mFontParams.advanceDirection;
                     if (aBuffer.mRunParams.isRTL) {
-                        inlineCoord -= advance;
+                        inlineCoord += advance;
                     }
                     if (glyphData->IsMissing()) {
                         if (!DrawMissingGlyph(aBuffer.mRunParams,
@@ -1896,7 +1930,8 @@ gfxFont::DrawGlyphs(const gfxShapedText*     aShapedText,
             if (i + 1 < aCount) {
                 space += aBuffer.mRunParams.spacing[i + 1].mBefore;
             }
-            inlineCoord += aBuffer.mRunParams.isRTL ? -space : space;
+            space *= aBuffer.mFontParams.advanceDirection;
+            inlineCoord += space;
         }
     }
 
@@ -1916,12 +1951,14 @@ gfxFont::DrawOneGlyph(uint32_t aGlyphID, const gfx::Point& aPt,
     gfx::Point devPt(ToDeviceUnits(aPt.x, runParams.devPerApp),
                      ToDeviceUnits(aPt.y, runParams.devPerApp));
 
-    gfxContextMatrixAutoSaveRestore matrixRestore;
-
     if (FC == FontComplexityT::ComplexFont) {
         const FontDrawParams& fontParams(aBuffer.mFontParams);
 
-        if (fontParams.needsOblique && fontParams.isVerticalFont) {
+        auto* textDrawer = runParams.context->GetTextDrawer();
+
+        gfxContextMatrixAutoSaveRestore matrixRestore;
+
+        if (fontParams.needsOblique && fontParams.isVerticalFont && !textDrawer) {
             // We have to flush each glyph individually when doing
             // synthetic-oblique for vertical-upright text, because
             // the skew transform needs to be applied to a separate
@@ -1958,12 +1995,9 @@ gfxFont::DrawOneGlyph(uint32_t aGlyphID, const gfx::Point& aPt,
                              aGlyphID)) {
             return;
         }
-    }
 
-    aBuffer.OutputGlyph(aGlyphID, devPt);
+        aBuffer.OutputGlyph(aGlyphID, devPt);
 
-    if (FC == FontComplexityT::ComplexFont) {
-        const FontDrawParams& fontParams(aBuffer.mFontParams);
         // Synthetic bolding (if required) by multi-striking.
         for (int32_t i = 0; i < fontParams.extraStrikes; ++i) {
             if (fontParams.isVerticalFont) {
@@ -1974,9 +2008,11 @@ gfxFont::DrawOneGlyph(uint32_t aGlyphID, const gfx::Point& aPt,
             aBuffer.OutputGlyph(aGlyphID, devPt);
         }
 
-        if (fontParams.needsOblique && fontParams.isVerticalFont) {
+        if (fontParams.needsOblique && fontParams.isVerticalFont && !textDrawer) {
             aBuffer.Flush();
         }
+    } else {
+        aBuffer.OutputGlyph(aGlyphID, devPt);
     }
 
     *aEmittedGlyphs = true;
@@ -1992,9 +2028,19 @@ gfxFont::DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
     // we don't have to draw the hexbox for them.
     float advance = aDetails->mAdvance;
     if (aRunParams.drawMode != DrawMode::GLYPH_PATH && advance > 0) {
-        if (auto* textDrawer = aRunParams.context->GetTextDrawer()) {
-            textDrawer->FoundUnsupportedFeature();
-            return false;
+        auto* textDrawer = aRunParams.context->GetTextDrawer();
+        const Matrix* matPtr = nullptr;
+        Matrix mat;
+        if (textDrawer) {
+            // Generate an orientation matrix for the current writing mode
+            wr::FontInstanceFlags flags = textDrawer->GetWRGlyphFlags();
+            if (flags.bits & wr::FontInstanceFlags::TRANSPOSE) {
+                std::swap(mat._11, mat._12);
+                std::swap(mat._21, mat._22);
+            }
+            mat.PostScale(flags.bits & wr::FontInstanceFlags::FLIP_X ? -1.0f : 1.0f,
+                          flags.bits & wr::FontInstanceFlags::FLIP_Y ? -1.0f : 1.0f);
+            matPtr = &mat;
         }
 
         Point pt(Float(ToDeviceUnits(aPt.x, aRunParams.devPerApp)),
@@ -2002,7 +2048,8 @@ gfxFont::DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
         Float advanceDevUnits =
             Float(ToDeviceUnits(advance, aRunParams.devPerApp));
         Float height = GetMetrics(eHorizontal).maxAscent;
-        Rect glyphRect = aFontParams.isVerticalFont ?
+        // Horizontally center if drawing vertically upright with no sideways transform.
+        Rect glyphRect = aFontParams.isVerticalFont && !mat.HasNonAxisAlignedTransform() ?
             Rect(pt.x - height / 2, pt.y,
                  height, advanceDevUnits) :
             Rect(pt.x, pt.y - height,
@@ -2012,7 +2059,7 @@ gfxFont::DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
         // of the drawTarget's transform, we need to undo
         // this before drawing the hexbox. (Bug 983985)
         gfxContextMatrixAutoSaveRestore matrixRestore;
-        if (aFontParams.needsOblique && !aFontParams.isVerticalFont) {
+        if (aFontParams.needsOblique && !aFontParams.isVerticalFont && !textDrawer) {
             matrixRestore.SetContext(aRunParams.context);
             gfx::Matrix mat =
                 aRunParams.context->CurrentMatrix().
@@ -2025,7 +2072,7 @@ gfxFont::DrawMissingGlyph(const TextRunDrawParams&            aRunParams,
         gfxFontMissingGlyphs::DrawMissingGlyph(
             aDetails->mGlyphID, glyphRect, *aRunParams.dt,
             PatternFromState(aRunParams.context),
-            1.0 / aRunParams.devPerApp);
+            1.0 / aRunParams.devPerApp, matPtr);
     }
     return true;
 }
@@ -2096,48 +2143,95 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
 
     auto* textDrawer = aRunParams.context->GetTextDrawer();
 
-    fontParams.needsOblique = mFontEntry->IsUpright() &&
-                              mStyle.style != NS_FONT_STYLE_NORMAL &&
-                              mStyle.allowSyntheticStyle;
+    fontParams.needsOblique = IsSyntheticOblique();
     fontParams.haveSVGGlyphs = GetFontEntry()->TryGetSVGData(this);
 
-    if ((fontParams.needsOblique || fontParams.haveSVGGlyphs) && textDrawer) {
+    if (fontParams.haveSVGGlyphs && textDrawer) {
         textDrawer->FoundUnsupportedFeature();
         return;
     }
 
     fontParams.haveColorGlyphs = GetFontEntry()->TryGetColorGlyphs();
     fontParams.contextPaint = aRunParams.runContextPaint;
-    fontParams.isVerticalFont =
-        aOrientation == gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_UPRIGHT;
 
-    bool sideways = false;
+    if (textDrawer) {
+        fontParams.isVerticalFont = aRunParams.isVerticalRun;
+    } else {
+        fontParams.isVerticalFont =
+            aOrientation == gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_UPRIGHT;
+    }
+
     gfxContextMatrixAutoSaveRestore matrixRestore;
+    layout::TextDrawTarget::AutoRestoreWRGlyphFlags glyphFlagsRestore;
 
+    // Save the current baseline offset for restoring later, in case it is modified.
+    float& baseline = fontParams.isVerticalFont ? aPt->x : aPt->y;
+    float origBaseline = baseline;
+
+    // The point may be advanced in local-space, while the resulting point on return
+    // must be advanced in transformed space. So save the original point so we can
+    // properly transform the advance later.
     gfx::Point origPt = *aPt;
-    if (aRunParams.isVerticalRun && !fontParams.isVerticalFont) {
 
+    // Default to advancing along the +X direction (-X if RTL).
+    fontParams.advanceDirection = aRunParams.isRTL ? -1.0f : 1.0f;
+    // Default to offsetting baseline downward along the +Y direction.
+    float baselineDir = 1.0f;
+    // The direction of sideways rotation, if applicable.
+    // -1 for rotating left/counter-clockwise
+    // 1 for rotating right/clockwise
+    // 0 for no rotation
+    float sidewaysDir =
+        (aOrientation == gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT ?
+            -1.0f :
+            (aOrientation == gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_RIGHT ?
+                1.0f : 0.0f));
+    // If we're rendering a sideways run, we need to push a rotation transform to the context.
+    if (sidewaysDir != 0.0f) {
         if (textDrawer) {
-            textDrawer->FoundUnsupportedFeature();
-            return;
-        }
+            // For WebRender, we can't use a DrawTarget transform and must instead use flags
+            // that locally transform the glyph, without affecting the glyph origin. The glyph
+            // origins must thus be offset in the transformed directions (instead of local-space
+            // directions). Modify the advance and baseline directions to account for the
+            // indicated transform.
 
-        sideways = true;
-        matrixRestore.SetContext(aRunParams.context);
-        gfxPoint p(aPt->x * aRunParams.devPerApp,
-                   aPt->y * aRunParams.devPerApp);
-        const Metrics& metrics = GetMetrics(eHorizontal);
-        // Get a matrix we can use to draw the (horizontally-shaped) textrun
-        // with 90-degree CW rotation.
-        const gfxFloat
-            rotation = (aOrientation ==
-                        gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT)
-                       ? -M_PI / 2.0 : M_PI / 2.0;
-        gfxMatrix mat =
-            aRunParams.context->CurrentMatrixDouble().
-            PreTranslate(p).     // translate origin for rotation
-            PreRotate(rotation). // turn 90deg CCW (sideways-left) or CW (*-right)
-            PreTranslate(-p);    // undo the translation
+            // The default text orientation is down being +Y and right being +X.
+            // Rotating 90 degrees left/CCW makes down be +X and right be -Y.
+            // Rotating 90 degrees right/CW makes down be -X and right be +Y.
+            // Thus the advance direction (moving right) is just sidewaysDir,
+            // i.e. negative along Y axis if rotated left and positive if
+            // rotated right.
+            fontParams.advanceDirection *= sidewaysDir;
+            // The baseline direction (moving down) is negated relative to the
+            // advance direction for sideways transforms.
+            baselineDir *= -sidewaysDir;
+
+            glyphFlagsRestore.Save(textDrawer);
+            // Set the transform flags accordingly. Both sideways rotations transpose X and Y,
+            // while left rotation flips the resulting Y axis, and right rotation flips the
+            // resulting X axis.
+            textDrawer->SetWRGlyphFlags(textDrawer->GetWRGlyphFlags() |
+                                        wr::FontInstanceFlags::TRANSPOSE |
+                                        (aOrientation ==
+                                         gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT ?
+                                            wr::FontInstanceFlags::FLIP_Y :
+                                            wr::FontInstanceFlags::FLIP_X));
+        } else {
+            // For non-WebRender targets, just push a rotation transform.
+            matrixRestore.SetContext(aRunParams.context);
+            gfxPoint p(aPt->x * aRunParams.devPerApp,
+                       aPt->y * aRunParams.devPerApp);
+            // Get a matrix we can use to draw the (horizontally-shaped) textrun
+            // with 90-degree CW rotation.
+            const gfxFloat rotation = sidewaysDir * M_PI / 2.0f;
+            gfxMatrix mat =
+                aRunParams.context->CurrentMatrixDouble().
+                PreTranslate(p).     // translate origin for rotation
+                PreRotate(rotation). // turn 90deg CCW (sideways-left) or CW (*-right)
+                PreTranslate(-p);    // undo the translation
+
+            aRunParams.context->SetMatrixDouble(mat);
+        }
 
         // If we're drawing rotated horizontal text for an element styled
         // text-orientation:mixed, the dominant baseline will be vertical-
@@ -2149,28 +2243,33 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
         // those if available.
         // [1] See http://www.microsoft.com/typography/otspec/base.htm
         if (aTextRun->UseCenterBaseline()) {
-            gfxPoint baseAdj(0, (metrics.emAscent - metrics.emDescent) / 2);
-            mat.PreTranslate(baseAdj);
+            const Metrics& metrics = GetMetrics(eHorizontal);
+            float baseAdj = (metrics.emAscent - metrics.emDescent) / 2;
+            baseline += baseAdj * aTextRun->GetAppUnitsPerDevUnit() * baselineDir;
         }
-
-        aRunParams.context->SetMatrixDouble(mat);
     }
 
-    if (fontParams.needsOblique && !fontParams.isVerticalFont) {
-        // Adjust matrix for synthetic-oblique, except if we're doing vertical-
-        // upright text, in which case this will be handled for each glyph
-        // individually in DrawOneGlyph.
-        if (!matrixRestore.HasMatrix()) {
-            matrixRestore.SetContext(aRunParams.context);
+    if (fontParams.needsOblique) {
+        if (textDrawer) {
+            glyphFlagsRestore.Save(textDrawer);
+            textDrawer->SetWRGlyphFlags(textDrawer->GetWRGlyphFlags() |
+                                        wr::FontInstanceFlags::SYNTHETIC_ITALICS);
+        } else if (!fontParams.isVerticalFont) {
+            // Adjust matrix for synthetic-oblique, except if we're doing vertical-
+            // upright text, in which case this will be handled for each glyph
+            // individually in DrawOneGlyph.
+            if (!matrixRestore.HasMatrix()) {
+                matrixRestore.SetContext(aRunParams.context);
+            }
+            gfx::Point p(aPt->x * aRunParams.devPerApp,
+                         aPt->y * aRunParams.devPerApp);
+            gfx::Matrix mat =
+                aRunParams.context->CurrentMatrix().
+                PreTranslate(p).
+                PreMultiply(gfx::Matrix(1, 0, -OBLIQUE_SKEW_FACTOR, 1, 0, 0)).
+                PreTranslate(-p);
+            aRunParams.context->SetMatrix(mat);
         }
-        gfx::Point p(aPt->x * aRunParams.devPerApp,
-                     aPt->y * aRunParams.devPerApp);
-        gfx::Matrix mat =
-            aRunParams.context->CurrentMatrix().
-            PreTranslate(p).
-            PreMultiply(gfx::Matrix(1, 0, -OBLIQUE_SKEW_FACTOR, 1, 0, 0)).
-            PreTranslate(-p);
-        aRunParams.context->SetMatrix(mat);
     }
 
     RefPtr<SVGContextPaint> contextPaint;
@@ -2212,11 +2311,9 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
 
     fontParams.drawOptions.mAntialiasMode = Get2DAAMode(mAntialiasOption);
 
-    float& baseline = fontParams.isVerticalFont ? aPt->x : aPt->y;
-    float origBaseline = baseline;
     if (mStyle.baselineOffset != 0.0) {
         baseline +=
-            mStyle.baselineOffset * aTextRun->GetAppUnitsPerDevUnit();
+            mStyle.baselineOffset * aTextRun->GetAppUnitsPerDevUnit() * baselineDir;
     }
 
     bool emittedGlyphs;
@@ -2228,7 +2325,7 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
         GlyphBufferAzure buffer(aRunParams, fontParams);
         if (fontParams.haveSVGGlyphs || fontParams.haveColorGlyphs ||
             fontParams.extraStrikes ||
-            (fontParams.needsOblique && fontParams.isVerticalFont)) {
+            (fontParams.needsOblique && fontParams.isVerticalFont && !textDrawer)) {
             if (aRunParams.spacing) {
                 emittedGlyphs =
                     DrawGlyphs<FontComplexityT::ComplexFont,
@@ -2268,15 +2365,13 @@ gfxFont::Draw(const gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
     aRunParams.dt->SetTransform(oldMat);
     aRunParams.dt->SetPermitSubpixelAA(oldSubpixelAA);
 
-    if (sideways) {
-        // adjust updated aPt to account for the transform we were using
+    if (sidewaysDir != 0.0f && !textDrawer) {
+        // Adjust updated aPt to account for the transform we were using.
+        // The advance happened horizontally in local-space, but the transformed
+        // sideways advance is actually vertical, with sign depending on the
+        // direction of rotation.
         float advance = aPt->x - origPt.x;
-        if (aOrientation ==
-            gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_SIDEWAYS_LEFT) {
-            *aPt = gfx::Point(origPt.x, origPt.y - advance);
-        } else {
-            *aPt = gfx::Point(origPt.x, origPt.y + advance);
-        }
+        *aPt = gfx::Point(origPt.x, origPt.y + advance * sidewaysDir);
     }
 }
 
@@ -2493,9 +2588,9 @@ gfxFont::Measure(const gfxTextRun *aTextRun,
                             advance, metrics.mBoundingBox.Height());
                     }
                     if (isRTL) {
-                        glyphRect.x -= advance;
+                        glyphRect.MoveByX(-advance);
                     }
-                    glyphRect.x += x;
+                    glyphRect.MoveByX(x);
                     metrics.mBoundingBox = metrics.mBoundingBox.Union(glyphRect);
                 }
             }
@@ -2522,10 +2617,10 @@ gfxFont::Measure(const gfxTextRun *aTextRun,
                             advance, metrics.mAscent + metrics.mDescent);
                     }
                     if (isRTL) {
-                        glyphRect.x -= advance;
+                        glyphRect.MoveByX(-advance);
                     }
-                    glyphRect.x += x + details->mOffset.x;
-                    glyphRect.y += details->mOffset.y;
+                    glyphRect.MoveByX(x + details->mOffset.x);
+                    glyphRect.MoveByY(details->mOffset.y);
                     metrics.mBoundingBox = metrics.mBoundingBox.Union(glyphRect);
                     x += direction*advance;
                 }
@@ -2564,15 +2659,15 @@ gfxFont::Measure(const gfxTextRun *aTextRun,
         gfxFloat extendLeftEdge =
             ceil(OBLIQUE_SKEW_FACTOR * metrics.mBoundingBox.YMost());
         gfxFloat extendRightEdge =
-            ceil(OBLIQUE_SKEW_FACTOR * -metrics.mBoundingBox.y);
-        metrics.mBoundingBox.width += extendLeftEdge + extendRightEdge;
-        metrics.mBoundingBox.x -= extendLeftEdge;
+            ceil(OBLIQUE_SKEW_FACTOR * -metrics.mBoundingBox.Y());
+        metrics.mBoundingBox.SetWidth(metrics.mBoundingBox.Width() + extendLeftEdge + extendRightEdge);
+        metrics.mBoundingBox.MoveByX(-extendLeftEdge);
     }
 
     if (baselineOffset != 0) {
         metrics.mAscent -= baselineOffset;
         metrics.mDescent += baselineOffset;
-        metrics.mBoundingBox.y += baselineOffset;
+        metrics.mBoundingBox.MoveByY(baselineOffset);
     }
 
     metrics.mAdvanceWidth = x*direction;
@@ -3476,10 +3571,10 @@ gfxFont::SetupGlyphExtents(DrawTarget* aDrawTarget, uint32_t aGlyphID,
                                        GetAdjustedSize(), &svgBounds)) {
         gfxFloat d2a = aExtents->GetAppUnitsPerDevUnit();
         aExtents->SetTightGlyphExtents(aGlyphID,
-                                       gfxRect(svgBounds.x * d2a,
-                                               svgBounds.y * d2a,
-                                               svgBounds.width * d2a,
-                                               svgBounds.height * d2a));
+                                       gfxRect(svgBounds.X() * d2a,
+                                               svgBounds.Y() * d2a,
+                                               svgBounds.Width() * d2a,
+                                               svgBounds.Height() * d2a));
         return;
     }
 

@@ -19,9 +19,7 @@ interfaces = [
     'core',
     'html',
     'events',
-    'stylesheets',
     'sidebar',
-    'css',
     'traversal',
     'range',
     'xbl',
@@ -59,6 +57,7 @@ DIRS += [
     'file',
     'filehandle',
     'filesystem',
+    'flex',
     'gamepad',
     'geolocation',
     'grid',
@@ -123,6 +122,6 @@ TEST_DIRS += [
     'imptests',
 ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk2', 'gtk3', 'cocoa', 'windows'):
+if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('gtk3', 'cocoa', 'windows'):
     TEST_DIRS += ['plugins/test']
 

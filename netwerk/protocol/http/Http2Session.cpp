@@ -42,6 +42,7 @@
 #include "nsICacheStorage.h"
 #include "CacheControlParser.h"
 #include "LoadContextInfo.h"
+#include "TCPFastOpenLayer.h"
 
 namespace mozilla {
 namespace net {
@@ -119,6 +120,8 @@ Http2Session::Http2Session(nsISocketTransport *aSocketTransport, uint32_t versio
   , mAttemptingEarlyData(attemptingEarlyData)
   , mOriginFrameActivated(false)
   , mTlsHandshakeFinished(false)
+  , mCheckNetworkStallsWithTFO(false)
+  , mLastRequestBytesSentTime(0)
 {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
@@ -269,8 +272,19 @@ Http2Session::ReadTimeoutTick(PRIntervalTime now)
   LOG3(("Http2Session::ReadTimeoutTick %p delta since last read %ds\n",
        this, PR_IntervalToSeconds(now - mLastReadEpoch)));
 
+  uint32_t nextTick = UINT32_MAX;
+  if (mCheckNetworkStallsWithTFO && mLastRequestBytesSentTime) {
+    PRIntervalTime initialResponseDelta = now - mLastRequestBytesSentTime;
+    if (initialResponseDelta >= gHttpHandler->FastOpenStallsTimeout()) {
+      gHttpHandler->IncrementFastOpenStallsCounter();
+      mCheckNetworkStallsWithTFO = false;
+    } else {
+      nextTick = PR_IntervalToSeconds(gHttpHandler->FastOpenStallsTimeout()) -
+                 PR_IntervalToSeconds(initialResponseDelta);
+    }
+  }
   if (!mPingThreshold)
-    return UINT32_MAX;
+    return nextTick;
 
   if ((now - mLastReadEpoch) < mPingThreshold) {
     // recent activity means ping is not an issue
@@ -283,8 +297,8 @@ Http2Session::ReadTimeoutTick(PRIntervalTime now)
       }
     }
 
-    return PR_IntervalToSeconds(mPingThreshold) -
-      PR_IntervalToSeconds(now - mLastReadEpoch);
+    return std::min(nextTick, PR_IntervalToSeconds(mPingThreshold) -
+                              PR_IntervalToSeconds(now - mLastReadEpoch));
   }
 
   if (mPingSentEpoch) {
@@ -373,6 +387,20 @@ Http2Session::RegisterStreamID(Http2Stream *stream, uint32_t aNewID)
   }
 
   mStreamIDHash.Put(aNewID, stream);
+
+  // If TCP fast Open has been used and conection was idle for some time
+  // we will be cautious and watch out for bug 1395494.
+  if (!mCheckNetworkStallsWithTFO && mConnection) {
+    RefPtr<nsHttpConnection> conn = mConnection->HttpConnection();
+    if (conn && (conn->GetFastOpenStatus() == TFO_DATA_SENT) &&
+        gHttpHandler->CheckIfConnectionIsStalledOnlyIfIdleForThisAmountOfSeconds() &&
+        IdleTime() >= gHttpHandler->CheckIfConnectionIsStalledOnlyIfIdleForThisAmountOfSeconds()) {
+      // If a connection was using the TCP FastOpen and it was idle for a
+      // long time we should check for stalls like bug 1395494.
+      mCheckNetworkStallsWithTFO = true;
+      mLastRequestBytesSentTime = PR_IntervalNow();
+    }
+  }
   return aNewID;
 }
 
@@ -417,7 +445,7 @@ Http2Session::AddStream(nsAHttpTransaction *aHttpTransaction,
   }
 
   aHttpTransaction->SetConnection(this);
-  aHttpTransaction->OnActivated(true);
+  aHttpTransaction->OnActivated();
 
   if (aUseTunnel) {
     LOG3(("Http2Session::AddStream session=%p trans=%p OnTunnel",
@@ -512,8 +540,10 @@ Http2Session::NetworkRead(nsAHttpSegmentWriter *writer, char *buf,
   }
 
   nsresult rv = writer->OnWriteSegment(buf, count, countWritten);
-  if (NS_SUCCEEDED(rv) && *countWritten > 0)
+  if (NS_SUCCEEDED(rv) && *countWritten > 0) {
     mLastReadEpoch = PR_IntervalNow();
+    mCheckNetworkStallsWithTFO = false;
+  }
   return rv;
 }
 
@@ -1858,7 +1888,7 @@ Http2Session::RecvPushPromise(Http2Session *self)
   // does the pushed origin belong on this connection?
   LOG3(("Http2Session::RecvPushPromise %p origin check %s", self,
         pushedStream->Origin().get()));
-  RefPtr<nsStandardURL> pushedOrigin;
+  nsCOMPtr<nsIURI> pushedOrigin;
   rv = Http2Stream::MakeOriginURL(pushedStream->Origin(), pushedOrigin);
   nsAutoCString pushedHostName;
   int32_t pushedPort = -1;
@@ -1913,7 +1943,7 @@ Http2Session::RecvPushPromise(Http2Session *self)
     nsAutoCString spec;
     spec.Assign(pushedStream->Origin());
     spec.Append(pushedStream->Path());
-    RefPtr<nsStandardURL> pushedURL;
+    nsCOMPtr<nsIURI> pushedURL;
     // Nifty trick: this doesn't actually do anything origin-specific, it's just
     // named that way. So by passing it the full spec here, we get a URL with
     // the full path.
@@ -2621,7 +2651,7 @@ Http2Session::RecvOrigin(Http2Session *self)
     }
 
     nsAutoCString originString;
-    RefPtr<nsStandardURL> originURL;
+    nsCOMPtr<nsIURI> originURL;
     originString.Assign(self->mInputFrameBuffer.get() + kFrameHeaderBytes + offset + 2, originLen);
     offset += originLen + 2;
     if (NS_FAILED(Http2Stream::MakeOriginURL(originString, originURL))){
@@ -3250,7 +3280,9 @@ Http2Session::WriteSegmentsAgain(nsAHttpSegmentWriter *writer,
             "stream->writeSegments returning code %" PRIx32 "\n",
             this, streamID, mNeedsCleanup, static_cast<uint32_t>(rv)));
       MOZ_ASSERT(!mNeedsCleanup || mNeedsCleanup->StreamID() == streamID);
-      CleanupStream(streamID, NS_OK, CANCEL_ERROR);
+      CleanupStream(streamID,
+                    (rv == NS_BINDING_RETARGETED) ? NS_BINDING_RETARGETED : NS_OK,
+                    CANCEL_ERROR);
       mNeedsCleanup = nullptr;
       *again = false;
       rv = ResumeRecv();

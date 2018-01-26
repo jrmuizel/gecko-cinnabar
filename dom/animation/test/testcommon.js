@@ -17,7 +17,7 @@ const MS_PER_SEC = 1000;
 
 /* The recommended minimum precision to use for time values[1].
  *
- * [1] https://w3c.github.io/web-animations/#precision-of-time-values
+ * [1] https://drafts.csswg.org/web-animations/#precision-of-time-values
  */
 var TIME_PRECISION = 0.0005; // ms
 
@@ -26,6 +26,13 @@ var TIME_PRECISION = 0.0005; // ms
  * times based on their precision requirements.
  */
 function assert_times_equal(actual, expected, description) {
+  assert_approx_equals(actual, expected, TIME_PRECISION * 2, description);
+}
+
+/*
+ * Compare a time value based on its precision requirements with a fixed value.
+ */
+function assert_time_equals_literal(actual, expected, description) {
   assert_approx_equals(actual, expected, TIME_PRECISION, description);
 }
 

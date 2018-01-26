@@ -42,6 +42,7 @@ impl Default for GlType {
 
 fn calculate_length(width: GLsizei, height: GLsizei, format: GLenum, pixel_type: GLenum) -> usize {
     let colors = match format {
+        ffi::RED => 1,
         ffi::RGB => 3,
         ffi::BGR => 3,
 
@@ -51,12 +52,12 @@ fn calculate_length(width: GLsizei, height: GLsizei, format: GLenum, pixel_type:
         ffi::ALPHA => 1,
         ffi::LUMINANCE => 1,
         ffi::DEPTH_COMPONENT => 1,
-        _ => panic!("unsupported format for read_pixels"),
+        _ => panic!("unsupported format for read_pixels: {:?}", format),
     };
     let depth = match pixel_type {
         ffi::UNSIGNED_BYTE => 1,
         ffi::FLOAT=> 4,
-        _ => panic!("unsupported pixel_type for read_pixels"),
+        _ => panic!("unsupported pixel_type for read_pixels: {:?}", pixel_type),
     };
 
     return (width * height * colors * depth) as usize;
@@ -252,6 +253,12 @@ pub trait Gl {
                             format: GLenum,
                             ty: GLenum,
                             offset: usize);
+    fn get_tex_image_into_buffer(&self,
+                                 target: GLenum,
+                                 level: GLint,
+                                 format: GLenum,
+                                 ty: GLenum,
+                                 output: &mut [u8]);
     fn get_integer_v(&self, name: GLenum) -> GLint;
     fn get_integer_64v(&self, name: GLenum) -> GLint64;
     fn get_integer_iv(&self, name: GLenum, index: GLuint) -> GLint;
@@ -429,6 +436,26 @@ pub trait Gl {
     fn client_wait_sync(&self, sync: GLsync, flags: GLbitfield, timeout: GLuint64);
     fn wait_sync(&self, sync: GLsync, flags: GLbitfield, timeout: GLuint64);
     fn delete_sync(&self, sync: GLsync);
+    fn texture_range_apple(&self, target: GLenum, data: &[u8]);
+    fn gen_fences_apple(&self, n: GLsizei) -> Vec<GLuint>;
+    fn delete_fences_apple(&self, fences: &[GLuint]);
+    fn set_fence_apple(&self, fence: GLuint);
+    fn finish_fence_apple(&self, fence: GLuint);
+    fn test_fence_apple(&self, fence: GLuint);
+
+    // GL_ARB_blend_func_extended
+    fn bind_frag_data_location_indexed(
+        &self,
+        program: GLuint,
+        color_number: GLuint,
+        index: GLuint,
+        name: &str,
+    );
+    fn get_frag_data_index(
+        &self,
+        program: GLuint,
+        name: &str,
+    ) -> GLint;
 }
 
 #[inline]

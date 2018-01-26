@@ -11,19 +11,18 @@ var Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/LoadContextInfo.jsm");
-Cu.import("resource://gre/modules/FormHistory.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/Downloads.jsm");
-Cu.import("resource://gre/modules/osfile.jsm");
-Cu.import("resource://gre/modules/Accounts.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "DownloadIntegration",
-                                  "resource://gre/modules/DownloadIntegration.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "EventDispatcher",
-                                  "resource://gre/modules/Messaging.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
-                                  "resource://gre/modules/TelemetryStopwatch.jsm");
+XPCOMUtils.defineLazyModuleGetters(this, {
+  Accounts: "resource://gre/modules/Accounts.jsm",
+  DownloadIntegration: "resource://gre/modules/DownloadIntegration.jsm",
+  Downloads: "resource://gre/modules/Downloads.jsm",
+  EventDispatcher: "resource://gre/modules/Messaging.jsm",
+  FormHistory: "resource://gre/modules/FormHistory.jsm",
+  LoadContextInfo: "resource://gre/modules/LoadContextInfo.jsm",
+  OS: "resource://gre/modules/osfile.jsm",
+  Task: "resource://gre/modules/Task.jsm",
+  TelemetryStopwatch: "resource://gre/modules/TelemetryStopwatch.jsm",
+});
 
 function dump(a) {
   Services.console.logStringMessage(a);
@@ -56,10 +55,16 @@ Sanitizer.prototype = {
     let item = this.items[aItemName];
     let canClear = item.canClear;
     if (typeof canClear == "function") {
-      canClear(function clearCallback(aCanClear) {
-        if (aCanClear)
+      let maybeDoClear = async () => {
+        let canClearResult = await new Promise(resolve => {
+          canClear(resolve);
+        });
+
+        if (canClearResult) {
           return item.clear(options);
-      });
+        }
+      };
+      return maybeDoClear();
     } else if (canClear) {
       return item.clear(options);
     }
@@ -238,10 +243,12 @@ Sanitizer.prototype = {
           FormHistory.update({
             op: "remove",
             firstUsedStart: time
+          }, {
+            handleCompletion() {
+              TelemetryStopwatch.finish("FX_SANITIZE_FORMDATA", refObj);
+              resolve();
+            }
           });
-
-          TelemetryStopwatch.finish("FX_SANITIZE_FORMDATA", refObj);
-          resolve();
         });
       },
 

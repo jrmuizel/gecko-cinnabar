@@ -149,7 +149,14 @@ include('/ipc/chromium/chromium-config.mozbuild')
 FINAL_LIBRARY = 'xul'
 
 SPHINX_TREES['webidl'] = 'docs'
+
+with Files('docs/**'):
+    SCHEDULES.exclusive = ['docs']
+
 SPHINX_PYTHON_PACKAGE_DIRS += ['mozwebidlcodegen']
+
+with Files('mozwebidlcodegen/**.py'):
+    SCHEDULES.inclusive += ['docs']
 
 if CONFIG['MOZ_BUILD_APP'] in ['browser', 'mobile/android', 'xulrunner']:
     # This is needed for Window.webidl
@@ -160,7 +167,7 @@ PYTHON_UNITTEST_MANIFESTS += [
     'mozwebidlcodegen/test/python.ini',
 ]
 
-if CONFIG['GNU_CXX']:
+if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']
     # Suppress warnings in third-party code.
     CXXFLAGS += [

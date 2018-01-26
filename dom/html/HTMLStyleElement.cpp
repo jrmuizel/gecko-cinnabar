@@ -7,7 +7,6 @@
 #include "mozilla/dom/HTMLStyleElementBinding.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
-#include "nsIDOMStyleSheet.h"
 #include "nsIDocument.h"
 #include "nsUnicharUtils.h"
 #include "nsThreadUtils.h"
@@ -175,10 +174,10 @@ HTMLStyleElement::GetInnerHTML(nsAString& aInnerHTML)
 
 void
 HTMLStyleElement::SetInnerHTML(const nsAString& aInnerHTML,
-                               nsIPrincipal& aScriptedPrincipal,
+                               nsIPrincipal* aScriptedPrincipal,
                                ErrorResult& aError)
 {
-  SetTextContentInternal(aInnerHTML, &aScriptedPrincipal, aError);
+  SetTextContentInternal(aInnerHTML, aScriptedPrincipal, aError);
 }
 
 void

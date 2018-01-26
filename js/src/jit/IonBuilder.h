@@ -195,7 +195,10 @@ class IonBuilder
 
     MInstruction* addConvertElementsToDoubles(MDefinition* elements);
     MDefinition* addMaybeCopyElementsForWrite(MDefinition* object, bool checkNative);
-    MInstruction* addBoundsCheck(MDefinition* index, MDefinition* length);
+
+    enum class BoundsCheckKind { IsLoad, IsStore, UnusedIndex };
+    MInstruction* addBoundsCheck(MDefinition* index, MDefinition* length, BoundsCheckKind kind);
+
     MInstruction* addShapeGuard(MDefinition* obj, Shape* const shape, BailoutKind bailoutKind);
     MInstruction* addGroupGuard(MDefinition* obj, ObjectGroup* group, BailoutKind bailoutKind);
     MInstruction* addUnboxedExpandoGuard(MDefinition* obj, bool hasExpando, BailoutKind bailoutKind);
@@ -375,7 +378,8 @@ class IonBuilder
                                        MDefinition* obj,
                                        MDefinition* index,
                                        TypedObjectPrediction objTypeDescrs,
-                                       LinearSum* indexAsByteOffset);
+                                       LinearSum* indexAsByteOffset,
+                                       BoundsCheckKind kind);
     AbortReasonOr<Ok> pushDerivedTypedObject(bool* emitted,
                                              MDefinition* obj,
                                              const LinearSum& byteOffset,
@@ -464,14 +468,16 @@ class IonBuilder
     void addTypedArrayLengthAndData(MDefinition* obj,
                                     BoundsChecking checking,
                                     MDefinition** index,
-                                    MInstruction** length, MInstruction** elements);
+                                    MInstruction** length, MInstruction** elements,
+                                    BoundsCheckKind boundsCheckKind);
 
     // Add an instruction to compute a typed array's length to the current
     // block.  If you also need the typed array's data, use the above method
     // instead.
     MInstruction* addTypedArrayLength(MDefinition* obj) {
         MInstruction* length;
-        addTypedArrayLengthAndData(obj, SkipBoundsCheck, nullptr, &length, nullptr);
+        addTypedArrayLengthAndData(obj, SkipBoundsCheck, nullptr, &length, nullptr,
+                                   BoundsCheckKind::UnusedIndex);
         return length;
     }
 
@@ -594,6 +600,7 @@ class IonBuilder
     AbortReasonOr<Ok> jsop_checkiscallable(uint8_t kind);
     AbortReasonOr<Ok> jsop_checkobjcoercible();
     AbortReasonOr<Ok> jsop_pushcallobj();
+    AbortReasonOr<Ok> jsop_implicitthis(PropertyName* name);
 
     /* Inlining. */
 
@@ -765,7 +772,7 @@ class IonBuilder
 
     bool prepareForSimdLoadStore(CallInfo& callInfo, Scalar::Type simdType,
                                  MInstruction** elements, MDefinition** index,
-                                 Scalar::Type* arrayType);
+                                 Scalar::Type* arrayType, BoundsCheckKind boundsCheckKind);
     InliningResult inlineSimdLoad(CallInfo& callInfo, JSNative native, SimdType type,
                                   unsigned numElems);
     InliningResult inlineSimdStore(CallInfo& callInfo, JSNative native, SimdType type,
@@ -829,7 +836,8 @@ class IonBuilder
     bool atomicsMeetsPreconditions(CallInfo& callInfo, Scalar::Type* arrayElementType,
                                    bool* requiresDynamicCheck,
                                    AtomicCheckResult checkResult=DoCheckAtomicResult);
-    void atomicsCheckBounds(CallInfo& callInfo, MInstruction** elements, MDefinition** index);
+    void atomicsCheckBounds(CallInfo& callInfo, MInstruction** elements, MDefinition** index,
+                            BoundsCheckKind kind);
 
     bool testNeedsArgumentCheck(JSFunction* target, CallInfo& callInfo);
 
@@ -1192,6 +1200,9 @@ class CallInfo
     MDefinition* thisArg_;
     MDefinition* newTargetArg_;
     MDefinitionVector args_;
+    // If non-empty, this corresponds to the stack prior any implicit inlining
+    // such as before JSOP_FUNAPPLY.
+    MDefinitionVector priorArgs_;
 
     bool constructing_:1;
 
@@ -1207,6 +1218,7 @@ class CallInfo
         thisArg_(nullptr),
         newTargetArg_(nullptr),
         args_(alloc),
+        priorArgs_(alloc),
         constructing_(constructing),
         ignoresReturnValue_(ignoresReturnValue),
         setter_(false),
@@ -1250,11 +1262,30 @@ class CallInfo
         return true;
     }
 
-    void popFormals(MBasicBlock* current) {
+    // Before doing any pop to the stack, capture whatever flows into the
+    // instruction, such that we can restore it later.
+    AbortReasonOr<Ok> savePriorCallStack(MIRGenerator* mir, MBasicBlock* current, size_t peekDepth);
+
+    void popPriorCallStack(MBasicBlock* current) {
+        if (priorArgs_.empty())
+            popCallStack(current);
+        else
+            current->popn(priorArgs_.length());
+    }
+
+    AbortReasonOr<Ok> pushPriorCallStack(MIRGenerator* mir, MBasicBlock* current) {
+        if (priorArgs_.empty())
+            return pushCallStack(mir, current);
+        for (MDefinition* def : priorArgs_)
+            current->push(def);
+        return Ok();
+    }
+
+    void popCallStack(MBasicBlock* current) {
         current->popn(numFormals());
     }
 
-    AbortReasonOr<Ok> pushFormals(MIRGenerator* mir, MBasicBlock* current) {
+    AbortReasonOr<Ok> pushCallStack(MIRGenerator* mir, MBasicBlock* current) {
         // Ensure sufficient space in the slots: needed for inlining from FUNAPPLY.
         if (apply_) {
             uint32_t depth = current->stackDepth() + numFormals();

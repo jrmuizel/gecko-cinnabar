@@ -8,15 +8,6 @@ config = {
     # code block and also make sure this is synced with
     # releng_base_linux_64_builds.py
 
-    # note: overridden by MOZHARNESS_ACTIONS in TaskCluster tasks
-    'default_actions': [
-        'clobber',
-        'clone-tools',
-        'checkout-sources',
-        'build',
-        'upload-files',
-        'update',  # decided by query_is_nightly()
-    ],
     "buildbot_json_path": "buildprops.json",
     'app_ini_path': '%(obj_dir)s/dist/bin/application.ini',
     # decides whether we want to use moz_sign_cmd in env
@@ -36,8 +27,6 @@ config = {
          'min_scm_level': 2, 'default': 'try-build-has-no-secrets'},
     ],
     'vcs_share_base': '/builds/hg-shared',
-    'tooltool_script': ["/builds/tooltool.py"],
-    'tooltool_bootstrap': "setup.sh",
     'enable_count_ctors': False,
     #########################################################################
 
@@ -45,8 +34,8 @@ config = {
     #########################################################################
     ###### 32 bit specific ######
     'base_name': 'WINNT_5.2_MINGW_%(branch)s',
-    'platform': 'win32',
-    'stage_platform': 'win32',
+    'platform': 'win32-mingw32',
+    'stage_platform': 'win32-mingw32',
     'publish_nightly_en_US_routes': False,
     'env': {
         'MOZBUILD_STATE_PATH': os.path.join(os.getcwd(), '.mozbuild'),
@@ -59,10 +48,7 @@ config = {
         'MOZ_CRASHREPORTER_NO_REPORT': '1',
         'LC_ALL': 'C',
         # 32 bit specific
-        'PATH': '/tools/buildbot/bin:/bin:/usr/bin:/usr/local/sbin:\
-/usr/sbin:/sbin:/tools/git/bin:/tools/python27/bin:\
-/tools/python27-mercurial/bin:/home/cltbld/bin',
-        'LD_LIBRARY_PATH': "/tools/gcc-4.3.3/installed/lib",
+        'PATH': '/usr/local/bin:/bin:/usr/bin',
     },
     'upload_env': {
         # stage_server is dictated from build_pool_specifics.py

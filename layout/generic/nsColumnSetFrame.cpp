@@ -87,12 +87,6 @@ nsDisplayColumnRule::GetLayerState(nsDisplayListBuilder* aBuilder,
     return LAYER_NONE;
   }
 
-  for (auto iter = mBorderRenderers.begin(); iter != mBorderRenderers.end(); iter++) {
-    if (!iter->CanCreateWebRenderCommands()) {
-      return LAYER_NONE;
-    }
-  }
-
   return LAYER_ACTIVE;
 }
 
@@ -121,14 +115,8 @@ nsDisplayColumnRule::CreateWebRenderCommands(mozilla::wr::DisplayListBuilder& aB
     return true;
   }
 
-  for (auto iter = mBorderRenderers.begin(); iter != mBorderRenderers.end(); iter++) {
-    if (!iter->CanCreateWebRenderCommands()) {
-      return false;
-    }
-  }
-
-  for (auto iter = mBorderRenderers.begin(); iter != mBorderRenderers.end(); iter++) {
-    iter->CreateWebRenderCommands(this, aBuilder, aResources, aSc);
+  for (auto& renderer : mBorderRenderers) {
+    renderer.CreateWebRenderCommands(this, aBuilder, aResources, aSc);
   }
 
   return true;
@@ -280,7 +268,7 @@ nsColumnSetFrame::CreateBorderRenderers(nsTArray<nsCSSBorderRenderer>& aBorderRe
                 (const nsRect& aLineRect)
                 {
                   // Assert that we're not drawing a border-image here; if we were, we
-                  // couldn't ignore the DrawResult that PaintBorderWithStyleBorder returns.
+                  // couldn't ignore the ImgDrawResult that PaintBorderWithStyleBorder returns.
                   MOZ_ASSERT(border.mBorderImageSource.GetType() == eStyleImageType_Null);
 
                   gfx::DrawTarget* dt = aCtx ? aCtx->GetDrawTarget() : nullptr;
@@ -1285,7 +1273,7 @@ nsColumnSetFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   if (IsVisibleForPainting(aBuilder)) {
     aLists.BorderBackground()->
-      AppendNewToTop(new (aBuilder) nsDisplayColumnRule(aBuilder, this));
+      AppendToTop(new (aBuilder) nsDisplayColumnRule(aBuilder, this));
   }
 
   // Our children won't have backgrounds so it doesn't matter where we put them.

@@ -53,7 +53,8 @@ def set_tp_preferences(test, browser_config):
             if test[cycle_var] > 2:
                 test[cycle_var] = 2
 
-    CLI_bool_options = ['tpchrome', 'tpmozafterpaint', 'tploadnocache', 'tpscrolltest', 'fnbpaint']
+    CLI_bool_options = ['tpchrome', 'tphero', 'tpmozafterpaint', 'tploadnocache', 'tpscrolltest',
+                        'fnbpaint']
     CLI_options = ['tpcycles', 'tppagecycles', 'tptimeout', 'tpmanifest']
     for key in CLI_bool_options:
         if key in test:
@@ -117,6 +118,18 @@ def run_tests(config, browser_config):
     # Pass subtests filter argument via a preference
     if browser_config['subtests']:
         browser_config['preferences']['talos.subtests'] = browser_config['subtests']
+
+    # If --code-coverage files are expected, set flag in browser config so ffsetup knows
+    # that it needs to delete any ccov files resulting from browser initialization
+    # NOTE: This is only supported in production; local setup of ccov folders and
+    # data collection not supported yet, so if attempting to run with --code-coverage
+    # flag locally, that is not supported yet
+    if config.get('code_coverage', False):
+        if browser_config['develop']:
+            raise TalosError('Aborting: talos --code-coverage flag is only '
+                             'supported in production')
+        else:
+            browser_config['code_coverage'] = True
 
     # set defaults
     testdate = config.get('testdate', '')

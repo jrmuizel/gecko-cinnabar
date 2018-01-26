@@ -34,6 +34,8 @@
 #include "mozilla/dom/BindingDeclarations.h" // For CallerType
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/intl/LineBreaker.h"
+#include "mozilla/intl/WordBreaker.h"
 #include "mozilla/net/ReferrerPolicy.h"
 #include "mozilla/Logging.h"
 #include "mozilla/NotNull.h"
@@ -80,7 +82,6 @@ class nsIFrame;
 class nsIImageLoadingContent;
 class nsIInterfaceRequestor;
 class nsIIOService;
-class nsILineBreaker;
 class nsILoadInfo;
 class nsILoadGroup;
 class nsIMessageBroadcaster;
@@ -100,7 +101,6 @@ class nsISupportsHashKey;
 class nsIURI;
 class nsIUUIDGenerator;
 class nsIWidget;
-class nsIWordBreaker;
 class nsIXPConnect;
 class nsNodeInfoManager;
 class nsPIDOMWindowInner;
@@ -752,14 +752,14 @@ public:
   // Returns true if aDoc1 and aDoc2 have equal NodePrincipal()s.
   static bool HaveEqualPrincipals(nsIDocument* aDoc1, nsIDocument* aDoc2);
 
-  static nsILineBreaker* LineBreaker()
+  static mozilla::intl::LineBreaker* LineBreaker()
   {
-    return sLineBreaker;
+    return sLineBreaker.get();
   }
 
-  static nsIWordBreaker* WordBreaker()
+  static mozilla::intl::WordBreaker* WordBreaker()
   {
-    return sWordBreaker;
+    return sWordBreaker.get();
   }
 
   /**
@@ -1090,6 +1090,8 @@ public:
                                   uint32_t aLineNumber = 0,
                                   uint32_t aColumnNumber = 0);
 
+  static void ReportEmptyGetElementByIdArg(const nsIDocument* aDoc);
+
   static void LogMessageToConsole(const char* aMsg);
 
   /**
@@ -1134,6 +1136,14 @@ public:
 
   static bool PrefetchPreloadEnabled(nsIDocShell* aDocShell);
 
+  static void
+  ExtractErrorValues(JSContext* aCx, JS::Handle<JS::Value> aValue,
+                     nsAString& aSourceSpecOut, uint32_t *aLineOut,
+                     uint32_t *aColumnOut, nsString& aMessageOut);
+
+  // Variant on `ExtractErrorValues` with a `nsACString`. This
+  // method is provided for backwards compatibility. Prefer the
+  // faster method above for your code.
   static void
   ExtractErrorValues(JSContext* aCx, JS::Handle<JS::Value> aValue,
                      nsACString& aSourceSpecOut, uint32_t *aLineOut,
@@ -1568,6 +1578,11 @@ public:
   static bool IsValidNodeName(nsAtom *aLocalName, nsAtom *aPrefix,
                                 int32_t aNamespaceID);
 
+  enum SanitizeFragments {
+    SanitizeSystemPrivileged,
+    NeverSanitize,
+  };
+
   /**
    * Creates a DocumentFragment from text using a context node to resolve
    * namespaces.
@@ -1581,6 +1596,8 @@ public:
    * @param aFragment the string which is parsed to a DocumentFragment
    * @param aReturn the resulting fragment
    * @param aPreventScriptExecution whether to mark scripts as already started
+   * @param aSanitize whether the fragment should be sanitized prior to
+   *        injection
    */
   static nsresult CreateContextualFragment(nsINode* aContextNode,
                                            const nsAString& aFragment,
@@ -1589,7 +1606,16 @@ public:
   static already_AddRefed<mozilla::dom::DocumentFragment>
   CreateContextualFragment(nsINode* aContextNode, const nsAString& aFragment,
                            bool aPreventScriptExecution,
+                           SanitizeFragments aSanitize,
                            mozilla::ErrorResult& aRv);
+  static already_AddRefed<mozilla::dom::DocumentFragment>
+  CreateContextualFragment(nsINode* aContextNode, const nsAString& aFragment,
+                           bool aPreventScriptExecution,
+                           mozilla::ErrorResult& aRv)
+  {
+    return CreateContextualFragment(aContextNode, aFragment, aPreventScriptExecution,
+                                    SanitizeSystemPrivileged, aRv);
+  }
 
   /**
    * Invoke the fragment parsing algorithm (innerHTML) using the HTML parser.
@@ -1602,6 +1628,8 @@ public:
    * @param aPreventScriptExecution true to prevent scripts from executing;
    *        don't set to false when parsing into a target node that has been
    *        bound to tree.
+   * @param aSanitize whether the fragment should be sanitized prior to
+   *        injection
    * @return NS_ERROR_DOM_INVALID_STATE_ERR if a re-entrant attempt to parse
    *         fragments is made, NS_ERROR_OUT_OF_MEMORY if aSourceBuffer is too
    *         long and NS_OK otherwise.
@@ -1611,7 +1639,8 @@ public:
                                     nsAtom* aContextLocalName,
                                     int32_t aContextNamespace,
                                     bool aQuirks,
-                                    bool aPreventScriptExecution);
+                                    bool aPreventScriptExecution,
+                                    SanitizeFragments aSanitize = SanitizeSystemPrivileged);
 
   /**
    * Invoke the fragment parsing algorithm (innerHTML) using the XML parser.
@@ -1621,6 +1650,8 @@ public:
    * @param aTagStack the namespace mapping context
    * @param aPreventExecution whether to mark scripts as already started
    * @param aReturn the result fragment
+   * @param aSanitize whether the fragment should be sanitized prior to
+   *        injection
    * @return NS_ERROR_DOM_INVALID_STATE_ERR if a re-entrant attempt to parse
    *         fragments is made, a return code from the XML parser.
    */
@@ -1628,7 +1659,8 @@ public:
                                    nsIDocument* aDocument,
                                    nsTArray<nsString>& aTagStack,
                                    bool aPreventScriptExecution,
-                                   nsIDOMDocumentFragment** aReturn);
+                                   nsIDOMDocumentFragment** aReturn,
+                                   SanitizeFragments aSanitize = SanitizeSystemPrivileged);
 
   /**
    * Parse a string into a document using the HTML parser.
@@ -2277,14 +2309,6 @@ public:
   }
 
   /*
-   * Returns true if user timing API should print to console.
-   */
-  static bool IsUserTimingLoggingEnabled()
-  {
-    return sIsUserTimingLoggingEnabled;
-  }
-
-  /*
    * Returns true if the performance timing APIs are enabled.
    */
   static bool IsResourceTimingEnabled()
@@ -2395,11 +2419,6 @@ public:
   {
     return sIsScopedStyleEnabled;
   }
-
-  /**
-   * Return true if this doc is controlled by a ServiceWorker.
-   */
-  static bool IsControlledByServiceWorker(nsIDocument* aDocument);
 
   /**
    * Fire mutation events for changes caused by parsing directly into a
@@ -2691,11 +2710,6 @@ public:
   static mozilla::HTMLEditor* GetHTMLEditor(nsPresContext* aPresContext);
 
   /**
-   * Returns true if the browser.dom.window.dump.enabled pref is set.
-   */
-  static bool DOMWindowDumpEnabled();
-
-  /**
    * Returns true if the privacy.donottrackheader.enabled pref is set.
    */
   static bool DoNotTrackEnabled();
@@ -2706,24 +2720,6 @@ public:
    * content JS to other logging modules.
    */
   static mozilla::LogModule* DOMDumpLog();
-
-  /**
-   * Returns whether a content is an insertion point for XBL
-   * bindings or web components ShadowRoot. In web components,
-   * this corresponds to a <content> element that participates
-   * in node distribution. In XBL this corresponds to an
-   * <xbl:children> element in anonymous content.
-   *
-   * @param aContent The content to test for being an insertion point.
-   */
-  static bool IsContentInsertionPoint(nsIContent* aContent);
-
-
-  /**
-   * Returns whether the children of the provided content are
-   * nodes that are distributed to Shadow DOM insertion points.
-   */
-  static bool HasDistributedChildren(nsIContent* aContent);
 
   /**
    * Returns whether a given header is forbidden for an XHR or fetch
@@ -2931,18 +2927,9 @@ public:
    */
   static mozilla::net::ReferrerPolicy GetReferrerPolicyFromHeader(const nsAString& aHeader);
 
-  static bool PromiseRejectionEventsEnabled(JSContext* aCx, JSObject* aObj);
-
-  static bool PushEnabled(JSContext* aCx, JSObject* aObj);
-
-  static bool StreamsEnabled(JSContext* aCx, JSObject* aObj);
-
   static bool IsNonSubresourceRequest(nsIChannel* aChannel);
 
-  static uint32_t CookiesBehavior()
-  {
-    return sCookiesBehavior;
-  }
+  static bool IsNonSubresourceInternalPolicyType(nsContentPolicyType aType);
 
   // The order of these entries matters, as we use std::min for total ordering
   // of permissions. Private Browsing is considered to be more limiting
@@ -2957,6 +2944,8 @@ public:
     eSessionScoped = 2,
     // Allow access to the storage
     eAllow = 3,
+    // Keep this at the end.  Used for serialization, but not a valid value.
+    eNumValues = 4,
   };
 
   /*
@@ -2979,6 +2968,21 @@ public:
    * StorageAllowedForWindow(), however, will not work in these cases.
    */
   static StorageAccess StorageAllowedForDocument(nsIDocument* aDoc);
+
+  /*
+   * Checks if storage should be allowed for a new window with the given
+   * principal, load URI, and parent.
+   */
+  static StorageAccess StorageAllowedForNewWindow(nsIPrincipal* aPrincipal,
+                                                  nsIURI* aURI,
+                                                  nsPIDOMWindowInner* aParent);
+
+  /*
+   * Checks if storage should be allowed for the given channel.  The check will
+   * be based on the channel result principal and, depending on preferences and
+   * permissions, mozIThirdPartyUtil.isThirdPartyChannel().
+   */
+  static StorageAccess StorageAllowedForChannel(nsIChannel* aChannel);
 
   /*
    * Checks if storage for the given principal is permitted by the user's
@@ -3034,7 +3038,7 @@ public:
    * definition.
    */
   static nsresult NewXULOrHTMLElement(Element** aResult, mozilla::dom::NodeInfo* aNodeInfo,
-                                      mozilla::dom::FromParser aFromParser, const nsAString* aIs,
+                                      mozilla::dom::FromParser aFromParser, nsAtom* aIsAtom,
                                       mozilla::dom::CustomElementDefinition* aDefinition);
 
   /**
@@ -3120,7 +3124,7 @@ public:
                                     JS::MutableHandle<JS::Value> aValue);
 
   static bool
-  IsWebComponentsEnabled() { return sIsWebComponentsEnabled; }
+  IsShadowDOMEnabled() { return sIsShadowDOMEnabled; }
 
   /**
    * Returns true if reserved key events should be prevented from being sent
@@ -3357,13 +3361,18 @@ private:
    * Checks if storage for a given principal is permitted by the user's
    * preferences. If aWindow is non-null, its principal must be passed as
    * aPrincipal, and the third-party iframe and sandboxing status of the window
-   * are also checked.
+   * are also checked.  If aURI is non-null, then it is used as the comparison
+   * against aWindow to determine if this is a third-party load.  We also
+   * allow a channel instead of the window reference when determining 3rd party
+   * status.
    *
    * Used in the implementation of StorageAllowedForWindow and
    * StorageAllowedForPrincipal.
    */
   static StorageAccess InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
-                                                          nsPIDOMWindowInner* aWindow);
+                                                          nsPIDOMWindowInner* aWindow,
+                                                          nsIURI* aURI,
+                                                          nsIChannel* aChannel);
 
   static nsINode* GetCommonAncestorHelper(nsINode* aNode1, nsINode* aNode2);
   static nsIContent* GetCommonFlattenedTreeAncestorHelper(nsIContent* aContent1,
@@ -3392,8 +3401,8 @@ private:
   static nsIContentPolicy* sContentPolicyService;
   static bool sTriedToGetContentPolicy;
 
-  static nsILineBreaker* sLineBreaker;
-  static nsIWordBreaker* sWordBreaker;
+  static RefPtr<mozilla::intl::LineBreaker> sLineBreaker;
+  static RefPtr<mozilla::intl::WordBreaker> sWordBreaker;
 
   static nsIBidiKeyboard* sBidiKeyboard;
 
@@ -3418,12 +3427,10 @@ private:
   static bool sIsPerformanceTimingEnabled;
   static bool sIsResourceTimingEnabled;
   static bool sIsPerformanceNavigationTimingEnabled;
-  static bool sIsUserTimingLoggingEnabled;
   static bool sIsFrameTimingPrefEnabled;
   static bool sIsFormAutofillAutocompleteEnabled;
-  static bool sIsWebComponentsEnabled;
+  static bool sIsShadowDOMEnabled;
   static bool sIsCustomElementsEnabled;
-  static bool sDevToolsEnabled;
   static bool sSendPerformanceTimingNotifications;
   static bool sUseActivityCursor;
   static bool sAnimationsAPICoreEnabled;
@@ -3472,9 +3479,6 @@ private:
   // bytecode out of the nsCacheInfoChannel.
   static nsCString* sJSBytecodeMimeType;
 
-#if !(defined(DEBUG) || defined(MOZ_ENABLE_JS_DUMP))
-  static bool sDOMWindowDumpEnabled;
-#endif
   static bool sDoNotTrackEnabled;
   static mozilla::LazyLogModule sDOMDumpLog;
 

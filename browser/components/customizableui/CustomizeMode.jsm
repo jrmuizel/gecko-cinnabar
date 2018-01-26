@@ -12,7 +12,6 @@ const kPrefCustomizationDebug = "browser.uiCustomization.debug";
 const kPaletteId = "customization-palette";
 const kDragDataTypePrefix = "text/toolbarwrapper-id/";
 const kSkipSourceNodePref = "browser.uiCustomization.skipSourceNodeCheck";
-const kToolbarVisibilityBtn = "customization-toolbar-visibility-button";
 const kDrawInTitlebarPref = "browser.tabs.drawInTitlebar";
 const kExtraDragSpacePref = "browser.tabs.extraDragSpace";
 const kMaxTransitionDurationMs = 2000;
@@ -279,16 +278,6 @@ CustomizeMode.prototype = {
         });
       }
 
-      let toolbarVisibilityBtn = document.getElementById(kToolbarVisibilityBtn);
-      let togglableToolbars = window.getTogglableToolbars();
-      if (togglableToolbars.length == 0) {
-        toolbarVisibilityBtn.setAttribute("hidden", "true");
-      } else {
-        toolbarVisibilityBtn.removeAttribute("hidden");
-      }
-
-      this.updateLWTStyling();
-
       CustomizableUI.dispatchToolboxEvent("beforecustomization", {}, window);
       CustomizableUI.notifyStartCustomizing(this.window);
 
@@ -323,8 +312,6 @@ CustomizeMode.prototype = {
         toolbar.setAttribute("customizing", true);
 
       await this._doTransition(true);
-
-      Services.obs.addObserver(this, "lightweight-theme-window-updated");
 
       // Let everybody in this window know that we're about to customize.
       CustomizableUI.dispatchToolboxEvent("customizationstarting", {}, window);
@@ -397,8 +384,6 @@ CustomizeMode.prototype = {
 
     this._handler.isExitingCustomizeMode = true;
 
-    this._removeExtraToolbarsIfEmpty();
-
     this._teardownDownloadAutoHideToggle();
 
     CustomizableUI.removeListener(this);
@@ -421,9 +406,6 @@ CustomizeMode.prototype = {
       await this.depopulatePalette();
 
       await this._doTransition(false);
-      this.updateLWTStyling({});
-
-      Services.obs.removeObserver(this, "lightweight-theme-window-updated");
 
       if (this.browser.selectedTab == gTab) {
         if (gTab.linkedBrowser.currentURI.spec == "about:blank") {
@@ -524,26 +506,6 @@ CustomizeMode.prototype = {
       docEl.removeAttribute("customize-entered");
     }
     return Promise.resolve();
-  },
-
-  updateLWTStyling(aData) {
-    let docElement = this.document.documentElement;
-    if (!aData) {
-      let lwt = docElement._lightweightTheme;
-      aData = lwt.getData();
-    }
-    let headerURL = aData && aData.headerURL;
-    if (!headerURL) {
-      docElement.removeAttribute("customization-lwtheme");
-      return;
-    }
-    docElement.setAttribute("customization-lwtheme", "true");
-
-    let deck = this.document.getElementById("tab-view-deck");
-    let toolboxRect = this.window.gNavToolbox.getBoundingClientRect();
-    let height = toolboxRect.bottom;
-    deck.style.setProperty("--toolbox-rect-height", `${height}`);
-    deck.style.setProperty("--toolbox-rect-height-with-unit", `${height}px`);
   },
 
   _getCustomizableChildForNode(aNode) {
@@ -917,7 +879,7 @@ CustomizeMode.prototype = {
       contextMenuAttrName = "contextmenu";
     }
     let currentContextMenu = aNode.getAttribute(contextMenuAttrName);
-    let contextMenuForPlace = aPlace == "panel" ?
+    let contextMenuForPlace = aPlace == "menu-panel" ?
                                 kPanelItemContextMenu :
                                 kPaletteItemContextMenu;
     if (aPlace != "toolbar") {
@@ -1001,7 +963,7 @@ CustomizeMode.prototype = {
       toolbarItem.setAttribute(contextAttrName, wrappedContext);
       toolbarItem.removeAttribute("wrapped-contextAttrName");
       toolbarItem.removeAttribute("wrapped-context");
-    } else if (place == "panel") {
+    } else if (place == "menu-panel") {
       toolbarItem.setAttribute("context", kPanelItemContextMenu);
     }
 
@@ -1109,18 +1071,6 @@ CustomizeMode.prototype = {
     })().catch(log.error);
   },
 
-  _removeExtraToolbarsIfEmpty() {
-    let toolbox = this.window.gNavToolbox;
-    for (let child of toolbox.children) {
-      if (child.hasAttribute("customindex")) {
-        let placements = CustomizableUI.getWidgetIdsInArea(child.id);
-        if (!placements.length) {
-          CustomizableUI.removeExtraToolbar(child.id);
-        }
-      }
-    }
-  },
-
   persistCurrentSets(aSetBeforePersisting) {
     let document = this.document;
     let toolbars = document.querySelectorAll("toolbar[customizable='true'][currentset]");
@@ -1196,7 +1146,6 @@ CustomizeMode.prototype = {
       toolbar.removeAttribute("customizing");
     }
     this._onUIChange();
-    this.updateLWTStyling();
   },
 
   onWidgetMoved(aWidgetId, aArea, aOldPosition, aNewPosition) {
@@ -1644,12 +1593,6 @@ CustomizeMode.prototype = {
           this._updateDragSpaceCheckbox();
         }
         break;
-      case "lightweight-theme-window-updated":
-        if (aSubject == this.window) {
-          aData = JSON.parse(aData);
-          this.updateLWTStyling(aData);
-        }
-        break;
     }
   },
 
@@ -1769,7 +1712,7 @@ CustomizeMode.prototype = {
       if (this._customizing && !this._transitioning) {
         item.hidden = true;
         DragPositionManager.start(this.window);
-        let canUsePrevSibling = placeForItem == "toolbar" || placeForItem == "panel";
+        let canUsePrevSibling = placeForItem == "toolbar" || placeForItem == "menu-panel";
         if (item.nextSibling) {
           this._setDragActive(item.nextSibling, "before", draggedItem.id, placeForItem);
           this._dragOverItem = item.nextSibling;
@@ -1825,7 +1768,7 @@ CustomizeMode.prototype = {
       return;
     }
 
-    let targetAreaType = CustomizableUI.getAreaType(targetArea.id);
+    let targetAreaType = CustomizableUI.getPlaceForItem(targetArea);
     let targetNode = this._getDragOverNode(aEvent, targetArea, targetAreaType, draggedItemId);
 
     // We need to determine the place that the widget is being dropped in
@@ -2170,11 +2113,6 @@ CustomizeMode.prototype = {
       return;
     }
 
-    // getPlaceForItem and getAreaType return different things. Hack-around
-    // rather than having to update every. single. consumer. (and break add-ons)
-    if (aAreaType == "panel") {
-      aAreaType = "menu-panel";
-    }
     if (aItem.getAttribute("dragover") != aValue) {
       aItem.setAttribute("dragover", aValue);
 
@@ -2344,10 +2282,6 @@ CustomizeMode.prototype = {
     let expectedParent = aAreaElement.customizationTarget || aAreaElement;
     if (!expectedParent.contains(aEvent.target)) {
       return expectedParent;
-    }
-    // Our tests are stupid. Cope:
-    if (!aEvent.clientX && !aEvent.clientY) {
-      return aEvent.target;
     }
     // Offset the drag event's position with the offset to the center of
     // the thing we're dragging

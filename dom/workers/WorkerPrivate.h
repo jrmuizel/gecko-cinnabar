@@ -68,6 +68,7 @@ class ClientSource;
 class Function;
 class MessagePort;
 class MessagePortIdentifier;
+class PerformanceStorage;
 class PromiseNativeHandler;
 class StructuredCloneHolder;
 class WorkerDebuggerGlobalScope;
@@ -410,9 +411,6 @@ public:
   UpdateLanguages(const nsTArray<nsString>& aLanguages);
 
   void
-  UpdatePreference(WorkerPreference aPref, bool aValue);
-
-  void
   UpdateJSWorkerMemoryParameter(JSGCParamKey key, uint32_t value);
 
 #ifdef JS_GC_ZEAL
@@ -576,6 +574,12 @@ public:
     return mLoadInfo.mServiceWorkerDescriptor.ref().SetState(aState);
   }
 
+  const Maybe<ServiceWorkerDescriptor>&
+  GetParentController() const
+  {
+    return mLoadInfo.mParentController;
+  }
+
   const ChannelInfo&
   GetChannelInfo() const
   {
@@ -684,10 +688,10 @@ public:
   nsresult
   SetPrincipalFromChannel(nsIChannel* aChannel);
 
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   bool
   FinalChannelPrincipalIsValid(nsIChannel* aChannel);
 
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   bool
   PrincipalURIMatchesScriptURL();
 #endif
@@ -1064,6 +1068,8 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   // fired on the main thread if the worker script fails to load
   nsCOMPtr<nsIRunnable> mLoadFailedRunnable;
 
+  RefPtr<PerformanceStorage> mPerformanceStorage;
+
   JS::UniqueChars mDefaultLocale; // nulled during worker JSContext init
   TimeStamp mKillTime;
   uint32_t mErrorHandlerRecursionCount;
@@ -1079,7 +1085,6 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   bool mIdleGCTimerRunning;
   bool mWorkerScriptExecutedSuccessfully;
   bool mFetchHandlerWasAdded;
-  bool mPreferences[WORKERPREF_COUNT];
   bool mOnLine;
 
 protected:
@@ -1287,9 +1292,6 @@ public:
   UpdateLanguagesInternal(const nsTArray<nsString>& aLanguages);
 
   void
-  UpdatePreferenceInternal(WorkerPreference aPref, bool aValue);
-
-  void
   UpdateJSWorkerMemoryParameterInternal(JSContext* aCx, JSGCParamKey key, uint32_t aValue);
 
   enum WorkerRanOrNot {
@@ -1411,18 +1413,6 @@ public:
   bool
   RegisterDebuggerBindings(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
 
-#define WORKER_SIMPLE_PREF(name, getter, NAME)                                \
-  bool                                                                        \
-  getter() const                                                              \
-  {                                                                           \
-    AssertIsOnWorkerThread();                                                 \
-    return mPreferences[WORKERPREF_##NAME];                                   \
-  }
-#define WORKER_PREF(name, callback)
-#include "WorkerPrefs.h"
-#undef WORKER_SIMPLE_PREF
-#undef WORKER_PREF
-
   bool
   OnLine() const
   {
@@ -1513,11 +1503,20 @@ public:
   const ClientInfo&
   GetClientInfo() const;
 
+  const ClientState
+  GetClientState() const;
+
+  const Maybe<ServiceWorkerDescriptor>
+  GetController() const;
+
   void
   Control(const ServiceWorkerDescriptor& aServiceWorker);
 
   void
   ExecutionReady();
+
+  PerformanceStorage*
+  GetPerformanceStorage();
 
 private:
   WorkerPrivate(WorkerPrivate* aParent,
@@ -1582,13 +1581,6 @@ private:
                               JS::Handle<JS::Value> aMessage,
                               const Sequence<JSObject*>& aTransferable,
                               ErrorResult& aRv);
-
-  void
-  GetAllPreferences(bool aPreferences[WORKERPREF_COUNT]) const
-  {
-    AssertIsOnWorkerThread();
-    memcpy(aPreferences, mPreferences, WORKERPREF_COUNT * sizeof(bool));
-  }
 
   // If the worker shutdown status is equal or greater then aFailStatus, this
   // operation will fail and nullptr will be returned. See WorkerHolder.h for

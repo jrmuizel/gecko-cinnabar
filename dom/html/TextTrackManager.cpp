@@ -43,7 +43,7 @@ CompareTextTracks::TrackChildPosition(TextTrack* aTextTrack) const {
   if (!trackElement) {
     return -1;
   }
-  return mMediaElement->IndexOf(trackElement);
+  return mMediaElement->ComputeIndexOf(trackElement);
 }
 
 bool
@@ -498,7 +498,7 @@ public:
     , mCue(aCue)
   {}
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     WEBVTT_LOGV("SimpleTextTrackEvent cue %p mName %s mTime %lf",
       mCue.get(), NS_ConvertUTF16toUTF8(mName).get(), mTime);
     mCue->DispatchTrustedEvent(mName);
@@ -527,7 +527,7 @@ private:
     if (aEvent->mTrack) {
       HTMLTrackElement* trackElement = aEvent->mTrack->GetTrackElement();
       if (trackElement) {
-        return mMediaElement->IndexOf(trackElement);
+        return mMediaElement->ComputeIndexOf(trackElement);
       }
     }
     return -1;

@@ -24,10 +24,6 @@ TASKBAR_AUTOHIDE_REG_PATH = {
 config = {
     "exes": {
         'python': sys.executable,
-        'virtualenv': [
-            sys.executable,
-            os.path.join(os.path.dirname(sys.executable), 'Lib', 'site-packages', 'virtualenv.py')
-        ],
         'mozinstall': ['build/venv/scripts/python', 'build/venv/scripts/mozinstall-script.py'],
         'tooltool.py': [sys.executable, os.path.join(os.environ['MOZILLABUILD'], 'tooltool.py')],
         'hg': os.path.join(os.environ['PROGRAMFILES'], 'Mercurial', 'hg')
@@ -201,7 +197,8 @@ config = {
             'tests': ["tests/reftest/tests/testing/crashtest/crashtests.list"]
         },
         "jsreftest": {
-            'options':["--extra-profile-file=tests/jsreftest/tests/user.js"],
+            'options':["--extra-profile-file=tests/jsreftest/tests/user.js",
+                       "--suite=jstestbrowser"],
             'tests': ["tests/jsreftest/tests/jstests.list"]
         },
         "reftest": {

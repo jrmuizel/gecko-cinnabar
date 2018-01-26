@@ -188,18 +188,6 @@ JsepSessionImpl::AddVideoRtpExtension(const std::string& extensionName,
   return AddRtpExtension(mVideoRtpExtensions, extensionName, direction);
 }
 
-std::vector<JsepTrack>
-JsepSessionImpl::GetRemoteTracksAdded() const
-{
-  return mRemoteTracksAdded;
-}
-
-std::vector<JsepTrack>
-JsepSessionImpl::GetRemoteTracksRemoved() const
-{
-  return mRemoteTracksRemoved;
-}
-
 nsresult
 JsepSessionImpl::CreateOfferMsection(const JsepOfferOptions& options,
                                      JsepTransceiver& transceiver,
@@ -357,6 +345,53 @@ JsepSessionImpl::GetRemoteIds(const Sdp& sdp,
 }
 
 nsresult
+JsepSessionImpl::RemoveDuplicateTrackIds(Sdp* sdp)
+{
+  std::set<std::string> trackIds;
+
+  for (size_t i = 0; i < sdp->GetMediaSectionCount(); ++i) {
+    SdpMediaSection& msection(sdp->GetMediaSection(i));
+
+    if (mSdpHelper.MsectionIsDisabled(msection)) {
+      continue;
+    }
+
+    std::vector<std::string> streamIds;
+    std::string trackId;
+    nsresult rv = mSdpHelper.GetIdsFromMsid(*sdp,
+                                            msection,
+                                            &streamIds,
+                                            &trackId);
+
+    if (NS_SUCCEEDED(rv)) {
+      if (trackIds.count(trackId)) {
+        // Re-set trackId
+        if (!mUuidGen->Generate(&trackId)) {
+          JSEP_SET_ERROR("Tried to replace duplicate track id in SDP, but "
+                         "failed to generate a UUID.");
+          return NS_ERROR_FAILURE;
+        }
+
+        auto& mediaAttrs = msection.GetAttributeList();
+        UniquePtr<SdpMsidAttributeList> newMsids(
+            new SdpMsidAttributeList(mediaAttrs.GetMsid()));
+        for (auto& msid : newMsids->mMsids) {
+          msid.appdata = trackId;
+        }
+
+        mediaAttrs.SetAttribute(newMsids.release());
+      }
+      trackIds.insert(trackId);
+    } else if (rv != NS_ERROR_NOT_AVAILABLE) {
+      // Error has already been set
+      return rv;
+    }
+  }
+
+  return NS_OK;
+}
+
+nsresult
 JsepSessionImpl::CreateOffer(const JsepOfferOptions& options,
                              std::string* offer)
 {
@@ -387,6 +422,9 @@ JsepSessionImpl::CreateOffer(const JsepOfferOptions& options,
   }
 
   SetupBundle(sdp.get());
+
+  rv = RemoveDuplicateTrackIds(sdp.get());
+  NS_ENSURE_SUCCESS(rv, rv);
 
   if (mCurrentLocalDescription) {
     rv = CopyPreviousTransportParams(*GetAnswer(),
@@ -517,6 +555,9 @@ JsepSessionImpl::CreateAnswer(const JsepAnswerOptions& options,
                               sdp.get());
     NS_ENSURE_SUCCESS(rv, rv);
   }
+
+  rv = RemoveDuplicateTrackIds(sdp.get());
+  NS_ENSURE_SUCCESS(rv, rv);
 
   if (mCurrentLocalDescription) {
     // per discussion with bwc, 3rd parm here should be offer, not *sdp. (mjf)
@@ -1078,9 +1119,14 @@ JsepSessionImpl::InitTransport(const SdpMediaSection& msection,
     transport->mTransportId = msection.GetAttributeList().GetMid();
   } else {
     std::ostringstream os;
-    os << "level_" << msection.GetLevel() << "(no mid)";
+    os << "no_mid_lvl_" << msection.GetLevel();
+    // This works providing we don't have an msection level higher than 99999.
+    // We need to fit inside the 16 character mid limitation that results from
+    // not having two-byte rtp header extensions support in webrtc.org yet.
     transport->mTransportId = os.str();
   }
+  // This assert can go away when webrtc.org supports 2-byte rtp header exts.
+  MOZ_ASSERT(transport->mTransportId.length() <= 16);
 }
 
 nsresult
@@ -1227,8 +1273,6 @@ JsepSessionImpl::ParseSdp(const std::string& sdp, UniquePtr<Sdp>* parsedp)
     return NS_ERROR_INVALID_ARG;
   }
 
-  std::set<std::string> trackIds;
-
   for (size_t i = 0; i < parsed->GetMediaSectionCount(); ++i) {
     if (mSdpHelper.MsectionIsDisabled(parsed->GetMediaSection(i))) {
       // Disabled, let this stuff slide.
@@ -1237,6 +1281,14 @@ JsepSessionImpl::ParseSdp(const std::string& sdp, UniquePtr<Sdp>* parsedp)
 
     const SdpMediaSection& msection(parsed->GetMediaSection(i));
     auto& mediaAttrs = msection.GetAttributeList();
+
+    if (mediaAttrs.HasAttribute(SdpAttribute::kMidAttribute) &&
+        mediaAttrs.GetMid().length() > 16) {
+      JSEP_SET_ERROR("Invalid description, mid length greater than 16 "
+                     "unsupported until 2-byte rtp header extensions are "
+                     "supported in webrtc.org");
+      return NS_ERROR_INVALID_ARG;
+    }
 
     if (mediaAttrs.GetIceUfrag().empty()) {
       JSEP_SET_ERROR("Invalid description, no ice-ufrag attribute");
@@ -1269,26 +1321,6 @@ JsepSessionImpl::ParseSdp(const std::string& sdp, UniquePtr<Sdp>* parsedp)
       return NS_ERROR_INVALID_ARG;
     }
 
-    std::vector<std::string> streamIds;
-    std::string trackId;
-    nsresult rv = mSdpHelper.GetIdsFromMsid(*parsed,
-                                            parsed->GetMediaSection(i),
-                                            &streamIds,
-                                            &trackId);
-
-    if (NS_SUCCEEDED(rv)) {
-      if (trackIds.count(trackId)) {
-        JSEP_SET_ERROR("track id:" << trackId
-                       << " appears in more than one m-section at level " << i);
-        return NS_ERROR_INVALID_ARG;
-      }
-
-      trackIds.insert(trackId);
-    } else if (rv != NS_ERROR_NOT_AVAILABLE) {
-      // Error has already been set
-      return rv;
-    }
-
     static const std::bitset<128> forbidden = GetForbiddenSdpPayloadTypes();
     if (msection.GetMediaType() == SdpMediaSection::kAudio ||
         msection.GetMediaType() == SdpMediaSection::kVideo) {
@@ -1313,6 +1345,9 @@ JsepSessionImpl::ParseSdp(const std::string& sdp, UniquePtr<Sdp>* parsedp)
       }
     }
   }
+
+  nsresult rv = RemoveDuplicateTrackIds(parsed.get());
+  NS_ENSURE_SUCCESS(rv, rv);
 
   *parsedp = Move(parsed);
   return NS_OK;
@@ -1349,12 +1384,6 @@ JsepSessionImpl::SetRemoteDescriptionAnswer(JsepSdpType type,
 
   SetState(kJsepStateStable);
   return NS_OK;
-}
-
-static bool
-TrackIdCompare(const JsepTrack& t1, const JsepTrack& t2)
-{
-  return t1.GetTrackId() < t2.GetTrackId();
 }
 
 JsepTransceiver*
@@ -1436,9 +1465,6 @@ JsepSessionImpl::GetTransceiverForRemote(const SdpMediaSection& msection)
 nsresult
 JsepSessionImpl::UpdateTransceiversFromRemoteDescription(const Sdp& remote)
 {
-  std::vector<JsepTrack> oldRemoteTracks;
-  std::vector<JsepTrack> newRemoteTracks;
-
   // Iterate over the sdp, updating remote tracks as we go
   for (size_t i = 0; i < remote.GetMediaSectionCount(); ++i) {
     const SdpMediaSection& msection = remote.GetMediaSection(i);
@@ -1446,13 +1472,6 @@ JsepSessionImpl::UpdateTransceiversFromRemoteDescription(const Sdp& remote)
     JsepTransceiver* transceiver(GetTransceiverForRemote(msection));
     if (!transceiver) {
       return NS_ERROR_FAILURE;
-    }
-
-    bool isRtp =
-      msection.GetMediaType() != SdpMediaSection::MediaType::kApplication;
-
-    if (isRtp && transceiver->mRecvTrack.GetActive()) {
-      oldRemoteTracks.push_back(transceiver->mRecvTrack);
     }
 
     if (!mSdpHelper.MsectionIsDisabled(msection)) {
@@ -1464,12 +1483,13 @@ JsepSessionImpl::UpdateTransceiversFromRemoteDescription(const Sdp& remote)
       continue;
     }
 
-    if (!isRtp) {
+    if (msection.GetMediaType() == SdpMediaSection::MediaType::kApplication) {
       continue;
     }
 
     // Interop workaround for endpoints that don't support msid.
-    // If the receiver has no ids, set some initial values, one way or another.
+    // Ensures that there is a default track id set.
+    // TODO(bug 1426005): Remove this
     if (msection.IsSending() && transceiver->mRecvTrack.GetTrackId().empty()) {
       std::vector<std::string> streamIds;
       std::string trackId;
@@ -1480,33 +1500,7 @@ JsepSessionImpl::UpdateTransceiversFromRemoteDescription(const Sdp& remote)
     }
 
     transceiver->mRecvTrack.UpdateRecvTrack(remote, msection);
-
-    if (msection.IsSending()) {
-      newRemoteTracks.push_back(transceiver->mRecvTrack);
-    }
   }
-
-  std::sort(oldRemoteTracks.begin(), oldRemoteTracks.end(), TrackIdCompare);
-  std::sort(newRemoteTracks.begin(), newRemoteTracks.end(), TrackIdCompare);
-
-  mRemoteTracksAdded.clear();
-  mRemoteTracksRemoved.clear();
-
-  std::set_difference(
-      oldRemoteTracks.begin(),
-      oldRemoteTracks.end(),
-      newRemoteTracks.begin(),
-      newRemoteTracks.end(),
-      std::inserter(mRemoteTracksRemoved, mRemoteTracksRemoved.begin()),
-      TrackIdCompare);
-
-  std::set_difference(
-      newRemoteTracks.begin(),
-      newRemoteTracks.end(),
-      oldRemoteTracks.begin(),
-      oldRemoteTracks.end(),
-      std::inserter(mRemoteTracksAdded, mRemoteTracksAdded.begin()),
-      TrackIdCompare);
 
   return NS_OK;
 }
@@ -1570,26 +1564,24 @@ JsepSessionImpl::RollbackRemoteOffer()
     }
 
     // New transceiver!
-    if (!transceiver->HasAddTrackMagic() &&
-        transceiver->WasCreatedBySetRemote()) {
-      transceiver->Stop();
-      transceiver->Disassociate();
-      transceiver->ClearLevel();
-      transceiver->SetRemoved();
-      mTransceivers.erase(mTransceivers.begin() + i);
-      --i;
-      continue;
-    }
+    bool shouldRemove = !transceiver->HasAddTrackMagic() &&
+                        transceiver->WasCreatedBySetRemote();
 
-    // Transceiver has been "touched" by addTrack; let it live, but unhook it
-    // from everything.
+    // We rollback even for transceivers we will remove, just to ensure we end
+    // up at the starting state.
     RefPtr<JsepTransceiver> temp(
         new JsepTransceiver(transceiver->GetMediaType()));
     transceiver->Rollback(*temp);
+
+    if (shouldRemove) {
+      transceiver->Stop();
+      transceiver->SetRemoved();
+      mTransceivers.erase(mTransceivers.begin() + i);
+      --i;
+    }
   }
 
   mOldTransceivers.clear();
-  std::swap(mRemoteTracksAdded, mRemoteTracksRemoved);
 }
 
 nsresult

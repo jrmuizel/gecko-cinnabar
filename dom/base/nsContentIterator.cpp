@@ -182,8 +182,8 @@ protected:
   // end to the common ancestor.  If we used the index array, we would pay the
   // price up front for n, and then pay the cost for m on the fly later on.
   // With the simple cache, we only "pay as we go".  Either way, we call
-  // IndexOf() once for each change of level in the hierarchy.  Since a trivial
-  // index is much simpler, we use it for the subtree iterator.
+  // ComputeIndexOf() once for each change of level in the hierarchy.  Since
+  // a trivial index is much simpler, we use it for the subtree iterator.
 
   bool mIsDone;
   bool mPre;
@@ -563,7 +563,7 @@ nsContentIterator::RebuildIndexStack()
       return NS_ERROR_FAILURE;
     }
 
-    mIndexes.InsertElementAt(0, parent->IndexOf(current));
+    mIndexes.InsertElementAt(0, parent->ComputeIndexOf(current));
 
     current = parent;
   }
@@ -649,7 +649,7 @@ nsContentIterator::GetDeepLastChild(nsIContent* aRoot,
   int32_t numChildren = node->GetChildCount();
 
   while (numChildren) {
-    nsIContent* child = node->GetChildAt(--numChildren);
+    nsIContent* child = node->GetChildAt_Deprecated(--numChildren);
 
     if (aIndexes) {
       // Add this node to the stack of indexes
@@ -689,17 +689,17 @@ nsContentIterator::GetNextSibling(nsINode* aNode,
   NS_WARNING_ASSERTION(indx >= 0, "bad indx");
 
   // reverify that the index of the current node hasn't changed.
-  // not super cheap, but a lot cheaper than IndexOf(), and still O(1).
-  // ignore result this time - the index may now be out of range.
-  nsIContent* sib = parent->GetChildAt(indx);
+  // not super cheap, but a lot cheaper than ComputeIndexOf(), and still
+  // O(1). ignore result this time - the index may now be out of range.
+  nsIContent* sib = parent->GetChildAt_Deprecated(indx);
   if (sib != aNode) {
     // someone changed our index - find the new index the painful way
-    indx = parent->IndexOf(aNode);
+    indx = parent->ComputeIndexOf(aNode);
     NS_WARNING_ASSERTION(indx >= 0, "bad indx");
   }
 
   // indx is now canonically correct
-  if ((sib = parent->GetChildAt(++indx))) {
+  if ((sib = parent->GetChildAt_Deprecated(++indx))) {
     // update index cache
     if (aIndexes && !aIndexes->IsEmpty()) {
       aIndexes->ElementAt(aIndexes->Length()-1) = indx;
@@ -752,15 +752,15 @@ nsContentIterator::GetPrevSibling(nsINode* aNode,
 
   // reverify that the index of the current node hasn't changed
   // ignore result this time - the index may now be out of range.
-  nsIContent* sib = parent->GetChildAt(indx);
+  nsIContent* sib = parent->GetChildAt_Deprecated(indx);
   if (sib != aNode) {
     // someone changed our index - find the new index the painful way
-    indx = parent->IndexOf(aNode);
+    indx = parent->ComputeIndexOf(aNode);
     NS_WARNING_ASSERTION(indx >= 0, "bad indx");
   }
 
   // indx is now canonically correct
-  if (indx > 0 && (sib = parent->GetChildAt(--indx))) {
+  if (indx > 0 && (sib = parent->GetChildAt_Deprecated(--indx))) {
     // update index cache
     if (aIndexes && !aIndexes->IsEmpty()) {
       aIndexes->ElementAt(aIndexes->Length()-1) = indx;
@@ -826,19 +826,19 @@ nsContentIterator::NextNode(nsINode* aNode, nsTArray<int32_t>* aIndexes)
   }
 
   // reverify that the index of the current node hasn't changed.  not super
-  // cheap, but a lot cheaper than IndexOf(), and still O(1).  ignore result
-  // this time - the index may now be out of range.
+  // cheap, but a lot cheaper than ComputeIndexOf(), and still O(1).  ignore
+  // result this time - the index may now be out of range.
   if (indx >= 0) {
-    sibling = parent->GetChildAt(indx);
+    sibling = parent->GetChildAt_Deprecated(indx);
   }
   if (sibling != node) {
     // someone changed our index - find the new index the painful way
-    indx = parent->IndexOf(node);
+    indx = parent->ComputeIndexOf(node);
     NS_WARNING_ASSERTION(indx >= 0, "bad indx");
   }
 
   // indx is now canonically correct
-  sibling = parent->GetChildAt(++indx);
+  sibling = parent->GetChildAt_Deprecated(++indx);
   if (sibling) {
     // update cache
     if (aIndexes && !aIndexes->IsEmpty()) {
@@ -895,21 +895,21 @@ nsContentIterator::PrevNode(nsINode* aNode, nsTArray<int32_t>* aIndexes)
     }
 
     // reverify that the index of the current node hasn't changed.  not super
-    // cheap, but a lot cheaper than IndexOf(), and still O(1).  ignore result
-    // this time - the index may now be out of range.
+    // cheap, but a lot cheaper than ComputeIndexOf(), and still O(1).
+    // ignore result this time - the index may now be out of range.
     if (indx >= 0) {
-      sibling = parent->GetChildAt(indx);
-      NS_WARNING_ASSERTION(sibling, "GetChildAt returned null");
+      sibling = parent->GetChildAt_Deprecated(indx);
+      NS_WARNING_ASSERTION(sibling, "GetChildAt_Deprecated returned null");
     }
 
     if (sibling != node) {
       // someone changed our index - find the new index the painful way
-      indx = parent->IndexOf(node);
+      indx = parent->ComputeIndexOf(node);
       NS_WARNING_ASSERTION(indx >= 0, "bad indx");
     }
 
     // indx is now canonically correct
-    if (indx && (sibling = parent->GetChildAt(--indx))) {
+    if (indx && (sibling = parent->GetChildAt_Deprecated(--indx))) {
       // update cache
       if (aIndexes && !aIndexes->IsEmpty()) {
         // replace an entry on the index stack
@@ -1098,9 +1098,9 @@ nsContentIterator::PositionAt(nsINode* aCurNode)
 
   // Get a list of the parents up to the root, then compare the new node with
   // entries in that array until we find a match (lowest common ancestor).  If
-  // no match, use IndexOf, take the parent, and repeat.  This avoids using
-  // IndexOf() N times on possibly large arrays.  We still end up doing it a
-  // fair bit.  It's better to use Clone() if possible.
+  // no match, use ComputeIndexOf, take the parent, and repeat.  This avoids
+  // using ComputeIndexOf() N times on possibly large arrays.  We still end
+  // up doing it a fair bit.  It's better to use Clone() if possible.
 
   // we know the depth we're down (though we may not have started at the top).
   oldParentStack.SetCapacity(mIndexes.Length() + 1);
@@ -1140,7 +1140,7 @@ nsContentIterator::PositionAt(nsINode* aCurNode)
       break;
     }
 
-    int32_t indx = parent->IndexOf(newCurNode);
+    int32_t indx = parent->ComputeIndexOf(newCurNode);
     NS_WARNING_ASSERTION(indx >= 0, "bad indx");
 
     // insert at the head!
@@ -1395,7 +1395,7 @@ nsContentSubtreeIterator::InitWithRange()
     // no children, start at the node itself
     node = startContainer;
   } else {
-    nsIContent* child = startContainer->GetChildAt(offset);
+    nsIContent* child = startContainer->GetChildAt_Deprecated(offset);
     if (!child) {
       // offset after last child
       node = startContainer;
@@ -1444,7 +1444,7 @@ nsContentSubtreeIterator::InitWithRange()
   if (!offset || !numChildren) {
     node = endContainer;
   } else {
-    lastCandidate = endContainer->GetChildAt(--offset);
+    lastCandidate = endContainer->GetChildAt_Deprecated(--offset);
     NS_ASSERTION(lastCandidate,
                  "tree traversal trouble in nsContentSubtreeIterator::Init");
   }

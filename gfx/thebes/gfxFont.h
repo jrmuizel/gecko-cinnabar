@@ -185,7 +185,7 @@ struct gfxFontStyle {
 
     PLDHashNumber Hash() const {
         return ((style + (systemFont << 7) +
-            (weight << 8)) + uint32_t(size*1000) + uint32_t(sizeAdjust*1000)) ^
+            (weight << 8)) + uint32_t(size*1000) + int32_t(sizeAdjust*1000)) ^
             nsRefPtrHashKey<nsAtom>::HashKey(language);
     }
 
@@ -1593,6 +1593,10 @@ public:
                                 uint32_t aLength,
                                 Script aRunScript);
 
+    // whether the specified feature will apply to the given character
+    bool FeatureWillHandleChar(Script aRunScript, uint32_t aFeature,
+                               uint32_t aUnicode);
+
     // Subclasses may choose to look up glyph ids for characters.
     // If they do not override this, gfxHarfBuzzShaper will fetch the cmap
     // table and use that.
@@ -1793,6 +1797,12 @@ public:
     virtual bool AllowSubpixelAA() { return true; }
 
     bool IsSyntheticBold() { return mApplySyntheticBold; }
+
+    bool IsSyntheticOblique() {
+        return mFontEntry->IsUpright() &&
+               mStyle.style != NS_FONT_STYLE_NORMAL &&
+               mStyle.allowSyntheticStyle;
+    }
 
     // Amount by which synthetic bold "fattens" the glyphs:
     // For size S up to a threshold size T, we use (0.25 + 3S / 4T),
@@ -2341,6 +2351,7 @@ struct MOZ_STACK_CLASS FontDrawParams {
     mozilla::gfx::Float       synBoldOnePixelOffset;
     int32_t                   extraStrikes;
     mozilla::gfx::DrawOptions drawOptions;
+    gfxFloat                  advanceDirection;
     bool                      isVerticalFont;
     bool                      haveSVGGlyphs;
     bool                      haveColorGlyphs;

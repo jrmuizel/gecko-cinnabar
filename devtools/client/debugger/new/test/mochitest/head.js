@@ -64,6 +64,11 @@ function logThreadEvents(dbg, event) {
   });
 }
 
+async function waitFor(condition) {
+  await BrowserTestUtils.waitForCondition(condition, "waitFor", 10, 500);
+  return condition();
+}
+
 // Wait until an action of `type` is dispatched. This is different
 // then `_afterDispatchDone` because it doesn't wait for async actions
 // to be done/errored. Use this if you want to listen for the "start"
@@ -203,7 +208,7 @@ function waitForSources(dbg, ...sources) {
       }
 
       if (!sourceExists(store.getState())) {
-        return waitForState(dbg, sourceExists);
+        return waitForState(dbg, sourceExists, `source ${url}`);
       }
     })
   );
@@ -225,7 +230,12 @@ function waitForSource(dbg, url) {
   });
 }
 
-async function waitForElement(dbg, selector) {
+async function waitForElement(dbg, name) {
+  await waitUntil(() => findElement(dbg, name));
+  return findElement(dbg, name);
+}
+
+async function waitForElementWithSelector(dbg, selector) {
   await waitUntil(() => findElementWithSelector(dbg, selector));
   return findElementWithSelector(dbg, selector);
 }
@@ -275,13 +285,13 @@ function assertNotPaused(dbg) {
  * @static
  */
 function assertPausedLocation(dbg) {
-  const { selectors: { getSelectedSource, getPause }, getState } = dbg;
+  const { selectors: { getSelectedSource, getTopFrame }, getState } = dbg;
 
   ok(isTopFrameSelected(dbg, getState()), "top frame's source is selected");
 
   // Check the pause location
-  const pause = getPause(getState());
-  const pauseLine = pause && pause.frame && pause.frame.location.line;
+  const frame = getTopFrame(getState());
+  const pauseLine = frame && frame.location.line;
   assertDebugLine(dbg, pauseLine);
 
   ok(isVisibleInEditor(dbg, getCM(dbg).display.gutters), "gutter is visible");
@@ -295,9 +305,7 @@ function assertDebugLine(dbg, line) {
     const url = source.get("url");
     ok(
       false,
-      `Looks like the source ${
-        url
-      } is still loading. Try adding waitForLoadedSource in the test.`
+      `Looks like the source ${url} is still loading. Try adding waitForLoadedSource in the test.`
     );
     return;
   }
@@ -308,8 +316,14 @@ function assertDebugLine(dbg, line) {
   );
 
   const debugLine =
-    findElementWithSelector(dbg, ".new-debug-line") ||
-    findElementWithSelector(dbg, ".new-debug-line-error");
+    findElement(dbg, "debugLine") || findElement(dbg, "debugErrorLine");
+
+  is(
+    findAllElements(dbg, "debugLine").length +
+      findAllElements(dbg, "debugErrorLine").length,
+    1,
+    "There is only one line"
+  );
 
   ok(isVisibleInEditor(dbg, debugLine), "debug line is visible");
 
@@ -333,15 +347,26 @@ function assertDebugLine(dbg, line) {
  * @static
  */
 function assertHighlightLocation(dbg, source, line) {
-  const { selectors: { getSelectedSource, getPause }, getState } = dbg;
+  const { selectors: { getSelectedSource }, getState } = dbg;
   source = findSource(dbg, source);
 
   // Check the selected source
-  is(getSelectedSource(getState()).get("url"), source.url);
+  is(
+    getSelectedSource(getState()).get("url"),
+    source.url,
+    "source url is correct"
+  );
 
   // Check the highlight line
   const lineEl = findElement(dbg, "highlightLine");
   ok(lineEl, "Line is highlighted");
+
+  is(
+    findAllElements(dbg, "highlightLine").length,
+    1,
+    "Only 1 line is highlighted"
+  );
+
   ok(isVisibleInEditor(dbg, lineEl), "Highlighted line is visible");
   ok(
     getCM(dbg)
@@ -359,17 +384,15 @@ function assertHighlightLocation(dbg, source, line) {
  * @static
  */
 function isPaused(dbg) {
-  const { selectors: { getPause }, getState } = dbg;
-  return !!getPause(getState());
+  const { selectors: { isPaused }, getState } = dbg;
+  return !!isPaused(getState());
 }
 
-async function waitForLoadedObjects(dbg) {
-  const { hasLoadingObjects } = dbg.selectors;
-  return waitForState(
-    dbg,
-    state => !hasLoadingObjects(state),
-    "loaded objects"
-  );
+async function waitForLoadedScopes(dbg) {
+  const scopes = await waitForElement(dbg, "scopes");
+  // Since scopes auto-expand, we can assume they are loaded when there is a tree node
+  // with the aria-level attribute equal to "1".
+  await waitUntil(() => scopes.querySelector(`.tree-node[aria-level="1"]`));
 }
 /**
  * Waits for the debugger to be fully paused.
@@ -379,18 +402,20 @@ async function waitForLoadedObjects(dbg) {
  * @static
  */
 async function waitForPaused(dbg) {
-  const { getSelectedScope, hasLoadingObjects } = dbg.selectors;
+  const { getSelectedScope } = dbg.selectors;
 
-  return waitForState(
+  const onScopesLoaded = waitForLoadedScopes(dbg);
+  const onStateChanged = waitForState(
     dbg,
     state => {
       const paused = isPaused(dbg);
       const scope = !!getSelectedScope(state);
-      const loaded = !hasLoadingObjects(state);
-      return paused && scope && loaded;
+      return paused && scope;
     },
     "paused"
   );
+
+  await Promise.all([onStateChanged, onScopesLoaded]);
 }
 
 /*
@@ -430,16 +455,11 @@ async function waitForMappedScopes(dbg) {
 }
 
 function isTopFrameSelected(dbg, state) {
-  const pause = dbg.selectors.getPause(state);
-
-  // Make sure we have the paused state.
-  if (!pause) {
-    return false;
-  }
+  const frame = dbg.selectors.getTopFrame(state);
 
   // Make sure the source text is completely loaded for the
   // source we are paused in.
-  const sourceId = pause.frame && pause.frame.location.sourceId;
+  const sourceId = frame.location.sourceId;
   const source = dbg.selectors.getSelectedSource(state);
 
   if (!source) {
@@ -481,6 +501,8 @@ function clearDebuggerPreferences() {
   Services.prefs.clearUserPref("devtools.debugger.pending-selected-location");
   Services.prefs.clearUserPref("devtools.debugger.pending-breakpoints");
   Services.prefs.clearUserPref("devtools.debugger.expressions");
+  Services.prefs.clearUserPref("devtools.debugger.call-stack-visible");
+  Services.prefs.clearUserPref("devtools.debugger.scopes-visible");
 }
 
 /**
@@ -491,12 +513,15 @@ function clearDebuggerPreferences() {
  * @return {Promise} dbg
  * @static
  */
-function initDebugger(url) {
-  return Task.spawn(function*() {
-    clearDebuggerPreferences();
-    const toolbox = yield openNewTabAndToolbox(EXAMPLE_URL + url, "jsdebugger");
-    return createDebuggerContext(toolbox);
-  });
+async function initDebugger(url) {
+  clearDebuggerPreferences();
+  const toolbox = await openNewTabAndToolbox(EXAMPLE_URL + url, "jsdebugger");
+  return createDebuggerContext(toolbox);
+}
+
+async function initPane(url, pane) {
+  clearDebuggerPreferences();
+  return openNewTabAndToolbox(EXAMPLE_URL + url, pane);
 }
 
 window.resumeTest = undefined;
@@ -576,13 +601,11 @@ function waitForLoadedSources(dbg) {
  * @static
  */
 function selectSource(dbg, url, line) {
-  info(`Selecting source: ${url}`);
   const source = findSource(dbg, url);
-  return dbg.actions.selectSource(source.id, { location: { line } });
+  return dbg.actions.selectLocation({ sourceId: source.id, line });
 }
 
 function closeTab(dbg, url) {
-  info(`Closing tab: ${url}`);
   const source = findSource(dbg, url);
   return dbg.actions.closeTab(source.url);
 }
@@ -596,7 +619,6 @@ function closeTab(dbg, url) {
  * @static
  */
 async function stepOver(dbg) {
-  info("Stepping over");
   await dbg.actions.stepOver();
   return waitForPaused(dbg);
 }
@@ -739,7 +761,6 @@ async function togglePauseOnExceptions(
 
   if (!isPaused(dbg)) {
     await waitForThreadEvents(dbg, "resumed");
-    await waitForLoadedObjects(dbg);
   }
 
   return command;
@@ -898,14 +919,13 @@ const selectors = {
   expressionNode: i =>
     `.expressions-list .expression-container:nth-child(${i}) .object-label`,
   expressionValue: i =>
-    `.expressions-list .expression-container:nth-child(${
-      i
-    }) .object-delimiter + *`,
+    `.expressions-list .expression-container:nth-child(${i}) .object-delimiter + *`,
   expressionClose: i =>
     `.expressions-list .expression-container:nth-child(${i}) .close`,
   expressionNodes: ".expressions-list .tree-node",
   scopesHeader: ".scopes-pane ._header",
   breakpointItem: i => `.breakpoints-list .breakpoint:nth-child(${i})`,
+  scopes: ".scopes-list",
   scopeNode: i => `.scopes-list .tree-node:nth-child(${i}) .object-label`,
   scopeValue: i =>
     `.scopes-list .tree-node:nth-child(${i}) .object-delimiter + *`,
@@ -916,6 +936,8 @@ const selectors = {
   pauseOnExceptions: ".pause-exceptions",
   breakpoint: ".CodeMirror-code > .new-breakpoint",
   highlightLine: ".CodeMirror-code > .highlight-line",
+  debugLine: ".new-debug-line",
+  debugErrorLine: ".new-debug-line-error",
   codeMirror: ".CodeMirror",
   resume: ".resume.active",
   sourceTabs: ".source-tabs",
@@ -933,7 +955,9 @@ const selectors = {
   resultItems: ".result-list .result-item",
   fileMatch: ".managed-tree .result",
   popup: ".popover",
-  tooltip: ".tooltip"
+  tooltip: ".tooltip",
+  outlineItem: i => `.outline-list__element:nth-child(${i})`,
+  outlineItems: ".outline-list__element"
 };
 
 function getSelector(elementName, ...args) {
@@ -975,7 +999,7 @@ function findAllElements(dbg, elementName, ...args) {
  */
 async function clickElement(dbg, elementName, ...args) {
   const selector = getSelector(elementName, ...args);
-  const el = await waitForElement(dbg, selector);
+  const el = await waitForElementWithSelector(dbg, selector);
 
   el.scrollIntoView();
 
@@ -1035,6 +1059,23 @@ function toggleCallStack(dbg) {
 
 function toggleScopes(dbg) {
   return findElement(dbg, "scopesHeader").click();
+}
+
+function toggleExpressionNode(dbg, index) {
+  return toggleObjectInspectorNode(findElement(dbg, "expressionNode", index));
+}
+
+function toggleScopeNode(dbg, index) {
+  return toggleObjectInspectorNode(findElement(dbg, "scopeNode", index));
+}
+
+function toggleObjectInspectorNode(node) {
+  const objectInspector = node.closest(".object-inspector");
+  const properties = objectInspector.querySelectorAll(".node").length;
+  node.click();
+  return waitUntil(
+    () => objectInspector.querySelectorAll(".node").length !== properties
+  );
 }
 
 function getCM(dbg) {

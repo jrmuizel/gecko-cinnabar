@@ -1038,10 +1038,18 @@ MConstant::assertInitializedPayload() const
     switch (type()) {
       case MIRType::Int32:
       case MIRType::Float32:
+#if MOZ_LITTLE_ENDIAN
         MOZ_ASSERT((payload_.asBits >> 32) == 0);
+#else
+        MOZ_ASSERT((payload_.asBits << 32) == 0);
+#endif
         break;
       case MIRType::Boolean:
+#if MOZ_LITTLE_ENDIAN
         MOZ_ASSERT((payload_.asBits >> 1) == 0);
+#else
+        MOZ_ASSERT((payload_.asBits & ~(1ULL << 56)) == 0);
+#endif
         break;
       case MIRType::Double:
       case MIRType::Int64:
@@ -1049,7 +1057,11 @@ MConstant::assertInitializedPayload() const
       case MIRType::String:
       case MIRType::Object:
       case MIRType::Symbol:
+#if MOZ_LITTLE_ENDIAN
         MOZ_ASSERT_IF(JS_BITS_PER_WORD == 32, (payload_.asBits >> 32) == 0);
+#else
+        MOZ_ASSERT_IF(JS_BITS_PER_WORD == 32, (payload_.asBits << 32) == 0);
+#endif
         break;
       default:
         MOZ_ASSERT(IsNullOrUndefined(type()) || IsMagicType(type()));
@@ -2036,14 +2048,14 @@ WrappedFunction::WrappedFunction(JSFunction* fun)
 
 MCall*
 MCall::New(TempAllocator& alloc, JSFunction* target, size_t maxArgc, size_t numActualArgs,
-           bool construct, bool ignoresReturnValue, bool isDOMCall)
+           bool construct, bool ignoresReturnValue, bool isDOMCall, DOMObjectKind objectKind)
 {
     WrappedFunction* wrappedTarget = target ? new(alloc) WrappedFunction(target) : nullptr;
     MOZ_ASSERT(maxArgc >= numActualArgs);
     MCall* ins;
     if (isDOMCall) {
         MOZ_ASSERT(!construct);
-        ins = new(alloc) MCallDOMNative(wrappedTarget, numActualArgs);
+        ins = new(alloc) MCallDOMNative(wrappedTarget, numActualArgs, objectKind);
     } else {
         ins = new(alloc) MCall(wrappedTarget, numActualArgs, construct, ignoresReturnValue);
     }
@@ -2159,12 +2171,10 @@ MCallDOMNative::congruentTo(const MDefinition* ins) const
 const JSJitInfo*
 MCallDOMNative::getJitInfo() const
 {
-    MOZ_ASSERT(getSingleTarget() && getSingleTarget()->isNative());
-
-    const JSJitInfo* jitInfo = getSingleTarget()->jitInfo();
-    MOZ_ASSERT(jitInfo);
-
-    return jitInfo;
+    MOZ_ASSERT(getSingleTarget() &&
+               getSingleTarget()->isNative() &&
+               getSingleTarget()->hasJitInfo());
+    return getSingleTarget()->jitInfo();
 }
 
 MDefinition*
@@ -4302,7 +4312,7 @@ MResumePoint::isRecoverableOperand(MUse* u) const
 }
 
 MDefinition*
-MToInt32::foldsTo(TempAllocator& alloc)
+MToNumberInt32::foldsTo(TempAllocator& alloc)
 {
     MDefinition* input = getOperand(0);
 
@@ -4346,7 +4356,7 @@ MToInt32::foldsTo(TempAllocator& alloc)
 }
 
 void
-MToInt32::analyzeEdgeCasesBackward()
+MToNumberInt32::analyzeEdgeCasesBackward()
 {
     if (!NeedNegativeZeroCheck(this))
         setCanBeNegativeZero(false);
@@ -5495,11 +5505,11 @@ DefinitelyDifferentValue(MDefinition* ins1, MDefinition* ins2)
     if (ins1 == ins2)
         return false;
 
-    // Drop the MToInt32 added by the TypePolicy for double and float values.
-    if (ins1->isToInt32())
-        return DefinitelyDifferentValue(ins1->toToInt32()->input(), ins2);
-    if (ins2->isToInt32())
-        return DefinitelyDifferentValue(ins2->toToInt32()->input(), ins1);
+    // Drop the MToNumberInt32 added by the TypePolicy for double and float values.
+    if (ins1->isToNumberInt32())
+        return DefinitelyDifferentValue(ins1->toToNumberInt32()->input(), ins2);
+    if (ins2->isToNumberInt32())
+        return DefinitelyDifferentValue(ins2->toToNumberInt32()->input(), ins1);
 
     // Ignore the bounds check, which in most cases will contain the same info.
     if (ins1->isBoundsCheck())

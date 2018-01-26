@@ -44,11 +44,15 @@
 #define DATABASE_FILENAME NS_LITERAL_STRING("places.sqlite")
 // Filename used to backup corrupt databases.
 #define DATABASE_CORRUPT_FILENAME NS_LITERAL_STRING("places.sqlite.corrupt")
+#define DATABASE_RECOVER_FILENAME NS_LITERAL_STRING("places.sqlite.recover")
 // Filename of the icons database.
 #define DATABASE_FAVICONS_FILENAME NS_LITERAL_STRING("favicons.sqlite")
 
 // Set when the database file was found corrupt by a previous maintenance.
 #define PREF_FORCE_DATABASE_REPLACEMENT "places.database.replaceOnStartup"
+
+// Whether on corruption we should try to fix the database by cloning it.
+#define PREF_DATABASE_CLONEONCORRUPTION "places.database.cloneOnCorruption"
 
 // Set to specify the size of the places database growth increments in kibibytes
 #define PREF_GROWTH_INCREMENT_KIB "places.database.growthIncrementKiB"
@@ -371,6 +375,7 @@ Database::Database()
   , mDatabaseStatus(nsINavHistoryService::DATABASE_STATUS_OK)
   , mClosed(false)
   , mShouldConvertIconPayloads(false)
+  , mShouldVacuumIcons(false)
   , mClientsShutdown(new ClientsShutdownBlocker())
   , mConnectionShutdown(new ConnectionShutdownBlocker(this))
   , mMaxUrlLength(0)
@@ -575,7 +580,7 @@ Database::EnsureConnection()
     else if (rv == NS_ERROR_FILE_CORRUPTED) {
       // The database is corrupt, backup and replace it with a new one.
       mDatabaseStatus = nsINavHistoryService::DATABASE_STATUS_CORRUPT;
-      rv = BackupAndReplaceDatabaseFile(storage);
+      rv = BackupAndReplaceDatabaseFile(storage, true);
       // Fallback to catch-all handler.
     }
     NS_ENSURE_SUCCESS(rv, rv);
@@ -588,10 +593,14 @@ Database::EnsureConnection()
     // is corrupt or incoherent, thus the database should be replaced.
     bool databaseMigrated = false;
     rv = SetupDatabaseConnection(storage);
+    bool shouldTryToCloneDb = true;
     if (NS_SUCCEEDED(rv)) {
       // Failing to initialize the schema may indicate a corruption.
       rv = InitSchema(&databaseMigrated);
       if (NS_FAILED(rv)) {
+        // Cloning the db on a schema migration may not be a good idea, since we
+        // may end up cloning the schema problems.
+        shouldTryToCloneDb = false;
         if (rv == NS_ERROR_STORAGE_BUSY ||
             rv == NS_ERROR_FILE_IS_LOCKED ||
             rv == NS_ERROR_FILE_NO_DEVICE_SPACE ||
@@ -617,7 +626,7 @@ Database::EnsureConnection()
       // Some errors may not indicate a database corruption, for those cases we
       // just bail out without throwing away a possibly valid places.sqlite.
       if (rv == NS_ERROR_FILE_CORRUPTED) {
-        rv = BackupAndReplaceDatabaseFile(storage);
+        rv = BackupAndReplaceDatabaseFile(storage, shouldTryToCloneDb);
         NS_ENSURE_SUCCESS(rv, rv);
         // Try to initialize the new database again.
         rv = SetupDatabaseConnection(storage);
@@ -694,18 +703,18 @@ Database::EnsureFaviconsDatabaseFile(nsCOMPtr<mozIStorageService>& aStorage)
       MOZ_ALWAYS_TRUE(NS_SUCCEEDED(conn->Close()));
     });
 
-    int32_t defaultPageSize;
-    rv = conn->GetDefaultPageSize(&defaultPageSize);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = SetupDurability(conn, defaultPageSize);
-    NS_ENSURE_SUCCESS(rv, rv);
-
     // Enable incremental vacuum for this database. Since it will contain even
     // large blobs and can be cleared with history, it's worth to have it.
     // Note that it will be necessary to manually use PRAGMA incremental_vacuum.
     rv = conn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
       "PRAGMA auto_vacuum = INCREMENTAL"
     ));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    int32_t defaultPageSize;
+    rv = conn->GetDefaultPageSize(&defaultPageSize);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = SetupDurability(conn, defaultPageSize);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // We are going to update the database, so everything from now on should be
@@ -769,7 +778,8 @@ Database::InitDatabaseFile(nsCOMPtr<mozIStorageService>& aStorage,
 }
 
 nsresult
-Database::BackupAndReplaceDatabaseFile(nsCOMPtr<mozIStorageService>& aStorage)
+Database::BackupAndReplaceDatabaseFile(nsCOMPtr<mozIStorageService>& aStorage,
+                                       bool aTryToClone)
 {
   MOZ_ASSERT(NS_IsMainThread());
   nsCOMPtr<nsIFile> profDir;
@@ -802,7 +812,9 @@ Database::BackupAndReplaceDatabaseFile(nsCOMPtr<mozIStorageService>& aStorage)
       stage_closing = 0,
       stage_removing,
       stage_reopening,
-      stage_replaced
+      stage_replaced,
+      stage_cloning,
+      stage_cloned
     };
     eCorruptDBReplaceStage stage = stage_closing;
     auto guard = MakeScopeExit([&]() {
@@ -832,16 +844,140 @@ Database::BackupAndReplaceDatabaseFile(nsCOMPtr<mozIStorageService>& aStorage)
       return rv;
     }
 
-    // Create a new database file.
+    // Create a new database file and try to clone tables from the corrupt one.
+    bool cloned = false;
+    if (aTryToClone && Preferences::GetBool(PREF_DATABASE_CLONEONCORRUPTION, true)) {
+      stage = stage_cloning;
+      rv = TryToCloneTablesFromCorruptDatabase(aStorage);
+      if (NS_SUCCEEDED(rv)) {
+        mDatabaseStatus = nsINavHistoryService::DATABASE_STATUS_OK;
+        cloned = true;
+      }
+    }
+
     // Use an unshared connection, it will consume more memory but avoid shared
     // cache contentions across threads.
     stage = stage_reopening;
     rv = aStorage->OpenUnsharedDatabase(databaseFile, getter_AddRefs(mMainConn));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    stage = stage_replaced;
+    stage = cloned ? stage_cloned : stage_replaced;
   }
 
+  return NS_OK;
+}
+
+nsresult
+Database::TryToCloneTablesFromCorruptDatabase(nsCOMPtr<mozIStorageService>& aStorage)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  nsCOMPtr<nsIFile> profDir;
+  nsresult rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
+                                       getter_AddRefs(profDir));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIFile> corruptFile;
+  rv = profDir->Clone(getter_AddRefs(corruptFile));
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = corruptFile->Append(DATABASE_CORRUPT_FILENAME);
+  NS_ENSURE_SUCCESS(rv, rv);
+  nsAutoString path;
+  rv = corruptFile->GetPath(path);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIFile> recoverFile;
+  rv = profDir->Clone(getter_AddRefs(recoverFile));
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = recoverFile->Append(DATABASE_RECOVER_FILENAME);
+  NS_ENSURE_SUCCESS(rv, rv);
+  // Ensure there's no previous recover file.
+  rv = recoverFile->Remove(false);
+  if (NS_FAILED(rv) && rv != NS_ERROR_FILE_TARGET_DOES_NOT_EXIST &&
+                       rv != NS_ERROR_FILE_NOT_FOUND) {
+    return rv;
+  }
+
+  nsCOMPtr<mozIStorageConnection> conn;
+  auto guard = MakeScopeExit([&]() {
+    if (conn) {
+      Unused << conn->Close();
+    }
+    Unused << recoverFile->Remove(false);
+  });
+
+  rv = aStorage->OpenUnsharedDatabase(recoverFile, getter_AddRefs(conn));
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = AttachDatabase(conn, NS_ConvertUTF16toUTF8(path),
+                      NS_LITERAL_CSTRING("corrupt"));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  mozStorageTransaction transaction(conn, false);
+
+  // Copy the schema version.
+  nsCOMPtr<mozIStorageStatement> stmt;
+  (void)conn->CreateStatement(NS_LITERAL_CSTRING("PRAGMA corrupt.user_version"),
+                              getter_AddRefs(stmt));
+  NS_ENSURE_TRUE(stmt, NS_ERROR_OUT_OF_MEMORY);
+  bool hasResult;
+  rv = stmt->ExecuteStep(&hasResult);
+  NS_ENSURE_SUCCESS(rv, rv);
+  int32_t schemaVersion = stmt->AsInt32(0);
+  rv = conn->SetSchemaVersion(schemaVersion);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Recreate the tables.
+  rv = conn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT name, sql FROM corrupt.sqlite_master "
+    "WHERE type = 'table' AND name BETWEEN 'moz_' AND 'moza'"
+  ), getter_AddRefs(stmt));
+  NS_ENSURE_SUCCESS(rv, rv);
+  while (NS_SUCCEEDED(stmt->ExecuteStep(&hasResult)) && hasResult) {
+    nsAutoCString name;
+    rv = stmt->GetUTF8String(0, name);
+    NS_ENSURE_SUCCESS(rv, rv);
+    nsAutoCString query;
+    rv = stmt->GetUTF8String(1, query);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = conn->ExecuteSimpleSQL(query);
+    NS_ENSURE_SUCCESS(rv, rv);
+    // Copy the table contents.
+    rv = conn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("INSERT INTO main.") +
+     name + NS_LITERAL_CSTRING(" SELECT * FROM corrupt.") + name);
+    if (NS_FAILED(rv)) {
+      rv = conn->ExecuteSimpleSQL(NS_LITERAL_CSTRING("INSERT INTO main.") +
+            name + NS_LITERAL_CSTRING(" SELECT * FROM corrupt.") + name +
+            NS_LITERAL_CSTRING(" ORDER BY rowid DESC"));
+    }
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  // Recreate the indices.  Doing this after data addition is faster.
+  rv = conn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT sql FROM corrupt.sqlite_master "
+    "WHERE type <> 'table' AND name BETWEEN 'moz_' AND 'moza'"
+  ), getter_AddRefs(stmt));
+  NS_ENSURE_SUCCESS(rv, rv);
+  hasResult = false;
+  while (NS_SUCCEEDED(stmt->ExecuteStep(&hasResult)) && hasResult) {
+    nsAutoCString query;
+    rv = stmt->GetUTF8String(0, query);
+    NS_ENSURE_SUCCESS(rv, rv);
+    rv = conn->ExecuteSimpleSQL(query);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  rv = stmt->Finalize();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  rv = transaction.Commit();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  Unused << conn->Close();
+  conn = nullptr;
+  rv = recoverFile->RenameTo(profDir, DATABASE_FILENAME);
+  NS_ENSURE_SUCCESS(rv, rv);
+  Unused << corruptFile->Remove(false);
+
+  guard.release();
   return NS_OK;
 }
 
@@ -955,6 +1091,21 @@ Database::InitSchema(bool* aDatabaseMigrated)
     return NS_OK;
   }
 
+  auto guard = MakeScopeExit([&]() {
+    // This runs at the end of the migration, out of the transaction,
+    // regardless of its success.
+    if (mShouldVacuumIcons) {
+      mShouldVacuumIcons = false;
+      MOZ_ALWAYS_SUCCEEDS(mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+        "VACUUM favicons"
+      )));
+    }
+    if (mShouldConvertIconPayloads) {
+      mShouldConvertIconPayloads = false;
+      nsFaviconService::ConvertUnsupportedPayloads(mMainConn);
+    }
+  });
+
   // We are going to update the database, so everything from now on should be in
   // a transaction for performances.
   mozStorageTransaction transaction(mMainConn, false);
@@ -982,14 +1133,6 @@ Database::InitSchema(bool* aDatabaseMigrated)
         // will first have to go through it.
         return NS_ERROR_FILE_CORRUPTED;
       }
-
-      auto guard = MakeScopeExit([&]() {
-        // This runs at the end of the migration, regardless of its success.
-        if (mShouldConvertIconPayloads) {
-          mShouldConvertIconPayloads = false;
-          nsFaviconService::ConvertUnsupportedPayloads(mMainConn);
-        }
-      });
 
       // Firefox 45 ESR uses schema version 30.
 
@@ -1065,6 +1208,13 @@ Database::InitSchema(bool* aDatabaseMigrated)
       }
 
       // Firefox 58 uses schema version 41.
+
+      if (currentSchemaVersion < 42) {
+        rv = MigrateV42Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Firefox 60 uses schema version 42.
 
       // Schema Upgrades must add migration code here.
       // >>> IMPORTANT! <<<
@@ -1815,6 +1965,33 @@ Database::MigrateV41Up() {
   rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
     "DROP TABLE IF EXISTS moz_favicons"));
   NS_ENSURE_SUCCESS(rv, rv);
+  return NS_OK;
+}
+
+nsresult
+Database::MigrateV42Up() {
+  MOZ_ASSERT(NS_IsMainThread());
+  // auto_vacuum of the favicons database was broken, we may have to set it again.
+  int32_t vacuum = 0;
+  {
+    nsCOMPtr<mozIStorageStatement> stmt;
+    nsresult rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+      "PRAGMA favicons.auto_vacuum"
+    ), getter_AddRefs(stmt));
+    NS_ENSURE_SUCCESS(rv, rv);
+    mozStorageStatementScoper scoper(stmt);
+    bool hasResult = false;
+    if (NS_SUCCEEDED(stmt->ExecuteStep(&hasResult)) && hasResult) {
+      vacuum = stmt->AsInt32(0);
+    }
+  }
+  if (vacuum != 2) {
+    nsresult rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+      "PRAGMA favicons.auto_vacuum = INCREMENTAL"));
+    NS_ENSURE_SUCCESS(rv, rv);
+    // For the change to be effective, we must vacuum the database.
+    mShouldVacuumIcons = true;
+  }
   return NS_OK;
 }
 

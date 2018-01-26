@@ -25,57 +25,57 @@
 //            a JavaScript Engine peer!
 var ecmaGlobals =
   [
-    "Array",
-    "ArrayBuffer",
-    "Atomics",
-    "Boolean",
-    {name: "ByteLengthQueuingStrategy", disabled: !SpecialPowers.Cu.getJSTestingFunctions().streamsAreEnabled()},
-    {name: "CountQueuingStrategy", disabled: !SpecialPowers.Cu.getJSTestingFunctions().streamsAreEnabled()},
-    "DataView",
-    "Date",
-    "Error",
-    "EvalError",
-    "Float32Array",
-    "Float64Array",
-    "Function",
+    {name: "Array", insecureContext: true},
+    {name: "ArrayBuffer", insecureContext: true},
+    {name: "Atomics", insecureContext: true, disabled: true},
+    {name: "Boolean", insecureContext: true},
+    {name: "ByteLengthQueuingStrategy", insecureContext: true, disabled: !SpecialPowers.Cu.getJSTestingFunctions().streamsAreEnabled()},
+    {name: "CountQueuingStrategy", insecureContext: true, disabled: !SpecialPowers.Cu.getJSTestingFunctions().streamsAreEnabled()},
+    {name: "DataView", insecureContext: true},
+    {name: "Date", insecureContext: true},
+    {name: "Error", insecureContext: true},
+    {name: "EvalError", insecureContext: true},
+    {name: "Float32Array", insecureContext: true},
+    {name: "Float64Array", insecureContext: true},
+    {name: "Function", insecureContext: true},
     // NB: We haven't bothered to resolve constants like Infinity and NaN on
     // Xrayed windows (which are seen from the XBL scope). We could support
     // this if needed with some refactoring.
-    {name: "Infinity", xbl: false},
-    "Int16Array",
-    "Int32Array",
-    "Int8Array",
-    "InternalError",
-    "Intl",
-    "JSON",
-    "Map",
-    "Math",
-    {name: "NaN", xbl: false},
-    "Number",
-    "Object",
-    "Promise",
-    "Proxy",
-    "RangeError",
-    {name: "ReadableStream", disabled: !SpecialPowers.Cu.getJSTestingFunctions().streamsAreEnabled()},
-    "ReferenceError",
-    "Reflect",
-    "RegExp",
-    "Set",
-    "SharedArrayBuffer",
-    {name: "SIMD", nightly: true},
-    "String",
-    "Symbol",
-    "SyntaxError",
-    {name: "TypedObject", nightly: true},
-    "TypeError",
-    "Uint16Array",
-    "Uint32Array",
-    "Uint8Array",
-    "Uint8ClampedArray",
-    "URIError",
-    "WeakMap",
-    "WeakSet",
-    {name: "WebAssembly", disabled: !SpecialPowers.Cu.getJSTestingFunctions().wasmIsSupported()}
+    {name: "Infinity", insecureContext: true, xbl: false},
+    {name: "Int16Array", insecureContext: true},
+    {name: "Int32Array", insecureContext: true},
+    {name: "Int8Array", insecureContext: true},
+    {name: "InternalError", insecureContext: true},
+    {name: "Intl", insecureContext: true},
+    {name: "JSON", insecureContext: true},
+    {name: "Map", insecureContext: true},
+    {name: "Math", insecureContext: true},
+    {name: "NaN", insecureContext: true, xbl: false},
+    {name: "Number", insecureContext: true},
+    {name: "Object", insecureContext: true},
+    {name: "Promise", insecureContext: true},
+    {name: "Proxy", insecureContext: true},
+    {name: "RangeError", insecureContext: true},
+    {name: "ReadableStream", insecureContext: true, disabled: !SpecialPowers.Cu.getJSTestingFunctions().streamsAreEnabled()},
+    {name: "ReferenceError", insecureContext: true},
+    {name: "Reflect", insecureContext: true},
+    {name: "RegExp", insecureContext: true},
+    {name: "Set", insecureContext: true},
+    {name: "SharedArrayBuffer", insecureContext: true, disabled: true},
+    {name: "SIMD", insecureContext: true, nightly: true},
+    {name: "String", insecureContext: true},
+    {name: "Symbol", insecureContext: true},
+    {name: "SyntaxError", insecureContext: true},
+    {name: "TypedObject", insecureContext: true, nightly: true},
+    {name: "TypeError", insecureContext: true},
+    {name: "Uint16Array", insecureContext: true},
+    {name: "Uint32Array", insecureContext: true},
+    {name: "Uint8Array", insecureContext: true},
+    {name: "Uint8ClampedArray", insecureContext: true},
+    {name: "URIError", insecureContext: true},
+    {name: "WeakMap", insecureContext: true},
+    {name: "WeakSet", insecureContext: true},
+    {name: "WebAssembly", insecureContext: true, disabled: !SpecialPowers.Cu.getJSTestingFunctions().wasmIsSupported()}
   ];
 // IMPORTANT: Do not change the list above without review from
 //            a JavaScript Engine peer!
@@ -101,1191 +101,1191 @@ var legacyMozPrefixedInterfaces =
 var interfaceNamesInGlobalScope =
   [
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AbortController",
+    {name: "AbortController", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AbortSignal",
+    {name: "AbortSignal", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AnalyserNode",
+    {name: "AnalyserNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "Animation"},
+    {name: "Animation", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AnimationEffectReadOnly", release: false},
+    {name: "AnimationEffectReadOnly", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AnimationEffectTiming", release: false},
+    {name: "AnimationEffectTiming", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AnimationEffectTimingReadOnly", release: false},
+    {name: "AnimationEffectTimingReadOnly", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AnimationEvent",
+    {name: "AnimationEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AnimationPlaybackEvent", release: false},
+    {name: "AnimationPlaybackEvent", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "AnimationTimeline", release: false},
+    {name: "AnimationTimeline", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Attr",
+    {name: "Attr", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Audio",
+    {name: "Audio", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioBuffer",
+    {name: "AudioBuffer", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioContext",
+    {name: "AudioContext", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioBufferSourceNode",
+    {name: "AudioBufferSourceNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioDestinationNode",
+    {name: "AudioDestinationNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioListener",
+    {name: "AudioListener", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioNode",
+    {name: "AudioNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioParam",
+    {name: "AudioParam", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioProcessingEvent",
+    {name: "AudioProcessingEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioScheduledSourceNode",
+    {name: "AudioScheduledSourceNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "AudioStreamTrack",
+    {name: "AudioStreamTrack", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "BarProp",
+    {name: "AuthenticatorAssertionResponse"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "BaseAudioContext",
+    {name: "AuthenticatorAttestationResponse"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "BatteryManager",
+    {name: "AuthenticatorResponse"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "BeforeUnloadEvent",
+    {name: "BarProp", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "BiquadFilterNode",
+    {name: "BaseAudioContext", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Blob",
+    {name: "BatteryManager", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "BlobEvent",
+    {name: "BeforeUnloadEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "BoxObject", xbl: true},
+    {name: "BiquadFilterNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "BroadcastChannel",
+    {name: "Blob", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Cache",
+    {name: "BlobEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CacheStorage",
+    {name: "BoxObject", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CanvasCaptureMediaStream",
+    {name: "BroadcastChannel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CanvasGradient",
+    {name: "Cache", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CanvasPattern",
+    {name: "CacheStorage", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CanvasRenderingContext2D",
+    {name: "CanvasCaptureMediaStream", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CaretPosition",
+    {name: "CanvasGradient", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CDATASection",
+    {name: "CanvasPattern", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ChannelMergerNode",
+    {name: "CanvasRenderingContext2D", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ChannelSplitterNode",
+    {name: "CaretPosition", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CharacterData",
+    {name: "CDATASection", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ChromeNodeList", xbl: true},
+    {name: "ChannelMergerNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ClipboardEvent",
+    {name: "ChannelSplitterNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CloseEvent",
+    {name: "CharacterData", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "CommandEvent", xbl: true},
+    {name: "ChromeNodeList", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Comment",
+    {name: "ClipboardEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CompositionEvent",
+    {name: "CloseEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ConstantSourceNode",
+    {name: "CommandEvent", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ConvolverNode",
+    {name: "Comment", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Crypto",
+    {name: "CompositionEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CryptoKey",
+    {name: "ConstantSourceNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSS",
+    {name: "ConvolverNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSS2Properties",
+    {name: "Credential"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "CSSAnimation", release: false},
+    {name: "CredentialsContainer"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSConditionRule",
+    {name: "Crypto", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSCounterStyleRule",
+    {name: "CryptoKey", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSFontFaceRule",
+    {name: "CSS", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSFontFeatureValuesRule",
+    {name: "CSS2Properties", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSGroupingRule",
+    {name: "CSSAnimation", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSImportRule",
+    {name: "CSSConditionRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSKeyframeRule",
+    {name: "CSSCounterStyleRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSKeyframesRule",
+    {name: "CSSFontFaceRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSMediaRule",
+    {name: "CSSFontFeatureValuesRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSMozDocumentRule",
+    {name: "CSSGroupingRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSNamespaceRule",
+    {name: "CSSImportRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSPageRule",
+    {name: "CSSKeyframeRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSPrimitiveValue",
+    {name: "CSSKeyframesRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "CSSPseudoElement", release: false},
+    {name: "CSSMediaRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSRule",
+    {name: "CSSMozDocumentRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSRuleList",
+    {name: "CSSNamespaceRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSStyleDeclaration",
+    {name: "CSSPageRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSStyleRule",
+    {name: "CSSPrimitiveValue", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSStyleSheet",
+    {name: "CSSPseudoElement", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSSupportsRule",
+    {name: "CSSRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "CSSTransition", release: false},
+    {name: "CSSRuleList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSValue",
+    {name: "CSSStyleDeclaration", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CSSValueList",
+    {name: "CSSStyleRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CustomElementRegistry",
+    {name: "CSSStyleSheet", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "CustomEvent",
+    {name: "CSSSupportsRule", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DataChannel",
+    {name: "CSSTransition", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DataTransfer",
+    {name: "CSSValue", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DataTransferItem",
+    {name: "CSSValueList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DataTransferItemList",
+    {name: "CustomElementRegistry", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DelayNode",
+    {name: "CustomEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DesktopNotification",
+    {name: "DataChannel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DesktopNotificationCenter",
+    {name: "DataTransfer", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DeviceLightEvent",
+    {name: "DataTransferItem", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DeviceMotionEvent",
+    {name: "DataTransferItemList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DeviceOrientationEvent",
+    {name: "DelayNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DeviceProximityEvent",
+    {name: "DeviceLightEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Directory",
+    {name: "DeviceMotionEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Document",
+    {name: "DeviceOrientationEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DocumentFragment",
+    {name: "DeviceProximityEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "DocumentTimeline", release: false},
+    {name: "Directory", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DocumentType",
+    {name: "Document", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "DOMConstructor", xbl: true},
+    {name: "DocumentFragment", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMCursor",
+    {name: "DocumentTimeline", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMError",
+    {name: "DocumentType", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMException",
+    {name: "DOMConstructor", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMImplementation",
+    {name: "DOMCursor", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMMatrix",
+    {name: "DOMError", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMMatrixReadOnly",
+    {name: "DOMException", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMParser",
+    {name: "DOMImplementation", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMPoint",
+    {name: "DOMMatrix", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMPointReadOnly",
+    {name: "DOMMatrixReadOnly", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMQuad",
+    {name: "DOMParser", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMRect",
+    {name: "DOMPoint", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMRectList",
+    {name: "DOMPointReadOnly", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMRectReadOnly",
+    {name: "DOMQuad", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMRequest",
+    {name: "DOMRect", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMStringList",
+    {name: "DOMRectList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMStringMap",
+    {name: "DOMRectReadOnly", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DOMTokenList",
+    {name: "DOMRequest", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DragEvent",
+    {name: "DOMStringList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "DynamicsCompressorNode",
+    {name: "DOMStringMap", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Element",
+    {name: "DOMTokenList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ErrorEvent",
+    {name: "DragEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Event",
+    {name: "DynamicsCompressorNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "EventSource",
+    {name: "Element", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "EventTarget",
+    {name: "ErrorEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "File",
+    {name: "Event", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FileList",
+    {name: "EventSource", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FileReader",
+    {name: "EventTarget", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FileSystem",
+    {name: "File", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FileSystemDirectoryEntry",
+    {name: "FileList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FileSystemDirectoryReader",
+    {name: "FileReader", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FileSystemEntry",
+    {name: "FileSystem", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FileSystemFileEntry",
+    {name: "FileSystemDirectoryEntry", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FocusEvent",
+    {name: "FileSystemDirectoryReader", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FormData",
+    {name: "FileSystemEntry", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FontFace",
+    {name: "FileSystemFileEntry", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FontFaceSet",
+    {name: "FocusEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "FontFaceSetLoadEvent",
+    {name: "FormData", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "GainNode",
+    {name: "FontFace", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Gamepad",
+    {name: "FontFaceSet", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "GamepadAxisMoveEvent",
+    {name: "FontFaceSetLoadEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "GamepadButtonEvent",
+    {name: "GainNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "GamepadButton",
+    {name: "Gamepad", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "GamepadEvent",
+    {name: "GamepadAxisMoveEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "GamepadHapticActuator",
+    {name: "GamepadButtonEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "GamepadPose",
+    {name: "GamepadButton", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HashChangeEvent",
+    {name: "GamepadEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Headers",
+    {name: "GamepadHapticActuator", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "History",
+    {name: "GamepadPose", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLAllCollection",
+    {name: "HashChangeEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLAnchorElement",
+    {name: "Headers", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLAreaElement",
+    {name: "History", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLAudioElement",
+    {name: "HTMLAllCollection", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLBaseElement",
+    {name: "HTMLAnchorElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLBodyElement",
+    {name: "HTMLAreaElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLBRElement",
+    {name: "HTMLAudioElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLButtonElement",
+    {name: "HTMLBaseElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLCanvasElement",
+    {name: "HTMLBodyElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLCollection",
+    {name: "HTMLBRElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLDataElement",
+    {name: "HTMLButtonElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLDataListElement",
+    {name: "HTMLCanvasElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLDetailsElement",
+    {name: "HTMLCollection", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "HTMLDialogElement", disabled: true},
+    {name: "HTMLDataElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLDirectoryElement",
+    {name: "HTMLDataListElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLDivElement",
+    {name: "HTMLDetailsElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLDListElement",
+    {name: "HTMLDialogElement", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLDocument",
+    {name: "HTMLDirectoryElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLElement",
+    {name: "HTMLDivElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLEmbedElement",
+    {name: "HTMLDListElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLFieldSetElement",
+    {name: "HTMLDocument", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLFontElement",
+    {name: "HTMLElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLFormControlsCollection",
+    {name: "HTMLEmbedElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLFormElement",
+    {name: "HTMLFieldSetElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLFrameElement",
+    {name: "HTMLFontElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLFrameSetElement",
+    {name: "HTMLFormControlsCollection", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLHeadElement",
+    {name: "HTMLFormElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLHeadingElement",
+    {name: "HTMLFrameElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLHRElement",
+    {name: "HTMLFrameSetElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLHtmlElement",
+    {name: "HTMLHeadElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLIFrameElement",
+    {name: "HTMLHeadingElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLImageElement",
+    {name: "HTMLHRElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLInputElement",
+    {name: "HTMLHtmlElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLLabelElement",
+    {name: "HTMLIFrameElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLLegendElement",
+    {name: "HTMLImageElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLLIElement",
+    {name: "HTMLInputElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLLinkElement",
+    {name: "HTMLLabelElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLMapElement",
+    {name: "HTMLLegendElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLMediaElement",
+    {name: "HTMLLIElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLMenuElement",
+    {name: "HTMLLinkElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLMenuItemElement",
+    {name: "HTMLMapElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLMetaElement",
+    {name: "HTMLMediaElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLMeterElement",
+    {name: "HTMLMenuElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLModElement",
+    {name: "HTMLMenuItemElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLObjectElement",
+    {name: "HTMLMetaElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLOListElement",
+    {name: "HTMLMeterElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLOptGroupElement",
+    {name: "HTMLModElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLOptionElement",
+    {name: "HTMLObjectElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLOptionsCollection",
+    {name: "HTMLOListElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLOutputElement",
+    {name: "HTMLOptGroupElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLParagraphElement",
+    {name: "HTMLOptionElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLParamElement",
+    {name: "HTMLOptionsCollection", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLPreElement",
+    {name: "HTMLOutputElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLPictureElement",
+    {name: "HTMLParagraphElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLProgressElement",
+    {name: "HTMLParamElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLQuoteElement",
+    {name: "HTMLPreElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLScriptElement",
+    {name: "HTMLPictureElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLSelectElement",
+    {name: "HTMLProgressElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLSlotElement",
+    {name: "HTMLQuoteElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLSourceElement",
+    {name: "HTMLScriptElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLSpanElement",
+    {name: "HTMLSelectElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLStyleElement",
+    {name: "HTMLSlotElement", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTableCaptionElement",
+    {name: "HTMLSourceElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTableCellElement",
+    {name: "HTMLSpanElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTableColElement",
+    {name: "HTMLStyleElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTableElement",
+    {name: "HTMLTableCaptionElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTableRowElement",
+    {name: "HTMLTableCellElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTableSectionElement",
+    {name: "HTMLTableColElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTemplateElement",
+    {name: "HTMLTableElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTextAreaElement",
+    {name: "HTMLTableRowElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTimeElement",
+    {name: "HTMLTableSectionElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTitleElement",
+    {name: "HTMLTemplateElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLTrackElement",
+    {name: "HTMLTextAreaElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLUListElement",
+    {name: "HTMLTimeElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLUnknownElement",
+    {name: "HTMLTitleElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "HTMLVideoElement",
+    {name: "HTMLTrackElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "IdleDeadline"},
+    {name: "HTMLUListElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBCursor",
+    {name: "HTMLUnknownElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBCursorWithValue",
+    {name: "HTMLVideoElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBDatabase",
+    {name: "IdleDeadline", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBFactory",
+    {name: "IDBCursor", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBFileHandle",
+    {name: "IDBCursorWithValue", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBFileRequest",
+    {name: "IDBDatabase", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBIndex",
+    {name: "IDBFactory", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBKeyRange",
+    {name: "IDBFileHandle", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBMutableFile",
+    {name: "IDBFileRequest", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBObjectStore",
+    {name: "IDBIndex", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBOpenDBRequest",
+    {name: "IDBKeyRange", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBRequest",
+    {name: "IDBMutableFile", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBTransaction",
+    {name: "IDBObjectStore", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IDBVersionChangeEvent",
+    {name: "IDBOpenDBRequest", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IIRFilterNode",
+    {name: "IDBRequest", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Image",
+    {name: "IDBTransaction", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ImageBitmap",
+    {name: "IDBVersionChangeEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ImageBitmapRenderingContext",
+    {name: "IIRFilterNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ImageCapture", disabled: true},
+    {name: "Image", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ImageCaptureErrorEvent", disabled: true},
+    {name: "ImageBitmap", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ImageData",
+    {name: "ImageBitmapRenderingContext", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "InputEvent",
+    {name: "ImageCapture", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "InstallTrigger",
+    {name: "ImageCaptureErrorEvent", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IntersectionObserver",
+    {name: "ImageData", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "IntersectionObserverEntry",
+    {name: "InputEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "KeyEvent",
+    {name: "InstallTrigger", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "KeyboardEvent",
+    {name: "IntersectionObserver", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "KeyframeEffectReadOnly", release: false},
+    {name: "IntersectionObserverEntry", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "KeyframeEffect", release: false},
+    {name: "KeyEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "LocalMediaStream",
+    {name: "KeyboardEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Location",
+    {name: "KeyframeEffectReadOnly", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaDeviceInfo",
+    {name: "KeyframeEffect", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaDevices",
+    {name: "LocalMediaStream", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaElementAudioSourceNode",
+    {name: "Location", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaError",
+    {name: "MediaDeviceInfo", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaKeyError",
+    {name: "MediaDevices", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaEncryptedEvent",
+    {name: "MediaElementAudioSourceNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaKeys",
+    {name: "MediaError", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaKeySession",
+    {name: "MediaKeyError", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaKeySystemAccess",
+    {name: "MediaEncryptedEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaKeyMessageEvent",
+    {name: "MediaKeys", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaKeyStatusMap",
+    {name: "MediaKeySession", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaList",
+    {name: "MediaKeySystemAccess", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaQueryList",
+    {name: "MediaKeyMessageEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaQueryListEvent",
+    {name: "MediaKeyStatusMap", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaRecorder",
+    {name: "MediaList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaRecorderErrorEvent",
+    {name: "MediaQueryList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaSource",
+    {name: "MediaQueryListEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaStream",
+    {name: "MediaRecorder", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaStreamAudioDestinationNode",
+    {name: "MediaRecorderErrorEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaStreamAudioSourceNode",
+    {name: "MediaSource", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaStreamEvent",
+    {name: "MediaStream", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaStreamTrackEvent",
+    {name: "MediaStreamAudioDestinationNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MediaStreamTrack",
+    {name: "MediaStreamAudioSourceNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "MenuBoxObject", xbl: true},
+    {name: "MediaStreamEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MessageChannel",
+    {name: "MediaStreamTrackEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MessageEvent",
+    {name: "MediaStreamTrack", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MessagePort",
+    {name: "MenuBoxObject", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MimeType",
+    {name: "MessageChannel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MimeTypeArray",
+    {name: "MessageEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MouseEvent",
+    {name: "MessagePort", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MouseScrollEvent",
+    {name: "MimeType", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "mozRTCIceCandidate",
+    {name: "MimeTypeArray", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "mozRTCPeerConnection",
+    {name: "MouseEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "mozRTCSessionDescription",
+    {name: "MouseScrollEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MutationEvent",
+    {name: "mozRTCIceCandidate", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MutationObserver",
+    {name: "mozRTCPeerConnection", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "MutationRecord",
+    {name: "mozRTCSessionDescription", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "NamedNodeMap",
+    {name: "MutationEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Navigator",
+    {name: "MutationObserver", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "NetworkInformation", desktop: false},
+    {name: "MutationRecord", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Node",
+    {name: "NamedNodeMap", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "NodeFilter",
+    {name: "Navigator", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "NodeIterator",
+    {name: "NetworkInformation", insecureContext: true, desktop: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "NodeList",
+    {name: "Node", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Notification",
+    {name: "NodeFilter", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "OffscreenCanvas", disabled: true},
+    {name: "NodeIterator", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "OfflineAudioCompletionEvent",
+    {name: "NodeList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "OfflineAudioContext",
+    {name: "Notification", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "OfflineResourceList",
+    {name: "OffscreenCanvas", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Option",
+    {name: "OfflineAudioCompletionEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "OscillatorNode",
+    {name: "OfflineAudioContext", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PageTransitionEvent",
+    {name: "OfflineResourceList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PaintRequest",
+    {name: "Option", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PaintRequestList",
+    {name: "OscillatorNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PannerNode",
+    {name: "PageTransitionEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Path2D",
+    {name: "PaintRequest", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Performance",
+    {name: "PaintRequestList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PerformanceEntry",
+    {name: "PannerNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PerformanceMark",
+    {name: "Path2D", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PerformanceMeasure",
+    {name: "Performance", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PerformanceNavigation",
+    {name: "PerformanceEntry", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PerformanceNavigationTiming",
+    {name: "PerformanceMark", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PerformanceObserver",
+    {name: "PerformanceMeasure", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PerformanceObserverEntryList",
+    {name: "PerformanceNavigation", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PerformanceResourceTiming",
+    {name: "PerformanceNavigationTiming", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PerformanceTiming",
+    {name: "PerformanceObserver", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PeriodicWave",
+    {name: "PerformanceObserverEntryList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Permissions",
+    {name: "PerformanceResourceTiming", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PermissionStatus",
+    {name: "PerformanceTiming", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Plugin",
+    {name: "PeriodicWave", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PluginArray",
+    {name: "Permissions", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PointerEvent", nightly: true, desktop: true, android: false},
+    {name: "PermissionStatus", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PopStateEvent",
+    {name: "Plugin", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PopupBlockedEvent",
+    {name: "PluginArray", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PopupBoxObject", xbl: true},
+    {name: "PointerEvent", insecureContext: true, android: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "Presentation", desktop: false, release: false },
+    {name: "PopStateEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PresentationAvailability", desktop: false, release: false },
+    {name: "PopupBlockedEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PresentationConnection", desktop: false, release: false},
+    {name: "PopupBoxObject", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PresentationConnectionAvailableEvent", desktop: false, release: false },
+    {name: "Presentation", insecureContext: true, desktop: false, release: false },
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PresentationConnectionCloseEvent", desktop: false, release: false },
+    {name: "PresentationAvailability", insecureContext: true, desktop: false, release: false },
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PresentationConnectionList", desktop: false, release: false },
+    {name: "PresentationConnection", insecureContext: true, desktop: false, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PresentationReceiver", desktop: false, release: false },
+    {name: "PresentationConnectionAvailableEvent", insecureContext: true, desktop: false, release: false },
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "PresentationRequest", desktop: false, release: false },
+    {name: "PresentationConnectionCloseEvent", insecureContext: true, desktop: false, release: false },
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ProcessingInstruction",
+    {name: "PresentationConnectionList", insecureContext: true, desktop: false, release: false },
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ProgressEvent",
+    {name: "PresentationReceiver", insecureContext: true, desktop: false, release: false },
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PushManager",
+    {name: "PresentationRequest", insecureContext: true, desktop: false, release: false },
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PushSubscription",
+    {name: "ProcessingInstruction", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "PushSubscriptionOptions",
+    {name: "ProgressEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RadioNodeList",
+    {name: "PublicKeyCredential"},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Range",
+    {name: "PushManager", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Rect",
+    {name: "PushSubscription", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Request",
+    {name: "PushSubscriptionOptions", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Response",
+    {name: "RadioNodeList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RGBColor",
+    {name: "Range", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCCertificate",
+    {name: "Rect", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCDataChannelEvent",
+    {name: "Request", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCDTMFSender",
+    {name: "Response", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCDTMFToneChangeEvent",
+    {name: "RGBColor", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCIceCandidate",
+    {name: "RTCCertificate", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCPeerConnection",
+    {name: "RTCDataChannelEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCPeerConnectionIceEvent",
+    {name: "RTCDTMFSender", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCRtpReceiver",
+    {name: "RTCDTMFToneChangeEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCRtpSender",
+    {name: "RTCIceCandidate", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCRtpTransceiver",
+    {name: "RTCPeerConnection", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCSessionDescription",
+    {name: "RTCPeerConnectionIceEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCStatsReport",
+    {name: "RTCRtpReceiver", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "RTCTrackEvent",
+    {name: "RTCRtpSender", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Screen",
+    {name: "RTCRtpTransceiver", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ScreenOrientation",
+    {name: "RTCSessionDescription", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ScriptProcessorNode",
+    {name: "RTCStatsReport", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ScrollAreaEvent",
+    {name: "RTCTrackEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SecurityPolicyViolationEvent",
+    {name: "Screen", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Selection",
+    {name: "ScreenOrientation", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ServiceWorker",
+    {name: "ScriptProcessorNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ServiceWorkerContainer",
+    {name: "ScrollAreaEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ServiceWorkerRegistration",
+    {name: "SecurityPolicyViolationEvent", insecureContext: true, release: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ScopedCredential", disabled: true},
+    {name: "Selection", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "ScopedCredentialInfo", disabled: true},
+    {name: "ServiceWorker", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ShadowRoot", // Bogus, but the test harness forces it on.  See bug 1159768.
+    {name: "ServiceWorkerContainer", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SharedWorker",
+    {name: "ServiceWorkerRegistration", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SimpleGestureEvent", xbl: true},
+    {name: "ScopedCredential", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SimpleTest", xbl: false},
+    {name: "ScopedCredentialInfo", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SourceBuffer",
+    {name: "ShadowRoot", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SourceBufferList",
+    {name: "SharedWorker", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesisErrorEvent", android: false},
+    {name: "SimpleGestureEvent", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesisEvent", android: false},
+    {name: "SimpleTest", insecureContext: true, xbl: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesis", android: false},
+    {name: "SourceBuffer", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesisUtterance", android: false},
+    {name: "SourceBufferList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpeechSynthesisVoice", android: false},
+    {name: "SpeechSynthesisErrorEvent", insecureContext: true, android: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "SpecialPowers", xbl: false},
+    {name: "SpeechSynthesisEvent", insecureContext: true, android: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "StereoPannerNode",
+    {name: "SpeechSynthesis", insecureContext: true, android: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Storage",
+    {name: "SpeechSynthesisUtterance", insecureContext: true, android: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "StorageEvent",
+    {name: "SpeechSynthesisVoice", insecureContext: true, android: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "StorageManager", isSecureContext: true, android: false},
+    {name: "SpecialPowers", insecureContext: true, xbl: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "StyleSheet",
+    {name: "StereoPannerNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "StyleSheetList",
+    {name: "Storage", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SubtleCrypto",
+    {name: "StorageEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAElement",
+    {name: "StorageManager", android: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAngle",
+    {name: "StyleSheet", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedAngle",
+    {name: "StyleSheetList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedBoolean",
+    {name: "SubtleCrypto", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedEnumeration",
+    {name: "SVGAElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedInteger",
+    {name: "SVGAngle", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedLength",
+    {name: "SVGAnimatedAngle", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedLengthList",
+    {name: "SVGAnimatedBoolean", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedNumber",
+    {name: "SVGAnimatedEnumeration", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedNumberList",
+    {name: "SVGAnimatedInteger", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedPreserveAspectRatio",
+    {name: "SVGAnimatedLength", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedRect",
+    {name: "SVGAnimatedLengthList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedString",
+    {name: "SVGAnimatedNumber", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimatedTransformList",
+    {name: "SVGAnimatedNumberList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimateElement",
+    {name: "SVGAnimatedPreserveAspectRatio", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimateMotionElement",
+    {name: "SVGAnimatedRect", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimateTransformElement",
+    {name: "SVGAnimatedString", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGAnimationElement",
+    {name: "SVGAnimatedTransformList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGCircleElement",
+    {name: "SVGAnimateElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGClipPathElement",
+    {name: "SVGAnimateMotionElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGComponentTransferFunctionElement",
+    {name: "SVGAnimateTransformElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGDefsElement",
+    {name: "SVGAnimationElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGDescElement",
+    {name: "SVGCircleElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGElement",
+    {name: "SVGClipPathElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGEllipseElement",
+    {name: "SVGComponentTransferFunctionElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEBlendElement",
+    {name: "SVGDefsElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEColorMatrixElement",
+    {name: "SVGDescElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEComponentTransferElement",
+    {name: "SVGElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFECompositeElement",
+    {name: "SVGEllipseElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEConvolveMatrixElement",
+    {name: "SVGFEBlendElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEDiffuseLightingElement",
+    {name: "SVGFEColorMatrixElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEDisplacementMapElement",
+    {name: "SVGFEComponentTransferElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEDistantLightElement",
+    {name: "SVGFECompositeElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEDropShadowElement",
+    {name: "SVGFEConvolveMatrixElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEFloodElement",
+    {name: "SVGFEDiffuseLightingElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEFuncAElement",
+    {name: "SVGFEDisplacementMapElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEFuncBElement",
+    {name: "SVGFEDistantLightElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEFuncGElement",
+    {name: "SVGFEDropShadowElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEFuncRElement",
+    {name: "SVGFEFloodElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEGaussianBlurElement",
+    {name: "SVGFEFuncAElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEImageElement",
+    {name: "SVGFEFuncBElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEMergeElement",
+    {name: "SVGFEFuncGElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEMergeNodeElement",
+    {name: "SVGFEFuncRElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEMorphologyElement",
+    {name: "SVGFEGaussianBlurElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEOffsetElement",
+    {name: "SVGFEImageElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFEPointLightElement",
+    {name: "SVGFEMergeElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFESpecularLightingElement",
+    {name: "SVGFEMergeNodeElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFESpotLightElement",
+    {name: "SVGFEMorphologyElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFETileElement",
+    {name: "SVGFEOffsetElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFETurbulenceElement",
+    {name: "SVGFEPointLightElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGFilterElement",
+    {name: "SVGFESpecularLightingElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGForeignObjectElement",
+    {name: "SVGFESpotLightElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGGElement",
+    {name: "SVGFETileElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGGeometryElement",
+    {name: "SVGFETurbulenceElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGGradientElement",
+    {name: "SVGFilterElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGGraphicsElement",
+    {name: "SVGForeignObjectElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGImageElement",
+    {name: "SVGGElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGLength",
+    {name: "SVGGeometryElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGLengthList",
+    {name: "SVGGradientElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGLinearGradientElement",
+    {name: "SVGGraphicsElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGLineElement",
+    {name: "SVGImageElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGMarkerElement",
+    {name: "SVGLength", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGMaskElement",
+    {name: "SVGLengthList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGMatrix",
+    {name: "SVGLinearGradientElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGMetadataElement",
+    {name: "SVGLineElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGMPathElement",
+    {name: "SVGMarkerElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGNumber",
+    {name: "SVGMaskElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGNumberList",
+    {name: "SVGMatrix", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathElement",
+    {name: "SVGMetadataElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSeg",
+    {name: "SVGMPathElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegArcAbs",
+    {name: "SVGNumber", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegArcRel",
+    {name: "SVGNumberList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegClosePath",
+    {name: "SVGPathElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegCurvetoCubicAbs",
+    {name: "SVGPathSeg", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegCurvetoCubicRel",
+    {name: "SVGPathSegArcAbs", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegCurvetoCubicSmoothAbs",
+    {name: "SVGPathSegArcRel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegCurvetoCubicSmoothRel",
+    {name: "SVGPathSegClosePath", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegCurvetoQuadraticAbs",
+    {name: "SVGPathSegCurvetoCubicAbs", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegCurvetoQuadraticRel",
+    {name: "SVGPathSegCurvetoCubicRel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegCurvetoQuadraticSmoothAbs",
+    {name: "SVGPathSegCurvetoCubicSmoothAbs", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegCurvetoQuadraticSmoothRel",
+    {name: "SVGPathSegCurvetoCubicSmoothRel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegLinetoAbs",
+    {name: "SVGPathSegCurvetoQuadraticAbs", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegLinetoHorizontalAbs",
+    {name: "SVGPathSegCurvetoQuadraticRel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegLinetoHorizontalRel",
+    {name: "SVGPathSegCurvetoQuadraticSmoothAbs", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegLinetoRel",
+    {name: "SVGPathSegCurvetoQuadraticSmoothRel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegLinetoVerticalAbs",
+    {name: "SVGPathSegLinetoAbs", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegLinetoVerticalRel",
+    {name: "SVGPathSegLinetoHorizontalAbs", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegList",
+    {name: "SVGPathSegLinetoHorizontalRel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegMovetoAbs",
+    {name: "SVGPathSegLinetoRel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPathSegMovetoRel",
+    {name: "SVGPathSegLinetoVerticalAbs", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPatternElement",
+    {name: "SVGPathSegLinetoVerticalRel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPoint",
+    {name: "SVGPathSegList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPointList",
+    {name: "SVGPathSegMovetoAbs", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPolygonElement",
+    {name: "SVGPathSegMovetoRel", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPolylineElement",
+    {name: "SVGPatternElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGPreserveAspectRatio",
+    {name: "SVGPoint", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGRadialGradientElement",
+    {name: "SVGPointList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGRect",
+    {name: "SVGPolygonElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGRectElement",
+    {name: "SVGPolylineElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGScriptElement",
+    {name: "SVGPreserveAspectRatio", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGSetElement",
+    {name: "SVGRadialGradientElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGStopElement",
+    {name: "SVGRect", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGStringList",
+    {name: "SVGRectElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGStyleElement",
+    {name: "SVGScriptElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGSVGElement",
+    {name: "SVGSetElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGSwitchElement",
+    {name: "SVGStopElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGSymbolElement",
+    {name: "SVGStringList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGTextContentElement",
+    {name: "SVGStyleElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGTextElement",
+    {name: "SVGSVGElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGTextPathElement",
+    {name: "SVGSwitchElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGTextPositioningElement",
+    {name: "SVGSymbolElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGTitleElement",
+    {name: "SVGTextContentElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGTransform",
+    {name: "SVGTextElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGTransformList",
+    {name: "SVGTextPathElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGTSpanElement",
+    {name: "SVGTextPositioningElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGUnitTypes",
+    {name: "SVGTitleElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGUseElement",
+    {name: "SVGTransform", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGViewElement",
+    {name: "SVGTransformList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "SVGZoomAndPan",
+    {name: "SVGTSpanElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Text",
+    {name: "SVGUnitTypes", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TextDecoder",
+    {name: "SVGUseElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TextEncoder",
+    {name: "SVGViewElement", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TextMetrics",
+    {name: "SVGZoomAndPan", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TextTrack",
+    {name: "Text", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TextTrackCue",
+    {name: "TextDecoder", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TextTrackCueList",
+    {name: "TextEncoder", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TextTrackList",
+    {name: "TextMetrics", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TimeEvent",
+    {name: "TextTrack", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TimeRanges",
+    {name: "TextTrackCue", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Touch",
+    {name: "TextTrackCueList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TouchEvent",
+    {name: "TextTrackList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TouchList",
+    {name: "TimeEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TrackEvent",
+    {name: "TimeRanges", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TransitionEvent",
+    {name: "Touch", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "TreeColumn", xbl: true},
+    {name: "TouchEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "TreeColumns", xbl: true},
+    {name: "TouchList", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "TreeContentView", xbl: true},
+    {name: "TrackEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "TreeWalker",
+    {name: "TransitionEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "U2F", disabled: true},
+    {name: "TreeColumn", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "UIEvent",
+    {name: "TreeColumns", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "URL",
+    {name: "TreeContentView", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "URLSearchParams",
+    {name: "TreeWalker", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "UserProximityEvent",
+    {name: "U2F", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "ValidityState",
+    {name: "UIEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "VideoPlaybackQuality",
+    {name: "URL", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "VideoStreamTrack",
+    {name: "URLSearchParams", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRDisplay", releaseNonWindowsAndMac: false},
+    {name: "UserProximityEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRDisplayCapabilities", releaseNonWindowsAndMac: false},
+    {name: "ValidityState", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRDisplayEvent", releaseNonWindowsAndMac: false},
+    {name: "VideoPlaybackQuality", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VREyeParameters", releaseNonWindowsAndMac: false},
+    {name: "VideoStreamTrack", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRFieldOfView", releaseNonWindowsAndMac: false},
+    {name: "VRDisplay", insecureContext: true, releaseNonWindows: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRFrameData", releaseNonWindowsAndMac: false},
+    {name: "VRDisplayCapabilities", insecureContext: true, releaseNonWindows: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRPose", releaseNonWindowsAndMac: false},
+    {name: "VRDisplayEvent", insecureContext: true, releaseNonWindows: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "VRStageParameters", releaseNonWindowsAndMac: false},
+    {name: "VREyeParameters", insecureContext: true, releaseNonWindows: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "VTTCue",
+    {name: "VRFieldOfView", insecureContext: true, releaseNonWindows: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "VTTRegion",
+    {name: "VRFrameData", insecureContext: true, releaseNonWindows: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WaveShaperNode",
+    {name: "VRPose", insecureContext: true, releaseNonWindows: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "WebAuthnAssertion", disabled: true},
+    {name: "VRStageParameters", insecureContext: true, releaseNonWindows: false},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "WebAuthnAttestation", disabled: true},
+    {name: "VTTCue", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "WebAuthentication", disabled: true},
+    {name: "VTTRegion", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLActiveInfo",
+    {name: "WaveShaperNode", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLBuffer",
+    {name: "WebAuthnAssertion", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLContextEvent",
+    {name: "WebAuthnAttestation", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLFramebuffer",
+    {name: "WebAuthentication", insecureContext: true, disabled: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLProgram",
+    {name: "WebGLActiveInfo", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLQuery",
+    {name: "WebGLBuffer", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLRenderbuffer",
+    {name: "WebGLContextEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLRenderingContext",
+    {name: "WebGLFramebuffer", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGL2RenderingContext",
+    {name: "WebGLProgram", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLSampler",
+    {name: "WebGLQuery", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLShader",
+    {name: "WebGLRenderbuffer", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLShaderPrecisionFormat",
+    {name: "WebGLRenderingContext", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLSync",
+    {name: "WebGL2RenderingContext", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLTexture",
+    {name: "WebGLSampler", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLTransformFeedback",
+    {name: "WebGLShader", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLUniformLocation",
+    {name: "WebGLShaderPrecisionFormat", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebGLVertexArrayObject",
+    {name: "WebGLSync", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebKitCSSMatrix",
+    {name: "WebGLTexture", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WebSocket",
+    {name: "WebGLTransformFeedback", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "WheelEvent",
+    {name: "WebGLUniformLocation", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Window",
+    {name: "WebGLVertexArrayObject", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "Worker",
+    {name: "WebKitCSSMatrix", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XMLDocument",
+    {name: "WebSocket", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XMLHttpRequest",
+    {name: "WheelEvent", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XMLHttpRequestEventTarget",
+    {name: "Window", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XMLHttpRequestUpload",
+    {name: "Worker", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XMLSerializer",
+    {name: "XMLDocument", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XMLStylesheetProcessingInstruction",
+    {name: "XMLHttpRequest", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XPathEvaluator",
+    {name: "XMLHttpRequestEventTarget", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XPathExpression",
+    {name: "XMLHttpRequestUpload", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XPathResult",
+    {name: "XMLSerializer", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    "XSLTProcessor",
+    {name: "XMLStylesheetProcessingInstruction", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULButtonElement", xbl: true},
+    {name: "XPathEvaluator", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULCheckboxElement", xbl: true},
+    {name: "XPathExpression", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULCommandEvent", xbl: true},
+    {name: "XPathResult", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULControlElement", xbl: true},
+    {name: "XSLTProcessor", insecureContext: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULDocument", xbl: true},
+    {name: "XULButtonElement", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULElement", xbl: true},
+    {name: "XULCheckboxElement", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULLabeledControlElement", xbl: true},
+    {name: "XULCommandEvent", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULPopupElement", xbl: true},
+    {name: "XULControlElement", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULTemplateBuilder", xbl: true},
+    {name: "XULDocument", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULTreeBuilder", xbl: true},
+    {name: "XULElement", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
-    {name: "XULTreeBuilderObserver", xbl: true},
+    {name: "XULLabeledControlElement", insecureContext: true, xbl: true},
 // IMPORTANT: Do not change this list without review from a DOM peer!
   ];
 // IMPORTANT: Do not change the list above without review from a DOM peer!
@@ -1299,7 +1299,7 @@ function createInterfaceMap(isXBLScope) {
   var isWindows = /Windows/.test(navigator.oscpu);
   var isAndroid = navigator.userAgent.includes("Android");
   var isLinux = /Linux/.test(navigator.oscpu) && !isAndroid;
-  var isSecureContext = window.isSecureContext;
+  var isInsecureContext = !window.isSecureContext;
 
   var interfaceMap = {};
 
@@ -1307,7 +1307,7 @@ function createInterfaceMap(isXBLScope) {
   {
     for (var entry of interfaces) {
       if (typeof(entry) === "string") {
-        interfaceMap[entry] = true;
+        interfaceMap[entry] = !isInsecureContext;
       } else {
         ok(!("pref" in entry), "Bogus pref annotation for " + entry.name);
         if ((entry.nightly === !isNightly) ||
@@ -1319,8 +1319,13 @@ function createInterfaceMap(isXBLScope) {
             (entry.linux === !isLinux) ||
             (entry.android === !isAndroid && !entry.nightlyAndroid) ||
             (entry.release === !isRelease) ||
-            (entry.releaseNonWindowsAndMac === !(isRelease && !isWindows && !isMac)) ||
-            (entry.isSecureContext === !isSecureContext) ||
+            (entry.releaseNonWindows === !(isRelease && !isWindows)) ||
+	    // The insecureContext test is very purposefully converting
+	    // entry.insecureContext to boolean, so undefined will convert to
+	    // false.  That way entries without an insecureContext annotation
+	    // will get treated as "insecureContext: false", which means exposed
+	    // only in secure contexts.
+            (isInsecureContext && !Boolean(entry.insecureContext)) ||
             entry.disabled) {
           interfaceMap[entry.name] = false;
         } else {

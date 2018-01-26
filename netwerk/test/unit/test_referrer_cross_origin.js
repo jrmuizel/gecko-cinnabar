@@ -6,7 +6,7 @@ Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
 function test_policy(test) {
-  do_print("Running test: " + test.toSource());
+  info("Running test: " + test.toSource());
 
   let prefs = Services.prefs;
 
@@ -30,7 +30,8 @@ function test_policy(test) {
     uri: test.url,
     loadingPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
     triggeringPrincipal: triggeringPrincipal,
-    contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER
+    contentPolicyType: Ci.nsIContentPolicy.TYPE_OTHER,
+    securityFlags: Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
   });
 
   chan.QueryInterface(Components.interfaces.nsIHttpChannel);
@@ -41,11 +42,11 @@ function test_policy(test) {
       do_throw("Should not find a Referer header!");
     } catch(e) {
     }
-    do_check_eq(chan.referrer, null);
+    Assert.equal(chan.referrer, null);
   } else {
     let header = chan.getRequestHeader("Referer");
-    do_check_eq(header, test.expectedReferrerSpec);
-    do_check_eq(chan.referrer.asciiSpec, test.expectedReferrerSpec);
+    Assert.equal(header, test.expectedReferrerSpec);
+    Assert.equal(chan.referrer.asciiSpec, test.expectedReferrerSpec);
   }
 }
 

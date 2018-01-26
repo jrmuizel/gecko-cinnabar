@@ -625,15 +625,13 @@ txMozillaXMLOutput::createTxWrapper()
       mDocument->CreateElem(nsDependentAtomString(nsGkAtoms::result),
                             nsGkAtoms::transformiix, namespaceID);
 
-    uint32_t i, j, childCount = mDocument->GetChildCount();
 #ifdef DEBUG
     // Keep track of the location of the current documentElement, if there is
     // one, so we can verify later
-    uint32_t rootLocation = 0;
+    uint32_t j = 0, rootLocation = 0;
 #endif
-    for (i = 0, j = 0; i < childCount; ++i) {
-        nsCOMPtr<nsIContent> childContent = mDocument->GetChildAt(j);
-
+    for (nsCOMPtr<nsIContent> childContent = mDocument->GetFirstChild();
+         childContent; childContent = childContent->GetNextSibling()) {
 #ifdef DEBUG
         if (childContent->IsElement()) {
             rootLocation = j;
@@ -646,11 +644,11 @@ txMozillaXMLOutput::createTxWrapper()
             // This is needed for cases when there is no existing
             // documentElement in the document.
             rootLocation = std::max(rootLocation, j + 1);
-#endif
             ++j;
+#endif
         }
         else {
-            mDocument->RemoveChildAt(j, true);
+            mDocument->RemoveChildNode(childContent, true);
 
             rv = wrapper->AppendChildTo(childContent, true);
             NS_ENSURE_SUCCESS(rv, rv);
@@ -752,10 +750,10 @@ txMozillaXMLOutput::endHTMLElement(nsIContent* aElement)
     else if (mCreatingNewDocument && aElement->IsHTMLElement(nsGkAtoms::meta)) {
         // handle HTTP-EQUIV data
         nsAutoString httpEquiv;
-        aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::httpEquiv, httpEquiv);
+        aElement->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::httpEquiv, httpEquiv);
         if (!httpEquiv.IsEmpty()) {
             nsAutoString value;
-            aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::content, value);
+            aElement->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::content, value);
             if (!value.IsEmpty()) {
                 nsContentUtils::ASCIIToLower(httpEquiv);
                 RefPtr<nsAtom> header = NS_Atomize(httpEquiv);

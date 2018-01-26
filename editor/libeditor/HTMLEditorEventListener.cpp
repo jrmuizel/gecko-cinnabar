@@ -62,7 +62,7 @@ HTMLEditorEventListener::MouseUp(nsIDOMMouseEvent* aMouseEvent)
   int32_t clientX, clientY;
   aMouseEvent->GetClientX(&clientX);
   aMouseEvent->GetClientY(&clientY);
-  htmlEditor->MouseUp(clientX, clientY, element);
+  htmlEditor->OnMouseUp(clientX, clientY, element);
 
   return EditorEventListener::MouseUp(aMouseEvent);
 }
@@ -194,7 +194,7 @@ HTMLEditorEventListener::MouseDown(nsIDOMMouseEvent* aMouseEvent)
     int32_t clientX, clientY;
     aMouseEvent->GetClientX(&clientX);
     aMouseEvent->GetClientY(&clientY);
-    htmlEditor->MouseDown(clientX, clientY, element, aMouseEvent->AsEvent());
+    htmlEditor->OnMouseDown(clientX, clientY, element, aMouseEvent->AsEvent());
   }
 
   return EditorEventListener::MouseDown(aMouseEvent);
@@ -211,11 +211,14 @@ HTMLEditorEventListener::MouseClick(nsIDOMMouseEvent* aMouseEvent)
   nsresult rv = aMouseEvent->AsEvent()->GetTarget(getter_AddRefs(target));
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(target, NS_ERROR_NULL_POINTER);
-  nsCOMPtr<nsIDOMElement> element = do_QueryInterface(target);
+  nsCOMPtr<Element> element = do_QueryInterface(target);
+  if (NS_WARN_IF(!element)) {
+    return NS_ERROR_FAILURE;
+  }
 
   RefPtr<HTMLEditor> htmlEditor = mEditorBase->AsHTMLEditor();
   MOZ_ASSERT(htmlEditor);
-  htmlEditor->DoInlineTableEditingAction(element);
+  htmlEditor->DoInlineTableEditingAction(*element);
   // DoInlineTableEditingAction might cause reframe
   // Editor is destroyed.
   if (htmlEditor->Destroyed()) {

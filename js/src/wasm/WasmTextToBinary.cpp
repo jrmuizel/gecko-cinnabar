@@ -132,7 +132,8 @@ class WasmToken
         UnsignedInteger,
         ValueType,
         Wait,
-        Wake
+        Wake,
+        Invalid
     };
   private:
     Kind kind_;
@@ -149,7 +150,7 @@ class WasmToken
     } u;
   public:
     WasmToken()
-      : kind_(Kind(-1)),
+      : kind_(Kind::Invalid),
         begin_(nullptr),
         end_(nullptr),
         u()
@@ -160,6 +161,7 @@ class WasmToken
         end_(end)
     {
         MOZ_ASSERT(kind_ != Error);
+        MOZ_ASSERT(kind_ != Invalid);
         MOZ_ASSERT((kind == EndOfFile) == (begin == end));
     }
     explicit WasmToken(uint32_t index, const char16_t* begin, const char16_t* end)
@@ -231,7 +233,7 @@ class WasmToken
         end_(begin)
     {}
     Kind kind() const {
-        MOZ_ASSERT(kind_ != Kind(-1));
+        MOZ_ASSERT(kind_ != Kind::Invalid);
         return kind_;
     }
     const char16_t* begin() const {
@@ -353,6 +355,8 @@ class WasmToken
           case UnsignedInteger:
           case ValueType:
             return false;
+          case Invalid:
+            break;
         }
         MOZ_CRASH("unexpected token kind");
     }
@@ -1217,7 +1221,7 @@ WasmTokenStream::next()
                     return WasmToken(WasmToken::UnaryOpcode, Op::I32Eqz, begin, cur_);
                 if (consume(u"eq"))
                     return WasmToken(WasmToken::ComparisonOpcode, Op::I32Eq, begin, cur_);
-#ifdef ENABLE_WASM_THREAD_OPS
+#ifdef ENABLE_WASM_SIGNEXTEND_OPS
                 if (consume(u"extend8_s"))
                     return WasmToken(WasmToken::ConversionOpcode, Op::I32Extend8S, begin, cur_);
                 if (consume(u"extend16_s"))
@@ -1445,7 +1449,7 @@ WasmTokenStream::next()
                 if (consume(u"extend_u/i32"))
                     return WasmToken(WasmToken::ConversionOpcode, Op::I64ExtendUI32,
                                      begin, cur_);
-#ifdef ENABLE_WASM_THREAD_OPS
+#ifdef ENABLE_WASM_SIGNEXTEND_OPS
                 if (consume(u"extend8_s"))
                     return WasmToken(WasmToken::ConversionOpcode, Op::I64Extend8S, begin, cur_);
                 if (consume(u"extend16_s"))
@@ -1661,12 +1665,15 @@ struct WasmParseContext
     LifoAlloc& lifo;
     UniqueChars* error;
     DtoaState* dtoaState;
+    uintptr_t stackLimit;
 
-    WasmParseContext(const char16_t* text, LifoAlloc& lifo, UniqueChars* error)
+    WasmParseContext(const char16_t* text, uintptr_t stackLimit, LifoAlloc& lifo,
+                     UniqueChars* error)
       : ts(text, error),
         lifo(lifo),
         error(error),
-        dtoaState(NewDtoaState())
+        dtoaState(NewDtoaState()),
+        stackLimit(stackLimit)
     {}
 
     ~WasmParseContext() {
@@ -2865,6 +2872,8 @@ ParseGrowMemory(WasmParseContext& c, bool inParens)
 static AstExpr*
 ParseExprBody(WasmParseContext& c, WasmToken token, bool inParens)
 {
+    if (!CheckRecursionLimitDontReport(c.stackLimit))
+        return nullptr;
     switch (token.kind()) {
       case WasmToken::Unreachable:
         return new(c.lifo) AstUnreachable;
@@ -3724,9 +3733,10 @@ ParseBinaryModule(WasmParseContext& c, AstModule* module)
 }
 
 static AstModule*
-ParseModule(const char16_t* text, LifoAlloc& lifo, UniqueChars* error, bool* binary)
+ParseModule(const char16_t* text, uintptr_t stackLimit, LifoAlloc& lifo, UniqueChars* error,
+            bool* binary)
 {
-    WasmParseContext c(text, lifo, error);
+    WasmParseContext c(text, stackLimit, lifo, error);
 
     *binary = false;
 
@@ -5432,12 +5442,12 @@ EncodeBinaryModule(const AstModule& module, Bytes* bytes)
 /*****************************************************************************/
 
 bool
-wasm::TextToBinary(const char16_t* text, Bytes* bytes, UniqueChars* error)
+wasm::TextToBinary(const char16_t* text, uintptr_t stackLimit, Bytes* bytes, UniqueChars* error)
 {
     LifoAlloc lifo(AST_LIFO_DEFAULT_CHUNK_SIZE);
 
     bool binary = false;
-    AstModule* module = ParseModule(text, lifo, error, &binary);
+    AstModule* module = ParseModule(text, stackLimit, lifo, error, &binary);
     if (!module)
         return false;
 

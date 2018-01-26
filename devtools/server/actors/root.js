@@ -168,9 +168,6 @@ RootActor.prototype = {
     // Trait added in Gecko 38, indicating that all features necessary for
     // grabbing allocations from the MemoryActor are available for the performance tool
     memoryActorAllocations: true,
-    // Added in Gecko 40, indicating that the backend isn't stupid about
-    // sending resumption packets on tab navigation.
-    noNeedToFakeResumptionOnNavigation: true,
     // Added in Firefox 40. Indicates that the backend supports registering custom
     // commands through the WebConsoleCommands API.
     webConsoleCommands: true,
@@ -289,7 +286,7 @@ RootActor.prototype = {
    * would trigger any lazy tabs to be loaded, greatly increasing resource usage.  Avoid
    * this method whenever possible.
    */
-  onListTabs: async function () {
+  onListTabs: async function (request) {
     let tabList = this._parameters.tabList;
     if (!tabList) {
       return { from: this.actorID, error: "noTabs",
@@ -308,7 +305,8 @@ RootActor.prototype = {
     let tabActorList = [];
     let selected;
 
-    let tabActors = await tabList.getList();
+    let options = request.options || {};
+    let tabActors = await tabList.getList(options);
     for (let tabActor of tabActors) {
       if (tabActor.exited) {
         // Tab actor may have exited while we were gathering the list.

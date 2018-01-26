@@ -10,6 +10,7 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/Sprintf.h"
 
 #include <sys/types.h>
@@ -65,10 +66,6 @@ static nsresult MacErrorMapper(OSErr inErr);
 #include "GeneratedJNIWrappers.h"
 #include "nsIMIMEService.h"
 #include <linux/magic.h>
-#endif
-
-#ifdef MOZ_ENABLE_CONTENTACTION
-#include <contentaction/contentaction.h>
 #endif
 
 #include "nsNativeCharsetUtils.h"
@@ -595,11 +592,26 @@ nsLocalFile::SetNativeLeafName(const nsACString& aLeafName)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsLocalFile::GetNativePath(nsACString& aResult)
+nsCString
+nsLocalFile::NativePath()
 {
-  aResult = mPath;
+  return mPath;
+}
+
+nsresult
+nsIFile::GetNativePath(nsACString& aResult)
+{
+  aResult = NativePath();
   return NS_OK;
+}
+
+nsCString
+nsIFile::HumanReadablePath()
+{
+  nsCString path;
+  DebugOnly<nsresult> rv = GetNativePath(path);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  return path;
 }
 
 nsresult
@@ -1992,17 +2004,6 @@ nsLocalFile::Launch()
   }
 
   return giovfs->ShowURIForInput(mPath);
-#elif defined(MOZ_ENABLE_CONTENTACTION)
-  QUrl uri = QUrl::fromLocalFile(QString::fromUtf8(mPath.get()));
-  ContentAction::Action action =
-    ContentAction::Action::defaultActionForFile(uri);
-
-  if (action.isValid()) {
-    action.trigger();
-    return NS_OK;
-  }
-
-  return NS_ERROR_FAILURE;
 #elif defined(MOZ_WIDGET_ANDROID)
   // Try to get a mimetype, if this fails just use the file uri alone
   nsresult rv;

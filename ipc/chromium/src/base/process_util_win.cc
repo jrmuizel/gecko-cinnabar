@@ -271,6 +271,63 @@ void FreeThreadAttributeList(LPPROC_THREAD_ATTRIBUTE_LIST lpAttributeList) {
   free(lpAttributeList);
 }
 
+// The next two functions are from chromium/base/environment.cc
+//
+// Parses a null-terminated input string of an environment block. The key is
+// placed into the given string, and the total length of the line, including
+// the terminating null, is returned.
+static size_t ParseEnvLine(const NativeEnvironmentString::value_type* input,
+                    NativeEnvironmentString* key) {
+  // Skip to the equals or end of the string, this is the key.
+  size_t cur = 0;
+  while (input[cur] && input[cur] != '=')
+    cur++;
+  *key = NativeEnvironmentString(&input[0], cur);
+
+  // Now just skip to the end of the string.
+  while (input[cur])
+    cur++;
+  return cur + 1;
+}
+
+std::wstring AlterEnvironment(const wchar_t* env,
+                              const EnvironmentMap& changes) {
+  std::wstring result;
+
+  // First copy all unmodified values to the output.
+  size_t cur_env = 0;
+  std::wstring key;
+  while (env[cur_env]) {
+    const wchar_t* line = &env[cur_env];
+    size_t line_length = ParseEnvLine(line, &key);
+
+    // Keep only values not specified in the change vector.
+    EnvironmentMap::const_iterator found_change = changes.find(key);
+    if (found_change == changes.end())
+      result.append(line, line_length);
+
+    cur_env += line_length;
+  }
+
+  // Now append all modified and new values.
+  for (EnvironmentMap::const_iterator i = changes.begin();
+       i != changes.end(); ++i) {
+    if (!i->second.empty()) {
+      result.append(i->first);
+      result.push_back('=');
+      result.append(i->second);
+      result.push_back(0);
+    }
+  }
+
+  // An additional null marks the end of the list. We always need a double-null
+  // in case nothing was added above.
+  if (result.empty())
+    result.push_back(0);
+  result.push_back(0);
+  return result;
+}
+
 bool LaunchApp(const std::wstring& cmdline,
                const LaunchOptions& options,
                ProcessHandle* process_handle) {
@@ -323,10 +380,18 @@ bool LaunchApp(const std::wstring& cmdline,
     }
   }
 
+  dwCreationFlags |= CREATE_UNICODE_ENVIRONMENT;
+  LPTCH original_environment = GetEnvironmentStrings();
+  base::NativeEnvironmentString new_environment =
+    AlterEnvironment(original_environment, options.env_map);
+  // Ignore return value? What can we do?
+  FreeEnvironmentStrings(original_environment);
+  LPVOID new_env_ptr = (void*)new_environment.data();
+
   PROCESS_INFORMATION process_info;
   BOOL createdOK = CreateProcess(NULL,
                      const_cast<wchar_t*>(cmdline.c_str()), NULL, NULL,
-                     bInheritHandles, dwCreationFlags, NULL, NULL,
+                     bInheritHandles, dwCreationFlags, new_env_ptr, NULL,
                      &startup_info, &process_info);
   if (lpAttributeList)
     FreeThreadAttributeList(lpAttributeList);
@@ -400,74 +465,6 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   }
 
   return true;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// ProcesMetrics
-
-ProcessMetrics::ProcessMetrics(ProcessHandle process) : process_(process),
-                                                        last_time_(0),
-                                                        last_system_time_(0) {
-  SYSTEM_INFO system_info;
-  GetSystemInfo(&system_info);
-  processor_count_ = system_info.dwNumberOfProcessors;
-}
-
-// static
-ProcessMetrics* ProcessMetrics::CreateProcessMetrics(ProcessHandle process) {
-  return new ProcessMetrics(process);
-}
-
-ProcessMetrics::~ProcessMetrics() { }
-
-static uint64_t FileTimeToUTC(const FILETIME& ftime) {
-  LARGE_INTEGER li;
-  li.LowPart = ftime.dwLowDateTime;
-  li.HighPart = ftime.dwHighDateTime;
-  return li.QuadPart;
-}
-
-int ProcessMetrics::GetCPUUsage() {
-  FILETIME now;
-  FILETIME creation_time;
-  FILETIME exit_time;
-  FILETIME kernel_time;
-  FILETIME user_time;
-
-  GetSystemTimeAsFileTime(&now);
-
-  if (!GetProcessTimes(process_, &creation_time, &exit_time,
-                       &kernel_time, &user_time)) {
-    // We don't assert here because in some cases (such as in the Task Manager)
-    // we may call this function on a process that has just exited but we have
-    // not yet received the notification.
-    return 0;
-  }
-  int64_t system_time = (FileTimeToUTC(kernel_time) + FileTimeToUTC(user_time)) /
-                        processor_count_;
-  int64_t time = FileTimeToUTC(now);
-
-  if ((last_system_time_ == 0) || (last_time_ == 0)) {
-    // First call, just set the last values.
-    last_system_time_ = system_time;
-    last_time_ = time;
-    return 0;
-  }
-
-  int64_t system_time_delta = system_time - last_system_time_;
-  int64_t time_delta = time - last_time_;
-  DCHECK(time_delta != 0);
-  if (time_delta == 0)
-    return 0;
-
-  // We add time_delta / 2 so the result is rounded.
-  int cpu = static_cast<int>((system_time_delta * 100 + time_delta / 2) /
-                             time_delta);
-
-  last_system_time_ = system_time;
-  last_time_ = time;
-
-  return cpu;
 }
 
 }  // namespace base

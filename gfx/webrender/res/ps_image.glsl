@@ -34,7 +34,7 @@ void main(void) {
     VertexInfo vi = write_vertex(prim.local_rect,
                                  prim.local_clip_rect,
                                  prim.z,
-                                 prim.layer,
+                                 prim.scroll_node,
                                  prim.task,
                                  prim.local_rect);
     vLocalPos = vi.local_pos - prim.local_rect.p0;
@@ -50,15 +50,8 @@ void main(void) {
     vec2 texture_size_normalization_factor = vec2(textureSize(sColor0, 0));
 #endif
 
-    vec2 uv0, uv1;
-
-    if (image.sub_rect.x < 0.0) {
-        uv0 = res.uv_rect.xy;
-        uv1 = res.uv_rect.zw;
-    } else {
-        uv0 = res.uv_rect.xy + image.sub_rect.xy;
-        uv1 = res.uv_rect.xy + image.sub_rect.zw;
-    }
+    vec2 uv0 = res.uv_rect.p0;
+    vec2 uv1 = res.uv_rect.p1;
 
     // vUv will contain how many times this image has wrapped around the image size.
     vec2 st0 = uv0 / texture_size_normalization_factor;

@@ -50,6 +50,7 @@ static const uint16_t kManyExtensions[] = {
     ssl_supported_groups_xtn,
     ssl_ec_point_formats_xtn,
     ssl_signature_algorithms_xtn,
+    ssl_signature_algorithms_cert_xtn,
     ssl_use_srtp_xtn,
     ssl_app_layer_protocol_xtn,
     ssl_signed_cert_timestamp_xtn,
@@ -77,7 +78,7 @@ void InstallManyWriters(std::shared_ptr<TlsAgent> agent,
                         SSLExtensionWriter writer, size_t *installed = nullptr,
                         size_t *called = nullptr) {
   for (size_t i = 0; i < PR_ARRAY_SIZE(kManyExtensions); ++i) {
-    SSLExtensionSupport support;
+    SSLExtensionSupport support = ssl_ext_none;
     SECStatus rv = SSL_GetExtensionSupport(kManyExtensions[i], &support);
     ASSERT_EQ(SECSuccess, rv) << "SSL_GetExtensionSupport cannot fail";
 

@@ -17,6 +17,7 @@
 #include "jshashutil.h"
 #include "jsobj.h"
 
+#include "gc/FreeOp.h"
 #include "gc/Policy.h"
 #include "js/HashTable.h"
 
@@ -1981,6 +1982,13 @@ Shape::dump(js::GenericPrinter& out) const
 #undef  DUMP_FLAG
         out.putChar(')');
     }
+}
+
+void
+Shape::dump() const
+{
+    Fprinter out(stderr);
+    dump(out);
 }
 
 void

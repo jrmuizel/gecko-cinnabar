@@ -109,7 +109,7 @@ GetPIPNSSBundleString(const char* stringName, nsAString& result)
   return pipnssBundle->GetStringFromName(stringName, result);
 }
 
-static nsresult
+nsresult
 PIPBundleFormatStringFromName(const char* stringName, const char16_t** params,
                               uint32_t numParams, nsAString& result)
 {
@@ -1675,7 +1675,13 @@ ProcessTime(PRTime dispTime,
     kDateFormatLong, kTimeFormatSeconds, &explodedTimeGMT, tempString);
 
   text.Append(tempString);
-  text.AppendLiteral(" GMT)");
+  // Append "GMT" if it's not already added by the formatter
+  // since the OS pattern contained a timezone (Mac and Linux).
+  if (tempString.Find(" GMT") == kNotFound) {
+    text.AppendLiteral(" GMT)");
+  } else {
+    text.Append(')');
+  }
 
   nsCOMPtr<nsIASN1PrintableItem> printableItem = new nsNSSASN1PrintableItem();
 

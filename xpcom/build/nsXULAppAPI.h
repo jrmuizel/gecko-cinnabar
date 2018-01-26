@@ -374,7 +374,7 @@ enum GeckoProcessType
   GeckoProcessType_GMPlugin, // Gecko Media Plugin
 
   GeckoProcessType_GPU,      // GPU and compositor process
-
+  GeckoProcessType_PDFium,   // Gecko PDFium process
   GeckoProcessType_End,
   GeckoProcessType_Invalid = GeckoProcessType_End
 };
@@ -385,7 +385,8 @@ static const char* const kGeckoProcessTypeString[] = {
   "tab",
   "ipdlunittest",
   "geckomediaplugin",
-  "gpu"
+  "gpu",
+  "pdfium"
 };
 
 static_assert(MOZ_ARRAY_LENGTH(kGeckoProcessTypeString) ==
@@ -511,14 +512,8 @@ XRE_API(int,
         XRE_XPCShellMain, (int argc, char** argv, char** envp,
                            const XREShellData* aShellData))
 
-#if MOZ_WIDGET_GTK == 2
-XRE_API(void,
-        XRE_GlibInit, ())
-#endif
-
-
 #ifdef LIBFUZZER
-#include "LibFuzzerRegistry.h"
+#include "FuzzerRegistry.h"
 
 XRE_API(void,
         XRE_LibFuzzerSetDriver, (LibFuzzerDriver))

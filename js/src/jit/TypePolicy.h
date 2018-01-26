@@ -99,7 +99,7 @@ class AllDoublePolicy final : public TypePolicy
 {
   public:
     EMPTY_DATA_;
-    MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def);
+    MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* def) override;
 };
 
 class BitwisePolicy final : public TypePolicy
@@ -182,9 +182,9 @@ class BooleanPolicy final : private TypePolicy
     }
 };
 
-// Expect an Int for operand Op. If the input is a Value, it is unboxed.
+// Expects either an Int32 or a boxed Int32 for operand Op; may unbox if needed.
 template <unsigned Op>
-class IntPolicy final : private TypePolicy
+class UnboxedInt32Policy final : private TypePolicy
 {
   public:
     EMPTY_DATA_;
@@ -394,7 +394,7 @@ class BoxExceptPolicy final : public TypePolicy
   public:
     EMPTY_DATA_;
     static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
-    MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) {
+    MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
         return staticAdjustInputs(alloc, ins);
     }
 };
@@ -406,7 +406,7 @@ class CacheIdPolicy final : public TypePolicy
   public:
     EMPTY_DATA_;
     static MOZ_MUST_USE bool staticAdjustInputs(TempAllocator& alloc, MInstruction* ins);
-    MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) {
+    MOZ_MUST_USE bool adjustInputs(TempAllocator& alloc, MInstruction* ins) override {
         return staticAdjustInputs(alloc, ins);
     }
 };

@@ -26,6 +26,7 @@ const {
   VIEW_NODE_LOCATION_TYPE,
   VIEW_NODE_SHAPE_POINT_TYPE,
   VIEW_NODE_VARIABLE_TYPE,
+  VIEW_NODE_FONT_TYPE,
 } = require("devtools/client/inspector/shared/node-types");
 const StyleInspectorMenu = require("devtools/client/inspector/shared/style-inspector-menu");
 const TooltipsOverlay = require("devtools/client/inspector/shared/tooltips-overlay");
@@ -290,6 +291,7 @@ CssRuleView.prototype = {
    * @param {DOMNode} node
    *        The node which we want information about
    * @return {Object} The type information object contains the following props:
+   * - view {String} Always "rule" to indicate the rule view.
    * - type {String} One of the VIEW_NODE_XXX_TYPE const in
    *   client/inspector/shared/node-types
    * - value {Object} Depends on the type of the node
@@ -320,6 +322,17 @@ CssRuleView.prototype = {
       value = {
         property: getPropertyNameAndValue(node).name,
         value: node.textContent,
+        enabled: prop.enabled,
+        overridden: prop.overridden,
+        pseudoElement: prop.rule.pseudoElement,
+        sheetHref: prop.rule.domRule.href,
+        textProperty: prop
+      };
+    } else if (classes.contains("ruleview-font-family") && prop) {
+      type = VIEW_NODE_FONT_TYPE;
+      value = {
+        property: getPropertyNameAndValue(node).name,
+        value: getPropertyNameAndValue(node).value,
         enabled: prop.enabled,
         overridden: prop.overridden,
         pseudoElement: prop.rule.pseudoElement,
@@ -383,7 +396,11 @@ CssRuleView.prototype = {
       return null;
     }
 
-    return {type, value};
+    return {
+      view: "rule",
+      type,
+      value,
+    };
   },
 
   /**
@@ -1607,11 +1624,11 @@ function RuleViewTool(inspector, window) {
   this.onViewRefreshed = this.onViewRefreshed.bind(this);
 
   this.view.on("ruleview-refreshed", this.onViewRefreshed);
-
   this.inspector.selection.on("detached-front", this.onSelected);
   this.inspector.selection.on("new-node-front", this.onSelected);
   this.inspector.selection.on("pseudoclass", this.refresh);
   this.inspector.target.on("navigate", this.clearUserProperties);
+  this.inspector.ruleViewSideBar.on("ruleview-selected", this.onPanelSelected);
   this.inspector.sidebar.on("ruleview-selected", this.onPanelSelected);
   this.inspector.pageStyle.on("stylesheet-updated", this.refresh);
   this.inspector.walker.on("mutations", this.onMutations);
@@ -1625,7 +1642,9 @@ RuleViewTool.prototype = {
     if (!this.view) {
       return false;
     }
-    return this.inspector.sidebar.getCurrentTabID() == "ruleview";
+
+    return this.inspector.isSplitRuleViewEnabled ?
+      true : this.inspector.sidebar.getCurrentTabID() == "ruleview";
   },
 
   onSelected: function (event) {

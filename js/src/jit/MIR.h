@@ -3415,7 +3415,7 @@ class MNewArrayCopyOnWrite
 
 class MNewArrayDynamicLength
   : public MUnaryInstruction,
-    public IntPolicy<0>::Data
+    public UnboxedInt32Policy<0>::Data
 {
     CompilerObject templateObject_;
     gc::InitialHeap initialHeap_;
@@ -3494,7 +3494,7 @@ class MNewTypedArray
 
 class MNewTypedArrayDynamicLength
   : public MUnaryInstruction,
-    public IntPolicy<0>::Data
+    public UnboxedInt32Policy<0>::Data
 {
     CompilerObject templateObject_;
     gc::InitialHeap initialHeap_;
@@ -3841,7 +3841,7 @@ class MNewDerivedTypedObject
   : public MTernaryInstruction,
     public MixPolicy<ObjectPolicy<0>,
                      ObjectPolicy<1>,
-                     IntPolicy<2> >::Data
+                     UnboxedInt32Policy<2> >::Data
 {
   private:
     TypedObjectPrediction prediction_;
@@ -4147,7 +4147,6 @@ class MInitElemGetterSetter
     INSTRUCTION_HEADER(InitElemGetterSetter)
     TRIVIAL_NEW_WRAPPERS
     NAMED_OPERANDS((0, object), (1, idValue), (2, value))
-
 };
 
 // WrappedFunction wraps a JSFunction so it can safely be used off-thread.
@@ -4174,6 +4173,7 @@ class WrappedFunction : public TempObject
     // fun->native() and fun->jitInfo() can safely be called off-thread: these
     // fields never change.
     JSNative native() const { return fun_->native(); }
+    bool hasJitInfo() const { return fun_->hasJitInfo(); }
     const JSJitInfo* jitInfo() const { return fun_->jitInfo(); }
 
     JSFunction* rawJSFunction() const { return fun_; }
@@ -4222,7 +4222,8 @@ class MCall
   public:
     INSTRUCTION_HEADER(Call)
     static MCall* New(TempAllocator& alloc, JSFunction* target, size_t maxArgc, size_t numActualArgs,
-                      bool construct, bool ignoresReturnValue, bool isDOMCall);
+                      bool construct, bool ignoresReturnValue, bool isDOMCall,
+                      DOMObjectKind objectKind);
 
     void initFunction(MDefinition* func) {
         initOperand(FunctionOperandIndex, func);
@@ -4312,9 +4313,13 @@ class MCallDOMNative : public MCall
     // actually a separate MIR op from MCall, because all sorts of places use
     // isCall() to check for calls and all we really want is to overload a few
     // virtual things from MCall.
+
+    DOMObjectKind objectKind_;
+
   protected:
-    MCallDOMNative(WrappedFunction* target, uint32_t numActualArgs)
-        : MCall(target, numActualArgs, false, false)
+    MCallDOMNative(WrappedFunction* target, uint32_t numActualArgs, DOMObjectKind objectKind)
+      : MCall(target, numActualArgs, false, false),
+        objectKind_(objectKind)
     {
         MOZ_ASSERT(getJitInfo()->type() != JSJitInfo::InlinableNative);
 
@@ -4330,10 +4335,14 @@ class MCallDOMNative : public MCall
 
     friend MCall* MCall::New(TempAllocator& alloc, JSFunction* target, size_t maxArgc,
                              size_t numActualArgs, bool construct, bool ignoresReturnValue,
-                             bool isDOMCall);
+                             bool isDOMCall, DOMObjectKind objectKind);
 
     const JSJitInfo* getJitInfo() const;
   public:
+    DOMObjectKind objectKind() const {
+        return objectKind_;
+    }
+
     virtual AliasSet getAliasSet() const override;
 
     virtual bool congruentTo(const MDefinition* ins) const override;
@@ -4348,7 +4357,7 @@ class MCallDOMNative : public MCall
 // fun.apply(self, arguments)
 class MApplyArgs
   : public MTernaryInstruction,
-    public MixPolicy<ObjectPolicy<0>, IntPolicy<1>, BoxPolicy<2> >::Data
+    public MixPolicy<ObjectPolicy<0>, UnboxedInt32Policy<1>, BoxPolicy<2> >::Data
 {
   protected:
     // Monomorphic cache of single target from TI, or nullptr.
@@ -4358,6 +4367,7 @@ class MApplyArgs
       : MTernaryInstruction(classOpcode, fun, argc, self),
         target_(target)
     {
+        MOZ_ASSERT(argc->type() == MIRType::Int32);
         setResultType(MIRType::Value);
     }
 
@@ -5661,18 +5671,21 @@ class MInt64ToFloatingPoint
     }
 };
 
-// Converts a primitive (either typed or untyped) to an int32. If the input is
-// not primitive at runtime, a bailout occurs. If the input cannot be converted
-// to an int32 without loss (i.e. "5.5" or undefined) then a bailout occurs.
-class MToInt32
+// Applies ECMA's ToNumber on a primitive (either typed or untyped) and expects
+// the result to be precisely representable as an Int32, otherwise bails.
+//
+// If the input is not primitive at runtime, a bailout occurs. If the input
+// cannot be converted to an int32 without loss (i.e. 5.5 or undefined) then a
+// bailout occurs.
+class MToNumberInt32
   : public MUnaryInstruction,
     public ToInt32Policy::Data
 {
     bool canBeNegativeZero_;
     MacroAssembler::IntConversionInputKind conversion_;
 
-    explicit MToInt32(MDefinition* def, MacroAssembler::IntConversionInputKind conversion =
-                                            MacroAssembler::IntConversion_Any)
+    explicit MToNumberInt32(MDefinition* def, MacroAssembler::IntConversionInputKind conversion
+                                              = MacroAssembler::IntConversion_Any)
       : MUnaryInstruction(classOpcode, def),
         canBeNegativeZero_(true),
         conversion_(conversion)
@@ -5687,7 +5700,7 @@ class MToInt32
     }
 
   public:
-    INSTRUCTION_HEADER(ToInt32)
+    INSTRUCTION_HEADER(ToNumberInt32)
     TRIVIAL_NEW_WRAPPERS
 
     MDefinition* foldsTo(TempAllocator& alloc) override;
@@ -5707,7 +5720,7 @@ class MToInt32
     }
 
     bool congruentTo(const MDefinition* ins) const override {
-        if (!ins->isToInt32() || ins->toToInt32()->conversion() != conversion())
+        if (!ins->isToNumberInt32() || ins->toToNumberInt32()->conversion() != conversion())
             return false;
         return congruentIfOperandsEqual(ins);
     }
@@ -5722,7 +5735,7 @@ class MToInt32
     bool isConsistentFloat32Use(MUse* use) const override { return true; }
 #endif
 
-    ALLOW_CLONE(MToInt32)
+    ALLOW_CLONE(MToNumberInt32)
 };
 
 // Converts a value or typed input to a truncated int32, for use with bitwise
@@ -7518,7 +7531,7 @@ class MConcat
 
 class MCharCodeAt
   : public MBinaryInstruction,
-    public MixPolicy<StringPolicy<0>, IntPolicy<1> >::Data
+    public MixPolicy<StringPolicy<0>, UnboxedInt32Policy<1> >::Data
 {
     MCharCodeAt(MDefinition* str, MDefinition* index)
         : MBinaryInstruction(classOpcode, str, index)
@@ -7552,7 +7565,7 @@ class MCharCodeAt
 
 class MFromCharCode
   : public MUnaryInstruction,
-    public IntPolicy<0>::Data
+    public UnboxedInt32Policy<0>::Data
 {
     explicit MFromCharCode(MDefinition* code)
       : MUnaryInstruction(classOpcode, code)
@@ -7582,7 +7595,7 @@ class MFromCharCode
 
 class MFromCodePoint
   : public MUnaryInstruction,
-    public IntPolicy<0>::Data
+    public UnboxedInt32Policy<0>::Data
 {
     explicit MFromCodePoint(MDefinition* codePoint)
       : MUnaryInstruction(classOpcode, codePoint)
@@ -7740,6 +7753,37 @@ class MComputeThis
     }
 
     // Note: don't override getAliasSet: the thisValue hook can be effectful.
+};
+
+class MImplicitThis
+  : public MUnaryInstruction,
+    public SingleObjectPolicy::Data
+{
+    CompilerPropertyName name_;
+
+    MImplicitThis(MDefinition* envChain, PropertyName* name)
+      : MUnaryInstruction(classOpcode, envChain),
+        name_(name)
+    {
+        setResultType(MIRType::Value);
+    }
+
+  public:
+    INSTRUCTION_HEADER(ImplicitThis)
+    TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, envChain))
+
+    PropertyName* name() const {
+        return name_;
+    }
+
+    bool appendRoots(MRootList& roots) const override {
+        return roots.append(name_);
+    }
+
+    bool possiblyCalls() const override {
+        return true;
+    }
 };
 
 // Load an arrow function's |new.target| value.
@@ -8446,7 +8490,7 @@ class MRegExpMatcher
   : public MTernaryInstruction,
     public MixPolicy<ObjectPolicy<0>,
                      StringPolicy<1>,
-                     IntPolicy<2> >::Data
+                     UnboxedInt32Policy<2> >::Data
 {
   private:
 
@@ -8478,7 +8522,7 @@ class MRegExpSearcher
   : public MTernaryInstruction,
     public MixPolicy<ObjectPolicy<0>,
                      StringPolicy<1>,
-                     IntPolicy<2> >::Data
+                     UnboxedInt32Policy<2> >::Data
 {
   private:
 
@@ -8509,7 +8553,7 @@ class MRegExpTester
   : public MTernaryInstruction,
     public MixPolicy<ObjectPolicy<0>,
                      StringPolicy<1>,
-                     IntPolicy<2> >::Data
+                     UnboxedInt32Policy<2> >::Data
 {
   private:
 
@@ -8656,7 +8700,7 @@ class MStringReplace
 
 class MSubstr
   : public MTernaryInstruction,
-    public MixPolicy<StringPolicy<0>, IntPolicy<1>, IntPolicy<2>>::Data
+    public MixPolicy<StringPolicy<0>, UnboxedInt32Policy<1>, UnboxedInt32Policy<2>>::Data
 {
   private:
 
@@ -8973,7 +9017,7 @@ class MConvertElementsToDoubles
 // double. Else return the original value.
 class MMaybeToDoubleElement
   : public MBinaryInstruction,
-    public IntPolicy<1>::Data
+    public UnboxedInt32Policy<1>::Data
 {
     MMaybeToDoubleElement(MDefinition* elements, MDefinition* value)
       : MBinaryInstruction(classOpcode, elements, value)
@@ -9411,7 +9455,7 @@ class MNot
 // (unsigned comparisons may be used).
 class MBoundsCheck
   : public MBinaryInstruction,
-    public MixPolicy<IntPolicy<0>, IntPolicy<1>>::Data
+    public MixPolicy<UnboxedInt32Policy<0>, UnboxedInt32Policy<1>>::Data
 {
     // Range over which to perform the bounds check, may be modified by GVN.
     int32_t minimum_;
@@ -9476,7 +9520,7 @@ class MBoundsCheck
 // Bailout if index < minimum.
 class MBoundsCheckLower
   : public MUnaryInstruction,
-    public IntPolicy<0>::Data
+    public UnboxedInt32Policy<0>::Data
 {
     int32_t minimum_;
     bool fallible_;
@@ -9507,6 +9551,38 @@ class MBoundsCheckLower
         return fallible_;
     }
     void collectRangeInfoPreTrunc() override;
+};
+
+class MSpectreMaskIndex
+  : public MBinaryInstruction,
+    public MixPolicy<UnboxedInt32Policy<0>, UnboxedInt32Policy<1>>::Data
+{
+    MSpectreMaskIndex(MDefinition* index, MDefinition* length)
+      : MBinaryInstruction(classOpcode, index, length)
+    {
+        setGuard();
+        setMovable();
+        MOZ_ASSERT(index->type() == MIRType::Int32);
+        MOZ_ASSERT(length->type() == MIRType::Int32);
+
+        // Returns the masked index.
+        setResultType(MIRType::Int32);
+    }
+
+  public:
+    INSTRUCTION_HEADER(SpectreMaskIndex)
+    TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, index), (1, length))
+
+    bool congruentTo(const MDefinition* ins) const override {
+        return congruentIfOperandsEqual(ins);
+    }
+    virtual AliasSet getAliasSet() const override {
+        return AliasSet::None();
+    }
+    void computeRange(TempAllocator& alloc) override;
+
+    ALLOW_CLONE(MSpectreMaskIndex)
 };
 
 // Instructions which access an object's elements can either do so on a
@@ -10107,7 +10183,7 @@ class MArrayPush
 // Array.prototype.slice on a dense array.
 class MArraySlice
   : public MTernaryInstruction,
-    public MixPolicy<ObjectPolicy<0>, IntPolicy<1>, IntPolicy<2>>::Data
+    public MixPolicy<ObjectPolicy<0>, UnboxedInt32Policy<1>, UnboxedInt32Policy<2>>::Data
 {
     CompilerObject templateObj_;
     gc::InitialHeap initialHeap_;
@@ -12218,7 +12294,7 @@ class MCallSetElement
 
 class MCallInitElementArray
   : public MTernaryInstruction,
-    public MixPolicy<ObjectPolicy<0>, IntPolicy<1>, BoxPolicy<2> >::Data
+    public MixPolicy<ObjectPolicy<0>, UnboxedInt32Policy<1>, BoxPolicy<2> >::Data
 {
     MCallInitElementArray(MDefinition* obj, MDefinition* index, MDefinition* val)
       : MTernaryInstruction(classOpcode, obj, index, val)
@@ -12241,10 +12317,13 @@ class MSetDOMProperty
     public MixPolicy<ObjectPolicy<0>, BoxPolicy<1> >::Data
 {
     const JSJitSetterOp func_;
+    DOMObjectKind objectKind_;
 
-    MSetDOMProperty(const JSJitSetterOp func, MDefinition* obj, MDefinition* val)
+    MSetDOMProperty(const JSJitSetterOp func, DOMObjectKind objectKind, MDefinition* obj,
+                    MDefinition* val)
       : MBinaryInstruction(classOpcode, obj, val),
-        func_(func)
+        func_(func),
+        objectKind_(objectKind)
     { }
 
   public:
@@ -12255,20 +12334,23 @@ class MSetDOMProperty
     JSJitSetterOp fun() const {
         return func_;
     }
+    DOMObjectKind objectKind() const {
+        return objectKind_;
+    }
 
     bool possiblyCalls() const override {
         return true;
     }
 };
 
-class MGetDOMProperty
+class MGetDOMPropertyBase
   : public MVariadicInstruction,
     public ObjectPolicy<0>::Data
 {
     const JSJitInfo* info_;
 
   protected:
-    MGetDOMProperty(Opcode op, const JSJitInfo* jitinfo)
+    MGetDOMPropertyBase(Opcode op, const JSJitInfo* jitinfo)
       : MVariadicInstruction(op),
         info_(jitinfo)
     {
@@ -12320,17 +12402,7 @@ class MGetDOMProperty
     }
 
   public:
-    INSTRUCTION_HEADER(GetDOMProperty)
     NAMED_OPERANDS((0, object))
-
-    static MGetDOMProperty* New(TempAllocator& alloc, const JSJitInfo* info, MDefinition* obj,
-                                MDefinition* guard, MDefinition* globalGuard)
-    {
-        auto* res = new(alloc) MGetDOMProperty(classOpcode, info);
-        if (!res || !res->init(alloc, obj, guard, globalGuard))
-            return nullptr;
-        return res;
-    }
 
     JSJitGetterOp fun() const {
         return info_->getter;
@@ -12351,14 +12423,8 @@ class MGetDOMProperty
     bool valueMayBeInSlot() const {
         return info_->isLazilyCachedInSlot;
     }
-    bool congruentTo(const MDefinition* ins) const override {
-        if (!ins->isGetDOMProperty())
-            return false;
 
-        return congruentTo(ins->toGetDOMProperty());
-    }
-
-    bool congruentTo(const MGetDOMProperty* ins) const {
+    bool baseCongruentTo(const MGetDOMPropertyBase* ins) const {
         if (!isDomMovable())
             return false;
 
@@ -12378,18 +12444,51 @@ class MGetDOMProperty
         MOZ_ASSERT(aliasSet == JSJitInfo::AliasEverything);
         return AliasSet::Store(AliasSet::Any);
     }
+};
+
+class MGetDOMProperty
+  : public MGetDOMPropertyBase
+{
+    DOMObjectKind objectKind_;
+
+  protected:
+    MGetDOMProperty(const JSJitInfo* jitinfo, DOMObjectKind objectKind)
+      : MGetDOMPropertyBase(classOpcode, jitinfo),
+        objectKind_(objectKind)
+    {}
+
+  public:
+    INSTRUCTION_HEADER(GetDOMProperty)
+
+    static MGetDOMProperty* New(TempAllocator& alloc, const JSJitInfo* info, DOMObjectKind objectKind,
+                                MDefinition* obj, MDefinition* guard, MDefinition* globalGuard)
+    {
+        auto* res = new(alloc) MGetDOMProperty(info, objectKind);
+        if (!res || !res->init(alloc, obj, guard, globalGuard))
+            return nullptr;
+        return res;
+    }
+
+    DOMObjectKind objectKind() const {
+        return objectKind_;
+    }
+
+    bool congruentTo(const MDefinition* ins) const override {
+        if (!ins->isGetDOMProperty())
+            return false;
+
+        return baseCongruentTo(ins->toGetDOMProperty());
+    }
 
     bool possiblyCalls() const override {
         return true;
     }
 };
 
-class MGetDOMMember : public MGetDOMProperty
+class MGetDOMMember : public MGetDOMPropertyBase
 {
-    // We inherit everything from MGetDOMProperty except our
-    // possiblyCalls value and the congruentTo behavior.
     explicit MGetDOMMember(const JSJitInfo* jitinfo)
-      : MGetDOMProperty(classOpcode, jitinfo)
+      : MGetDOMPropertyBase(classOpcode, jitinfo)
     {
         setResultType(MIRTypeFromValueType(jitinfo->returnType()));
     }
@@ -12414,7 +12513,7 @@ class MGetDOMMember : public MGetDOMProperty
         if (!ins->isGetDOMMember())
             return false;
 
-        return MGetDOMProperty::congruentTo(ins->toGetDOMMember());
+        return baseCongruentTo(ins->toGetDOMMember());
     }
 };
 
@@ -12872,7 +12971,7 @@ class MArgumentsLength : public MNullaryInstruction
 // This MIR instruction is used to get an argument from the actual arguments.
 class MGetFrameArgument
   : public MUnaryInstruction,
-    public IntPolicy<0>::Data
+    public UnboxedInt32Policy<0>::Data
 {
     bool scriptHasSetArg_;
 
@@ -12974,7 +13073,7 @@ class MRestCommon
 class MRest
   : public MUnaryInstruction,
     public MRestCommon,
-    public IntPolicy<0>::Data
+    public UnboxedInt32Policy<0>::Data
 {
     MRest(TempAllocator& alloc, CompilerConstraintList* constraints, MDefinition* numActuals,
           unsigned numFormals, ArrayObject* templateObject)
@@ -13169,7 +13268,7 @@ class MPostWriteBarrier : public MBinaryInstruction, public ObjectPolicy<0>::Dat
 // index, update the generational store buffer if the value is in the nursery
 // and object is in the tenured heap.
 class MPostWriteElementBarrier : public MTernaryInstruction
-                               , public MixPolicy<ObjectPolicy<0>, IntPolicy<2>>::Data
+                               , public MixPolicy<ObjectPolicy<0>, UnboxedInt32Policy<2>>::Data
 {
     MPostWriteElementBarrier(MDefinition* obj, MDefinition* value, MDefinition* index)
       : MTernaryInstruction(classOpcode, obj, value, index)
@@ -13790,7 +13889,7 @@ public:
 
 class MCompareExchangeTypedArrayElement
   : public MQuaternaryInstruction,
-    public MixPolicy<ObjectPolicy<0>, IntPolicy<1>, TruncateToInt32Policy<2>, TruncateToInt32Policy<3>>::Data
+    public MixPolicy<ObjectPolicy<0>, UnboxedInt32Policy<1>, TruncateToInt32Policy<2>, TruncateToInt32Policy<3>>::Data
 {
     Scalar::Type arrayType_;
 
@@ -13825,7 +13924,7 @@ class MCompareExchangeTypedArrayElement
 
 class MAtomicExchangeTypedArrayElement
   : public MTernaryInstruction,
-    public MixPolicy<ObjectPolicy<0>, IntPolicy<1>, TruncateToInt32Policy<2>>::Data
+    public MixPolicy<ObjectPolicy<0>, UnboxedInt32Policy<1>, TruncateToInt32Policy<2>>::Data
 {
     Scalar::Type arrayType_;
 
@@ -13857,7 +13956,7 @@ class MAtomicExchangeTypedArrayElement
 
 class MAtomicTypedArrayElementBinop
   : public MTernaryInstruction,
-    public MixPolicy< ObjectPolicy<0>, IntPolicy<1>, TruncateToInt32Policy<2> >::Data
+    public MixPolicy< ObjectPolicy<0>, UnboxedInt32Policy<1>, TruncateToInt32Policy<2> >::Data
 {
   private:
     AtomicOp op_;
@@ -13997,7 +14096,7 @@ class MDebugCheckSelfHosted
 
 class MFinishBoundFunctionInit
   : public MTernaryInstruction,
-    public MixPolicy<ObjectPolicy<0>, ObjectPolicy<1>, IntPolicy<2>>::Data
+    public MixPolicy<ObjectPolicy<0>, ObjectPolicy<1>, UnboxedInt32Policy<2>>::Data
 {
     MFinishBoundFunctionInit(MDefinition* bound, MDefinition* target, MDefinition* argCount)
       : MTernaryInstruction(classOpcode, bound, target, argCount)

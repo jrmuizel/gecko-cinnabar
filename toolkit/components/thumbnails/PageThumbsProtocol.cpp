@@ -59,12 +59,9 @@ PageThumbsProtocol::NewURI(const nsACString& aSpec,
                            const char *aOriginCharset,
                            nsIURI *aBaseURI, nsIURI **_retval)
 {
-  nsCOMPtr <nsIURI> uri = do_CreateInstance(NS_SIMPLEURI_CONTRACTID);
-  nsresult rv = uri->SetSpec(aSpec);
-  if (NS_WARN_IF(NS_FAILED(rv))) return rv;
-
-  uri.forget(_retval);
-  return rv;
+  return NS_MutateURI(NS_SIMPLEURIMUTATOR_CONTRACTID)
+           .SetSpec(aSpec)
+           .Finalize(_retval);
 }
 
 // PageThumbsProtocol::NewChannel
@@ -141,10 +138,9 @@ PageThumbsProtocol::ParseProtocolURL(nsIURI* aURI, nsString& aParsedURL)
     return NS_ERROR_MALFORMED_URI;
   }
 
-  URLParams params;
-  params.ParseInput(Substring(path, queryBegins + 1));
-
-  params.Get(NS_LITERAL_STRING("url"), aParsedURL);
+  URLParams::Extract(Substring(path, queryBegins + 1),
+                     NS_LITERAL_STRING("url"),
+                     aParsedURL);
 
   // If there's no URL as part of the query params, there will be no thumbnail
   if (aParsedURL.IsVoid()) {

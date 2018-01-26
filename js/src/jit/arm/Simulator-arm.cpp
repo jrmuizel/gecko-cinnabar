@@ -65,6 +65,33 @@ __aeabi_uidivmod(int x, int y)
 namespace js {
 namespace jit {
 
+// For decoding load-exclusive and store-exclusive instructions.
+namespace excl {
+
+// Bit positions.
+enum {
+    ExclusiveOpHi = 24,         // Hi bit of opcode field
+    ExclusiveOpLo = 23,         // Lo bit of opcode field
+    ExclusiveSizeHi = 22,       // Hi bit of operand size field
+    ExclusiveSizeLo = 21,       // Lo bit of operand size field
+    ExclusiveLoad = 20          // Bit indicating load
+};
+
+// Opcode bits for exclusive instructions.
+enum {
+    ExclusiveOpcode = 3
+};
+
+// Operand size, Bits(ExclusiveSizeHi,ExclusiveSizeLo).
+enum {
+    ExclusiveWord = 0,
+    ExclusiveDouble = 1,
+    ExclusiveByte = 2,
+    ExclusiveHalf = 3
+};
+
+}
+
 // Load/store multiple addressing mode.
 enum BlockAddrMode {
     // Alias modes for comparison when writeback does not matter.
@@ -260,6 +287,11 @@ class SimInstruction {
         return typeValue() == 7 && bit(24) == 1 && svcValue() >= kStopCode;
     }
 
+    // Test for a udf instruction, which falls under type 3.
+    inline bool isUDF() const {
+      return (instructionBits() & 0xfff000f0) == 0xe7f000f0;
+    }
+
     // Special accessors that test for existence of a value.
     inline bool hasS()    const { return sValue() == 1; }
     inline bool hasB()    const { return bValue() == 1; }
@@ -408,6 +440,7 @@ Simulator::Destroy(Simulator* sim)
 void
 Simulator::disassemble(SimInstruction* instr, size_t n)
 {
+#ifdef JS_DISASM_ARM
     disasm::NameConverter converter;
     disasm::Disassembler dasm(converter);
     disasm::EmbeddedVector<char, disasm::ReasonableBufferSize> buffer;
@@ -417,6 +450,7 @@ Simulator::disassemble(SimInstruction* instr, size_t n)
         fprintf(stderr, "  0x%08x  %s\n", uint32_t(instr), buffer.start());
         instr = reinterpret_cast<SimInstruction*>(reinterpret_cast<uint8_t*>(instr) + 4);
     }
+#endif
 }
 
 void
@@ -1583,6 +1617,16 @@ Simulator::handleWasmInterrupt()
     set_pc(int32_t(cs->interruptCode()));
 }
 
+static inline JitActivation*
+GetJitActivation(JSContext* cx)
+{
+    if (!wasm::CodeExists)
+        return nullptr;
+    if (!cx->activation() || !cx->activation()->isJit())
+        return nullptr;
+    return cx->activation()->asJit();
+}
+
 // WebAssembly memories contain an extra region of guard pages (see
 // WasmArrayRawBuffer comment). The guard pages catch out-of-bounds accesses
 // using a signal handler that redirects PC to a stub that safely reports an
@@ -1590,13 +1634,11 @@ Simulator::handleWasmInterrupt()
 // and cannot be redirected. Therefore, we must avoid hitting the handler by
 // redirecting in the simulator before the real handler would have been hit.
 bool
-Simulator::handleWasmFault(int32_t addr, unsigned numBytes)
+Simulator::handleWasmSegFault(int32_t addr, unsigned numBytes)
 {
-    if (!wasm::CodeExists)
+    JitActivation* act = GetJitActivation(cx_);
+    if (!act)
         return false;
-    if (!cx_->activation() || !cx_->activation()->isJit())
-        return false;
-    JitActivation* act = cx_->activation()->asJit();
 
     void* pc = reinterpret_cast<void*>(get_pc());
     uint8_t* fp = reinterpret_cast<uint8_t*>(get_register(r11));
@@ -1623,10 +1665,34 @@ Simulator::handleWasmFault(int32_t addr, unsigned numBytes)
     return true;
 }
 
+bool
+Simulator::handleWasmIllFault()
+{
+    JitActivation* act = GetJitActivation(cx_);
+    if (!act)
+        return false;
+
+    void* pc = reinterpret_cast<void*>(get_pc());
+    uint8_t* fp = reinterpret_cast<uint8_t*>(get_register(r11));
+
+    const wasm::CodeSegment* segment = wasm::LookupCodeSegment(pc);
+    if (!segment)
+        return false;
+
+    wasm::Trap trap;
+    wasm::BytecodeOffset bytecode;
+    if (!segment->code().lookupTrap(pc, &trap, &bytecode))
+        return false;
+
+    act->startWasmTrap(trap, bytecode.offset, pc, fp);
+    set_pc(int32_t(segment->trapCode()));
+    return true;
+}
+
 uint64_t
 Simulator::readQ(int32_t addr, SimInstruction* instr, UnalignedPolicy f)
 {
-    if (handleWasmFault(addr, 8))
+    if (handleWasmSegFault(addr, 8))
         return UINT64_MAX;
 
     if ((addr & 3) == 0 || (f == AllowUnaligned && !HasAlignmentFault())) {
@@ -1649,7 +1715,7 @@ Simulator::readQ(int32_t addr, SimInstruction* instr, UnalignedPolicy f)
 void
 Simulator::writeQ(int32_t addr, uint64_t value, SimInstruction* instr, UnalignedPolicy f)
 {
-    if (handleWasmFault(addr, 8))
+    if (handleWasmSegFault(addr, 8))
         return;
 
     if ((addr & 3) == 0 || (f == AllowUnaligned && !HasAlignmentFault())) {
@@ -1672,7 +1738,7 @@ Simulator::writeQ(int32_t addr, uint64_t value, SimInstruction* instr, Unaligned
 int
 Simulator::readW(int32_t addr, SimInstruction* instr, UnalignedPolicy f)
 {
-    if (handleWasmFault(addr, 4))
+    if (handleWasmSegFault(addr, 4))
         return -1;
 
     if ((addr & 3) == 0 || (f == AllowUnaligned && !HasAlignmentFault())) {
@@ -1698,7 +1764,7 @@ Simulator::readW(int32_t addr, SimInstruction* instr, UnalignedPolicy f)
 void
 Simulator::writeW(int32_t addr, int value, SimInstruction* instr, UnalignedPolicy f)
 {
-    if (handleWasmFault(addr, 4))
+    if (handleWasmSegFault(addr, 4))
         return;
 
     if ((addr & 3) == 0 || (f == AllowUnaligned && !HasAlignmentFault())) {
@@ -1743,7 +1809,7 @@ Simulator::readExW(int32_t addr, SimInstruction* instr)
     if (addr & 3)
         MOZ_CRASH("Unaligned exclusive read");
 
-    if (handleWasmFault(addr, 4))
+    if (handleWasmSegFault(addr, 4))
         return -1;
 
     SharedMem<int32_t*> ptr = SharedMem<int32_t*>::shared(reinterpret_cast<int32_t*>(addr));
@@ -1758,7 +1824,7 @@ Simulator::writeExW(int32_t addr, int value, SimInstruction* instr)
     if (addr & 3)
         MOZ_CRASH("Unaligned exclusive write");
 
-    if (handleWasmFault(addr, 4))
+    if (handleWasmSegFault(addr, 4))
         return -1;
 
     SharedMem<int32_t*> ptr = SharedMem<int32_t*>::shared(reinterpret_cast<int32_t*>(addr));
@@ -1773,7 +1839,7 @@ Simulator::writeExW(int32_t addr, int value, SimInstruction* instr)
 uint16_t
 Simulator::readHU(int32_t addr, SimInstruction* instr)
 {
-    if (handleWasmFault(addr, 2))
+    if (handleWasmSegFault(addr, 2))
         return UINT16_MAX;
 
     // The regexp engine emits unaligned loads, so we don't check for them here
@@ -1799,7 +1865,7 @@ Simulator::readHU(int32_t addr, SimInstruction* instr)
 int16_t
 Simulator::readH(int32_t addr, SimInstruction* instr)
 {
-    if (handleWasmFault(addr, 2))
+    if (handleWasmSegFault(addr, 2))
         return -1;
 
     if ((addr & 1) == 0 || !HasAlignmentFault()) {
@@ -1823,7 +1889,7 @@ Simulator::readH(int32_t addr, SimInstruction* instr)
 void
 Simulator::writeH(int32_t addr, uint16_t value, SimInstruction* instr)
 {
-    if (handleWasmFault(addr, 2))
+    if (handleWasmSegFault(addr, 2))
         return;
 
     if ((addr & 1) == 0 || !HasAlignmentFault()) {
@@ -1846,7 +1912,7 @@ Simulator::writeH(int32_t addr, uint16_t value, SimInstruction* instr)
 void
 Simulator::writeH(int32_t addr, int16_t value, SimInstruction* instr)
 {
-    if (handleWasmFault(addr, 2))
+    if (handleWasmSegFault(addr, 2))
         return;
 
     if ((addr & 1) == 0 || !HasAlignmentFault()) {
@@ -1872,7 +1938,7 @@ Simulator::readExHU(int32_t addr, SimInstruction* instr)
     if (addr & 1)
         MOZ_CRASH("Unaligned exclusive read");
 
-    if (handleWasmFault(addr, 2))
+    if (handleWasmSegFault(addr, 2))
         return UINT16_MAX;
 
     SharedMem<uint16_t*> ptr = SharedMem<uint16_t*>::shared(reinterpret_cast<uint16_t*>(addr));
@@ -1887,7 +1953,7 @@ Simulator::writeExH(int32_t addr, uint16_t value, SimInstruction* instr)
     if (addr & 1)
         MOZ_CRASH("Unaligned exclusive write");
 
-    if (handleWasmFault(addr, 2))
+    if (handleWasmSegFault(addr, 2))
         return -1;
 
     SharedMem<uint16_t*> ptr = SharedMem<uint16_t*>::shared(reinterpret_cast<uint16_t*>(addr));
@@ -1902,7 +1968,7 @@ Simulator::writeExH(int32_t addr, uint16_t value, SimInstruction* instr)
 uint8_t
 Simulator::readBU(int32_t addr)
 {
-    if (handleWasmFault(addr, 1))
+    if (handleWasmSegFault(addr, 1))
         return UINT8_MAX;
 
     uint8_t* ptr = reinterpret_cast<uint8_t*>(addr);
@@ -1912,7 +1978,7 @@ Simulator::readBU(int32_t addr)
 uint8_t
 Simulator::readExBU(int32_t addr)
 {
-    if (handleWasmFault(addr, 1))
+    if (handleWasmSegFault(addr, 1))
         return UINT8_MAX;
 
     SharedMem<uint8_t*> ptr = SharedMem<uint8_t*>::shared(reinterpret_cast<uint8_t*>(addr));
@@ -1924,7 +1990,7 @@ Simulator::readExBU(int32_t addr)
 int32_t
 Simulator::writeExB(int32_t addr, uint8_t value)
 {
-    if (handleWasmFault(addr, 1))
+    if (handleWasmSegFault(addr, 1))
         return -1;
 
     SharedMem<uint8_t*> ptr = SharedMem<uint8_t*>::shared(reinterpret_cast<uint8_t*>(addr));
@@ -1939,7 +2005,7 @@ Simulator::writeExB(int32_t addr, uint8_t value)
 int8_t
 Simulator::readB(int32_t addr)
 {
-    if (handleWasmFault(addr, 1))
+    if (handleWasmSegFault(addr, 1))
         return -1;
 
     int8_t* ptr = reinterpret_cast<int8_t*>(addr);
@@ -1949,7 +2015,7 @@ Simulator::readB(int32_t addr)
 void
 Simulator::writeB(int32_t addr, uint8_t value)
 {
-    if (handleWasmFault(addr, 1))
+    if (handleWasmSegFault(addr, 1))
         return;
 
     uint8_t* ptr = reinterpret_cast<uint8_t*>(addr);
@@ -1959,7 +2025,7 @@ Simulator::writeB(int32_t addr, uint8_t value)
 void
 Simulator::writeB(int32_t addr, int8_t value)
 {
-    if (handleWasmFault(addr, 1))
+    if (handleWasmSegFault(addr, 1))
         return;
 
     int8_t* ptr = reinterpret_cast<int8_t*>(addr);
@@ -1969,7 +2035,7 @@ Simulator::writeB(int32_t addr, int8_t value)
 int32_t*
 Simulator::readDW(int32_t addr)
 {
-    if (handleWasmFault(addr, 8))
+    if (handleWasmSegFault(addr, 8))
         return nullptr;
 
     if ((addr & 3) == 0) {
@@ -1984,7 +2050,7 @@ Simulator::readDW(int32_t addr)
 void
 Simulator::writeDW(int32_t addr, int32_t value1, int32_t value2)
 {
-    if (handleWasmFault(addr, 8))
+    if (handleWasmSegFault(addr, 8))
         return;
 
     if ((addr & 3) == 0) {
@@ -2004,7 +2070,7 @@ Simulator::readExDW(int32_t addr, int32_t* hibits)
     if (addr & 3)
         MOZ_CRASH("Unaligned exclusive read");
 
-    if (handleWasmFault(addr, 8))
+    if (handleWasmSegFault(addr, 8))
         return -1;
 
     SharedMem<uint64_t*> ptr = SharedMem<uint64_t*>::shared(reinterpret_cast<uint64_t*>(addr));
@@ -2025,7 +2091,7 @@ Simulator::writeExDW(int32_t addr, int32_t value1, int32_t value2)
     if (addr & 3)
         MOZ_CRASH("Unaligned exclusive write");
 
-    if (handleWasmFault(addr, 8))
+    if (handleWasmSegFault(addr, 8))
         return -1;
 
     SharedMem<uint64_t*> ptr = SharedMem<uint64_t*>::shared(reinterpret_cast<uint64_t*>(addr));
@@ -3067,17 +3133,17 @@ Simulator::decodeType01(SimInstruction* instr)
                         MOZ_CRASH();
                 }
             } else {
-                if (instr->bits(disasm::ExclusiveOpHi, disasm::ExclusiveOpLo) == disasm::ExclusiveOpcode) {
+                if (instr->bits(excl::ExclusiveOpHi, excl::ExclusiveOpLo) == excl::ExclusiveOpcode) {
                     // Load-exclusive / store-exclusive.
-                    if (instr->bit(disasm::ExclusiveLoad)) {
+                    if (instr->bit(excl::ExclusiveLoad)) {
                         int rn = instr->rnValue();
                         int rt = instr->rtValue();
                         int32_t address = get_register(rn);
-                        switch (instr->bits(disasm::ExclusiveSizeHi, disasm::ExclusiveSizeLo)) {
-                          case disasm::ExclusiveWord:
+                        switch (instr->bits(excl::ExclusiveSizeHi, excl::ExclusiveSizeLo)) {
+                          case excl::ExclusiveWord:
                             set_register(rt, readExW(address, instr));
                             break;
-                          case disasm::ExclusiveDouble: {
+                          case excl::ExclusiveDouble: {
                             MOZ_ASSERT((rt % 2) == 0);
                             int32_t hibits;
                             int32_t lobits = readExDW(address, &hibits);
@@ -3085,10 +3151,10 @@ Simulator::decodeType01(SimInstruction* instr)
                             set_register(rt+1, hibits);
                             break;
                           }
-                          case disasm::ExclusiveByte:
+                          case excl::ExclusiveByte:
                             set_register(rt, readExBU(address));
                             break;
-                          case disasm::ExclusiveHalf:
+                          case excl::ExclusiveHalf:
                             set_register(rt, readExHU(address, instr));
                             break;
                         }
@@ -3099,20 +3165,20 @@ Simulator::decodeType01(SimInstruction* instr)
                         int32_t address = get_register(rn);
                         int32_t value = get_register(rt);
                         int32_t result = 0;
-                        switch (instr->bits(disasm::ExclusiveSizeHi, disasm::ExclusiveSizeLo)) {
-                          case disasm::ExclusiveWord:
+                        switch (instr->bits(excl::ExclusiveSizeHi, excl::ExclusiveSizeLo)) {
+                          case excl::ExclusiveWord:
                             result = writeExW(address, value, instr);
                             break;
-                          case disasm::ExclusiveDouble: {
+                          case excl::ExclusiveDouble: {
                             MOZ_ASSERT((rt % 2) == 0);
                             int32_t value2 = get_register(rt+1);
                             result = writeExDW(address, value, value2);
                             break;
                           }
-                          case disasm::ExclusiveByte:
+                          case excl::ExclusiveByte:
                             result = writeExB(address, (uint8_t)value);
                             break;
-                          case disasm::ExclusiveHalf:
+                          case excl::ExclusiveHalf:
                             result = writeExH(address, (uint16_t)value, instr);
                             break;
                         }
@@ -3551,6 +3617,12 @@ rotateBytes(uint32_t val, int32_t rotate)
 void
 Simulator::decodeType3(SimInstruction* instr)
 {
+    if (MOZ_UNLIKELY(instr->isUDF())) {
+        if (handleWasmIllFault())
+            return;
+        MOZ_CRASH("illegal instruction encountered");
+    }
+
     int rd = instr->rdValue();
     int rn = instr->rnValue();
     int32_t rn_val = get_register(rn);

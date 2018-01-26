@@ -718,7 +718,7 @@ public:
   {
     GetURIAttr(nsGkAtoms::src, nullptr, aValue);
   }
-  void SetSrc(const nsAString& aValue, nsIPrincipal& aTriggeringPrincipal, ErrorResult& aRv)
+  void SetSrc(const nsAString& aValue, nsIPrincipal* aTriggeringPrincipal, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::src, aValue, aTriggeringPrincipal, aRv);
   }
@@ -1058,6 +1058,11 @@ protected:
    * @return whether the current value is the empty string.
    */
   bool IsValueEmpty() const;
+
+  /**
+   * Returns whether the current placeholder value should be shown.
+   */
+  bool ShouldShowPlaceholder() const;
 
   void ClearFiles(bool aSetValueChanged);
 
@@ -1726,13 +1731,6 @@ private:
    */
   static bool
   IsDateTimeTypeSupported(uint8_t aDateTimeInputType);
-
-  /**
-   * Checks preference "dom.webkitBlink.dirPicker.enabled" to determine if
-   * webkitdirectory should be supported.
-   */
-  static bool
-  IsWebkitDirPickerEnabled();
 
   /**
    * Checks preference "dom.webkitBlink.filesystem.enabled" to determine if

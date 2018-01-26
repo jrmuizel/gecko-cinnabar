@@ -146,7 +146,7 @@ ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
                              MSG_METHOD_THIS_DOES_NOT_IMPLEMENT_INTERFACE;
   MOZ_RELEASE_ASSERT(GetErrorArgCount(errorNumber) <= 2);
   JS_ReportErrorNumberUC(aCx, GetErrorMessage, nullptr,
-                         static_cast<const unsigned>(errorNumber),
+                         static_cast<unsigned>(errorNumber),
                          funcNameStr.get(), ifaceName.get());
   return false;
 }
@@ -253,7 +253,7 @@ TErrorResult<CleanupPolicy>::SetPendingExceptionWithMessage(JSContext* aCx)
   args[argCount] = nullptr;
 
   JS_ReportErrorNumberUCArray(aCx, dom::GetErrorMessage, nullptr,
-                              static_cast<const unsigned>(message->mErrorNumber),
+                              static_cast<unsigned>(message->mErrorNumber),
                               argCount > 0 ? args : nullptr);
 
   ClearMessage();
@@ -2499,6 +2499,37 @@ InterfaceHasInstance(JSContext* cx, int prototypeID, int depth,
 }
 
 bool
+InterfaceIsInstance(JSContext* cx, unsigned argc, JS::Value* vp,
+                    prototypes::ID prototypeID, int depth)
+{
+  JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+  if (MOZ_UNLIKELY(args.length() < 1)) {
+    nsPrintfCString message("%s.isInstance",
+                            NamesOfInterfacesWithProtos(prototypeID));
+    return ThrowErrorMessage(cx, MSG_MISSING_ARGUMENTS, message.get());
+  }
+
+  if (!args[0].isObject()) {
+    nsPrintfCString message("Argument 1 of %s.isInstance",
+                            NamesOfInterfacesWithProtos(prototypeID));
+    return ThrowErrorMessage(cx, MSG_NOT_OBJECT, message.get());
+  }
+
+  JS::Rooted<JSObject*> instance(cx, &args[0].toObject());
+
+  const DOMJSClass* domClass =
+    GetDOMClass(js::UncheckedUnwrap(instance, /* stopAtWindowProxy = */ false));
+
+  if (domClass && domClass->mInterfaceChain[depth] == prototypeID) {
+    args.rval().setBoolean(true);
+    return true;
+  }
+
+  args.rval().setBoolean(false);
+  return true;
+}
+
+bool
 ReportLenientThisUnwrappingFailure(JSContext* cx, JSObject* obj)
 {
   JS::Rooted<JSObject*> rootedObj(cx, obj);
@@ -2839,43 +2870,6 @@ IsNonExposedGlobal(JSContext* aCx, JSObject* aGlobal,
   }
 
   return false;
-}
-
-void
-HandlePrerenderingViolation(nsPIDOMWindowInner* aWindow)
-{
-  // Freeze the window and its workers, and its children too.
-  aWindow->Freeze();
-
-  // Suspend event handling on the document
-  nsCOMPtr<nsIDocument> doc = aWindow->GetExtantDoc();
-  if (doc) {
-    doc->SuppressEventHandling();
-  }
-}
-
-bool
-EnforceNotInPrerendering(JSContext* aCx, JSObject* aObj)
-{
-  JS::Rooted<JSObject*> thisObj(aCx, js::CheckedUnwrap(aObj));
-  if (!thisObj) {
-    // Without a this object, we cannot check the safety.
-    return true;
-  }
-  nsGlobalWindowInner* window = xpc::WindowGlobalOrNull(thisObj);
-  if (!window) {
-    // Without a window, we cannot check the safety.
-    return true;
-  }
-
-  if (window->GetIsPrerendered()) {
-    HandlePrerenderingViolation(window->AsInner());
-    // When the bindings layer sees a false return value, it returns false form
-    // the JSNative in order to trigger an uncatchable exception.
-    return false;
-  }
-
-  return true;
 }
 
 bool
@@ -3525,28 +3519,6 @@ GetDesiredProto(JSContext* aCx, const JS::CallArgs& aCallArgs,
 
   aDesiredProto.set(&protoVal.toObject());
   return true;
-}
-
-CustomElementReactionsStack*
-GetCustomElementReactionsStack(JS::Handle<JSObject*> aObj)
-{
-  // This might not be the right object, if there are wrappers. Unwrap if we can.
-  JSObject* obj = js::CheckedUnwrap(aObj);
-  if (!obj) {
-    return nullptr;
-  }
-
-  nsGlobalWindowInner* window = xpc::WindowGlobalOrNull(obj);
-  if (!window) {
-    return nullptr;
-  }
-
-  DocGroup* docGroup = window->AsInner()->GetDocGroup();
-  if (!docGroup) {
-    return nullptr;
-  }
-
-  return docGroup->CustomElementReactionsStack();
 }
 
 // https://html.spec.whatwg.org/multipage/dom.html#htmlconstructor

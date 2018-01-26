@@ -29,28 +29,28 @@ class RemotePrintJobParent final : public PRemotePrintJobParent
 public:
   explicit RemotePrintJobParent(nsIPrintSettings* aPrintSettings);
 
-  void ActorDestroy(ActorDestroyReason aWhy) final;
+  void ActorDestroy(ActorDestroyReason aWhy) final override;
 
   mozilla::ipc::IPCResult RecvInitializePrint(const nsString& aDocumentTitle,
                                               const nsString& aPrintToFile,
                                               const int32_t& aStartPage,
-                                              const int32_t& aEndPage) final;
+                                              const int32_t& aEndPage) final override;
 
-  mozilla::ipc::IPCResult RecvProcessPage() final;
+  mozilla::ipc::IPCResult RecvProcessPage() final override;
 
-  mozilla::ipc::IPCResult RecvFinalizePrint() final;
+  mozilla::ipc::IPCResult RecvFinalizePrint() final override;
 
-  mozilla::ipc::IPCResult RecvAbortPrint(const nsresult& aRv) final;
+  mozilla::ipc::IPCResult RecvAbortPrint(const nsresult& aRv) final override;
 
   mozilla::ipc::IPCResult RecvStateChange(const long& aStateFlags,
-                                          const nsresult& aStatus) final;
+                                          const nsresult& aStatus) final override;
 
   mozilla::ipc::IPCResult RecvProgressChange(const long& aCurSelfProgress,
                                              const long& aMaxSelfProgress,
                                              const long& aCurTotalProgress,
-                                             const long& aMaxTotalProgress) final;
+                                             const long& aMaxTotalProgress) final override;
 
-  mozilla::ipc::IPCResult RecvStatusChange(const nsresult& aStatus) final;
+  mozilla::ipc::IPCResult RecvStatusChange(const nsresult& aStatus) final override;
 
   /**
     * Register a progress listener to receive print progress updates.
@@ -76,11 +76,18 @@ private:
 
   nsresult PrintPage(PRFileDescStream& aRecording);
 
+  /**
+   * Called to notify our corresponding RemotePrintJobChild once we've
+   * finished printing a page.
+   */
+  void PageDone(nsresult aResult);
+
   nsCOMPtr<nsIPrintSettings> mPrintSettings;
   RefPtr<nsDeviceContext> mPrintDeviceContext;
   UniquePtr<PrintTranslator> mPrintTranslator;
   nsCOMArray<nsIWebProgressListener> mPrintProgressListeners;
   PRFileDescStream mCurrentPageStream;
+  bool mIsDoingPrinting;
 };
 
 } // namespace layout

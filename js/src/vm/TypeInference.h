@@ -738,6 +738,8 @@ class HeapTypeSet : public ConstraintTypeSet
 CompilerConstraintList*
 NewCompilerConstraintList(jit::TempAllocator& alloc);
 
+enum class DOMObjectKind : uint8_t { Proxy, Native, Unknown };
+
 class TemporaryTypeSet : public TypeSet
 {
   public:
@@ -828,13 +830,10 @@ class TemporaryTypeSet : public TypeSet
                                    TypedArraySharedness* sharedness = nullptr);
 
     /* Whether all objects have JSCLASS_IS_DOMJSCLASS set. */
-    bool isDOMClass(CompilerConstraintList* constraints);
+    bool isDOMClass(CompilerConstraintList* constraints, DOMObjectKind* kind);
 
     /* Whether clasp->isCallable() is true for one or more objects in this set. */
     bool maybeCallable(CompilerConstraintList* constraints);
-
-    /* Whether clasp->isProxy() might be true for one or more objects in this set. */
-    bool maybeProxy(CompilerConstraintList* constraints);
 
     /* Whether clasp->emulatesUndefined() is true for one or more objects in this set. */
     bool maybeEmulatesUndefined(CompilerConstraintList* constraints);
@@ -1286,6 +1285,20 @@ class TypeScript
 #endif
 };
 
+// Ensures no TypeScripts are purged in the current zone.
+class MOZ_RAII AutoKeepTypeScripts
+{
+    TypeZone& zone_;
+    bool prev_;
+
+    AutoKeepTypeScripts(const AutoKeepTypeScripts&) = delete;
+    void operator=(const AutoKeepTypeScripts&) = delete;
+
+  public:
+    explicit inline AutoKeepTypeScripts(JSContext* cx);
+    inline ~AutoKeepTypeScripts();
+};
+
 void
 FillBytecodeTypeMap(JSScript* script, uint32_t* bytecodeMap);
 
@@ -1360,6 +1373,9 @@ class TypeZone
     static const size_t TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE = 8 * 1024;
     ZoneGroupData<LifoAlloc> typeLifoAlloc_;
 
+    TypeZone(const TypeZone&) = delete;
+    void operator=(const TypeZone&) = delete;
+
   public:
     // Current generation for sweeping.
     ZoneGroupOrGCTaskOrIonCompileData<uint32_t> generation;
@@ -1385,6 +1401,8 @@ class TypeZone
     ZoneGroupData<bool> sweepReleaseTypes;
 
     ZoneGroupData<bool> sweepingTypes;
+
+    ZoneGroupData<bool> keepTypeScripts;
 
     // The topmost AutoEnterAnalysis on the stack, if there is one.
     ZoneGroupData<AutoEnterAnalysis*> activeAnalysis;

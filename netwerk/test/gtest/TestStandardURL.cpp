@@ -16,7 +16,7 @@ extern nsresult Test_NormalizeIPv4(const nsACString& host, nsCString& result);
 TEST(TestStandardURL, Simple) {
     nsCOMPtr<nsIURL> url( do_CreateInstance(NS_STANDARDURL_CONTRACTID) );
     ASSERT_TRUE(url);
-    ASSERT_EQ(url->SetSpec(NS_LITERAL_CSTRING("http://example.com")), NS_OK);
+    ASSERT_EQ(url->SetSpecInternal(NS_LITERAL_CSTRING("http://example.com")), NS_OK);
 
     nsAutoCString out;
 
@@ -183,7 +183,7 @@ MOZ_GTEST_BENCH(TestStandardURL, Perf, [] {
     nsAutoCString out;
 
     for (int i = COUNT; i; --i) {
-        ASSERT_EQ(url->SetSpec(NS_LITERAL_CSTRING("http://example.com")), NS_OK);
+        ASSERT_EQ(url->SetSpecInternal(NS_LITERAL_CSTRING("http://example.com")), NS_OK);
         ASSERT_EQ(url->GetSpec(out), NS_OK);
         url->Resolve(NS_LITERAL_CSTRING("foo.html?q=45"), out);
         url->SetScheme(NS_LITERAL_CSTRING("foo"));
@@ -236,26 +236,32 @@ MOZ_GTEST_BENCH(TestStandardURL, NormalizePerfFails, [] {
 });
 #endif
 
-
 TEST(TestStandardURL, Mutator)
 {
   nsAutoCString out;
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_MutateURI(NS_STANDARDURLMUTATOR_CONTRACTID)
                   .SetSpec(NS_LITERAL_CSTRING("http://example.com"))
-                  .Finalize(getter_AddRefs(uri));
+                  .Finalize(uri);
   ASSERT_EQ(rv, NS_OK);
 
   ASSERT_EQ(uri->GetSpec(out), NS_OK);
   ASSERT_TRUE(out == NS_LITERAL_CSTRING("http://example.com/"));
 
-  nsCOMPtr<nsIURI> uri2;
   rv = NS_MutateURI(uri)
          .SetScheme(NS_LITERAL_CSTRING("ftp"))
          .SetHost(NS_LITERAL_CSTRING("mozilla.org"))
          .SetPathQueryRef(NS_LITERAL_CSTRING("/path?query#ref"))
-         .Finalize(getter_AddRefs(uri2));
+         .Finalize(uri);
   ASSERT_EQ(rv, NS_OK);
-  ASSERT_EQ(uri2->GetSpec(out), NS_OK);
+  ASSERT_EQ(uri->GetSpec(out), NS_OK);
   ASSERT_TRUE(out == NS_LITERAL_CSTRING("ftp://mozilla.org/path?query#ref"));
+
+  nsCOMPtr<nsIURL> url;
+  rv = NS_MutateURI(uri)
+         .SetScheme(NS_LITERAL_CSTRING("https"))
+         .Finalize(url);
+  ASSERT_EQ(rv, NS_OK);
+  ASSERT_EQ(url->GetSpec(out), NS_OK);
+  ASSERT_TRUE(out == NS_LITERAL_CSTRING("https://mozilla.org/path?query#ref"));
 }

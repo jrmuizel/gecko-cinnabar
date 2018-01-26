@@ -76,6 +76,7 @@ inline bool IsSpaceCharacter(char aChar) {
 class AccessibleNode;
 struct BoxQuadOptions;
 struct ConvertCoordinateOptions;
+class DocGroup;
 class DOMPoint;
 class DOMQuad;
 class DOMRectReadOnly;
@@ -278,6 +279,7 @@ private:
 #define DOM_USER_DATA         1
 
 // IID for the nsINode interface
+// Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
 #define NS_INODE_IID \
 { 0x70ba4547, 0x7699, 0x44fc, \
   { 0xb3, 0x20, 0x52, 0xdb, 0xe3, 0xd1, 0xf9, 0x0a } }
@@ -292,6 +294,7 @@ class nsINode : public mozilla::dom::EventTarget
 public:
   typedef mozilla::dom::BoxQuadOptions BoxQuadOptions;
   typedef mozilla::dom::ConvertCoordinateOptions ConvertCoordinateOptions;
+  typedef mozilla::dom::DocGroup DocGroup;
   typedef mozilla::dom::DOMPoint DOMPoint;
   typedef mozilla::dom::DOMPointInit DOMPointInit;
   typedef mozilla::dom::DOMQuad DOMQuad;
@@ -500,21 +503,24 @@ public:
   virtual uint32_t GetChildCount() const = 0;
 
   /**
+   * NOTE: this function is going to be removed soon (hopefully!) Don't use it
+   * in new code.
+   *
    * Get a child by index
    * @param aIndex the index of the child to get
    * @return the child, or null if index out of bounds
    */
-  virtual nsIContent* GetChildAt(uint32_t aIndex) const = 0;
+  virtual nsIContent* GetChildAt_Deprecated(uint32_t aIndex) const = 0;
 
   /**
    * Get the index of a child within this content
    * @param aPossibleChild the child to get the index of.
    * @return the index of the child, or -1 if not a child
    *
-   * If the return value is not -1, then calling GetChildAt() with that value
-   * will return aPossibleChild.
+   * If the return value is not -1, then calling GetChildAt_Deprecated() with
+   * that value will return aPossibleChild.
    */
-  virtual int32_t IndexOf(const nsINode* aPossibleChild) const = 0;
+  virtual int32_t ComputeIndexOf(const nsINode* aPossibleChild) const = 0;
 
   /**
    * Returns the "node document" of this node.
@@ -614,6 +620,11 @@ public:
   }
 
   /**
+   * Returns the DocGroup of the "node document" of this node.
+   */
+  DocGroup* GetDocGroup() const;
+
+  /**
    * Print a debugger friendly descriptor of this element. This will describe
    * the position of this element in the document.
    */
@@ -698,6 +709,37 @@ public:
     return IsMathMLElement() && IsNodeInternal(aFirst, aArgs...);
   }
 
+  bool IsShadowRoot() const
+  {
+    const bool isShadowRoot = IsInShadowTree() && !GetParentNode();
+    MOZ_ASSERT_IF(isShadowRoot,
+                  NodeType() == nsIDOMNode::DOCUMENT_FRAGMENT_NODE);
+    return isShadowRoot;
+  }
+
+  /**
+   * Insert a content node before another or at the end.
+   * This method handles calling BindToTree on the child appropriately.
+   *
+   * @param aKid the content to insert
+   * @param aBeforeThis an existing node. Use nullptr if you want to
+   *        add aKid at the end.
+   * @param aNotify whether to notify the document (current document for
+   *        nsIContent, and |this| for nsIDocument) that the insert has
+   *        occurred
+   *
+   * @throws NS_ERROR_DOM_HIERARCHY_REQUEST_ERR if one attempts to have more
+   * than one element node as a child of a document.  Doing this will also
+   * assert -- you shouldn't be doing it!  Check with
+   * nsIDocument::GetRootElement() first if you're not sure.  Apart from this
+   * one constraint, this doesn't do any checking on whether aKid is a valid
+   * child of |this|.
+   *
+   * @throws NS_ERROR_OUT_OF_MEMORY in some cases (from BindToTree).
+   */
+  virtual nsresult InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
+                                     bool aNotify) = 0;
+
   /**
    * Insert a content node at a particular index.  This method handles calling
    * BindToTree on the child appropriately.
@@ -718,8 +760,8 @@ public:
    *
    * @throws NS_ERROR_OUT_OF_MEMORY in some cases (from BindToTree).
    */
-  virtual nsresult InsertChildAt(nsIContent* aKid, uint32_t aIndex,
-                                 bool aNotify) = 0;
+  virtual nsresult InsertChildAt_Deprecated(nsIContent* aKid, uint32_t aIndex,
+                                            bool aNotify) = 0;
 
   /**
    * Append a content node to the end of the child list.  This method handles
@@ -741,10 +783,13 @@ public:
    */
   nsresult AppendChildTo(nsIContent* aKid, bool aNotify)
   {
-    return InsertChildAt(aKid, GetChildCount(), aNotify);
+    return InsertChildAt_Deprecated(aKid, GetChildCount(), aNotify);
   }
 
   /**
+   * NOTE: this function is going to be removed soon (hopefully!) Don't use it
+   * in new code.
+   *
    * Remove a child from this node.  This method handles calling UnbindFromTree
    * on the child appropriately.
    *
@@ -755,7 +800,18 @@ public:
    *
    * Note: If there is no child at aIndex, this method will simply do nothing.
    */
-  virtual void RemoveChildAt(uint32_t aIndex, bool aNotify) = 0;
+  virtual void RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify) = 0;
+
+  /**
+   * Remove a child from this node.  This method handles calling UnbindFromTree
+   * on the child appropriately.
+   *
+   * @param aKid the content to remove
+   * @param aNotify whether to notify the document (current document for
+   *        nsIContent, and |this| for nsIDocument) that the remove has
+   *        occurred
+   */
+  virtual void RemoveChildNode(nsIContent* aKid, bool aNotify) = 0;
 
   /**
    * Get a property associated with this node.
@@ -935,6 +991,8 @@ public:
     return mParent;
   }
 
+  enum FlattenedParentType { eNotForStyle, eForStyle };
+
   /**
    * Returns the node that is the parent of this node in the flattened
    * tree. This differs from the normal parent if the node is filtered
@@ -946,10 +1004,10 @@ public:
   inline nsINode* GetFlattenedTreeParentNode() const;
 
   /**
-   * Like GetFlattenedTreeParentNode, but returns null for any native
-   * anonymous content that was generated for ancestor frames of the
-   * root element's primary frame, such as scrollbar elements created
-   * by the root scroll frame.
+   * Like GetFlattenedTreeParentNode, but returns the document for any native
+   * anonymous content that was generated for ancestor frames of the document
+   * element's primary frame, such as scrollbar elements created by the root
+   * scroll frame.
    */
   inline nsINode* GetFlattenedTreeParentNodeForStyle() const;
 
@@ -1105,8 +1163,8 @@ public:
     // putting a DestroySlots function on nsINode
     virtual ~nsSlots();
 
-    void Traverse(nsCycleCollectionTraversalCallback &cb);
-    void Unlink();
+    virtual void Traverse(nsCycleCollectionTraversalCallback&);
+    virtual void Unlink();
 
     /**
      * A list of mutation observers
@@ -1287,7 +1345,7 @@ public:
   {
     uint32_t count = GetChildCount();
 
-    return count > 0 ? GetChildAt(count - 1) : nullptr;
+    return count > 0 ? GetChildAt_Deprecated(count - 1) : nullptr;
   }
 
   /**
@@ -1346,10 +1404,10 @@ public:
     GetTextContentInternal(aTextContent, aError);
   }
   void SetTextContent(const nsAString& aTextContent,
-                      nsIPrincipal& aSubjectPrincipal,
+                      nsIPrincipal* aSubjectPrincipal,
                       mozilla::ErrorResult& aError)
   {
-    SetTextContentInternal(aTextContent, &aSubjectPrincipal, aError);
+    SetTextContentInternal(aTextContent, aSubjectPrincipal, aError);
   }
   void SetTextContent(const nsAString& aTextContent,
                       mozilla::ErrorResult& aError)
@@ -1811,7 +1869,7 @@ public:
   void GetNodeName(mozilla::dom::DOMString& aNodeName)
   {
     const nsString& nodeName = NodeName();
-    aNodeName.SetOwnedString(nodeName);
+    aNodeName.SetKnownLiveString(nodeName);
   }
   MOZ_MUST_USE nsresult GetBaseURI(nsAString& aBaseURI) const;
   // Return the base URI for the document.
@@ -1875,7 +1933,7 @@ public:
   void GetLocalName(mozilla::dom::DOMString& aLocalName) const
   {
     const nsString& localName = LocalName();
-    aLocalName.SetOwnedString(localName);
+    aLocalName.SetKnownLiveString(localName);
   }
 
   nsDOMAttributeMap* GetAttributes();
@@ -2059,7 +2117,7 @@ protected:
                        nsAttrAndChildArray& aChildArray);
 
   /**
-   * Most of the implementation of the nsINode InsertChildAt method.
+   * Most of the implementation of the nsINode InsertChildAt_Deprecated method.
    * Should only be called on document, element, and document fragment
    * nodes.  The aChildArray passed in should be the one for |this|.
    *

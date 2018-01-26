@@ -29,8 +29,8 @@
 #include "nsCRT.h"
 #include "nsContentUtils.h"
 #include "nsAttrName.h"
-#include "nsILineBreaker.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/intl/LineBreaker.h"
 #include "nsParserConstants.h"
 #include "mozilla/Encoding.h"
 
@@ -1294,12 +1294,12 @@ void
 nsXMLContentSerializer::MaybeEnterInPreContent(nsIContent* aNode)
 {
   // support of the xml:space attribute
+  nsAutoString space;
   if (ShouldMaintainPreLevel() &&
-      aNode->HasAttr(kNameSpaceID_XML, nsGkAtoms::space)) {
-    nsAutoString space;
-    aNode->GetAttr(kNameSpaceID_XML, nsGkAtoms::space, space);
-    if (space.EqualsLiteral("preserve"))
-      ++PreLevel();
+      aNode->IsElement() &&
+      aNode->AsElement()->GetAttr(kNameSpaceID_XML, nsGkAtoms::space, space) &&
+      space.EqualsLiteral("preserve")) {
+    ++PreLevel();
   }
 }
 
@@ -1307,12 +1307,12 @@ void
 nsXMLContentSerializer::MaybeLeaveFromPreContent(nsIContent* aNode)
 {
   // support of the xml:space attribute
+  nsAutoString space;
   if (ShouldMaintainPreLevel() &&
-      aNode->HasAttr(kNameSpaceID_XML, nsGkAtoms::space)) {
-    nsAutoString space;
-    aNode->GetAttr(kNameSpaceID_XML, nsGkAtoms::space, space);
-    if (space.EqualsLiteral("preserve"))
-      --PreLevel();
+      aNode->IsElement() &&
+      aNode->AsElement()->GetAttr(kNameSpaceID_XML, nsGkAtoms::space, space) &&
+      space.EqualsLiteral("preserve")) {
+    --PreLevel();
   }
 }
 
@@ -1600,7 +1600,8 @@ nsXMLContentSerializer::AppendWrapped_NonWhitespaceSequence(
         int32_t wrapPosition = 0;
 
         if (mAllowLineBreaking) {
-          nsILineBreaker *lineBreaker = nsContentUtils::LineBreaker();
+          mozilla::intl::LineBreaker* lineBreaker =
+            nsContentUtils::LineBreaker();
 
           wrapPosition = lineBreaker->Prev(aSequenceStart,
                                            (aEnd - aSequenceStart),

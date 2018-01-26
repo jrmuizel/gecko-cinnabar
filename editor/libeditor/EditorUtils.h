@@ -8,6 +8,7 @@
 #define mozilla_EditorUtils_h
 
 #include "mozilla/dom/Selection.h"
+#include "mozilla/EditAction.h"
 #include "mozilla/EditorBase.h"
 #include "mozilla/EditorDOMPoint.h"
 #include "mozilla/GuardObjects.h"
@@ -176,7 +177,7 @@ public:
   nsIContent* GetRightNode() const
   {
     if (mGivenSplitPoint.IsSet()) {
-      return mGivenSplitPoint.GetChildAtOffset();
+      return mGivenSplitPoint.GetChild();
     }
     return mPreviousNode && !mNextNode ? mPreviousNode : mNextNode;
   }
@@ -188,7 +189,7 @@ public:
   {
     if (mGivenSplitPoint.IsSet()) {
       return mGivenSplitPoint.IsEndOfContainer() ?
-               mGivenSplitPoint.GetChildAtOffset() : nullptr;
+               mGivenSplitPoint.GetChild() : nullptr;
     }
     return mPreviousNode;
   }
@@ -200,7 +201,7 @@ public:
   {
     if (mGivenSplitPoint.IsSet()) {
       return !mGivenSplitPoint.IsEndOfContainer() ?
-                mGivenSplitPoint.GetChildAtOffset() : nullptr;
+                mGivenSplitPoint.GetChild() : nullptr;
     }
     return mNextNode;
   }
@@ -522,7 +523,7 @@ class TrivialFunctor final : public BoolDomIterFunctor
 {
 public:
   // Used to build list of all nodes iterator covers
-  virtual bool operator()(nsINode* aNode) const
+  virtual bool operator()(nsINode* aNode) const override
   {
     return true;
   }

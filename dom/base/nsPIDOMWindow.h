@@ -47,9 +47,11 @@ class ThrottledEventQueue;
 namespace dom {
 class AudioContext;
 class ClientInfo;
+class ClientState;
 class DocGroup;
 class TabGroup;
 class Element;
+class Navigator;
 class Performance;
 class ServiceWorkerDescriptor;
 class ServiceWorkerRegistration;
@@ -121,10 +123,12 @@ enum class LargeAllocStatus : uint8_t
 } // namespace dom
 } // namespace mozilla
 
+// Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
 #define NS_PIDOMWINDOWINNER_IID \
 { 0x775dabc9, 0x8f43, 0x4277, \
   { 0x9a, 0xdb, 0xf1, 0x99, 0x0d, 0x77, 0xcf, 0xfb } }
 
+// Must be kept in sync with xpcom/rust/xpcom/src/interfaces/nonidl.rs
 #define NS_PIDOMWINDOWOUTER_IID \
   { 0x769693d4, 0xb009, 0x4fe2, \
   { 0xaf, 0x18, 0x7d, 0xc8, 0xdf, 0x74, 0x96, 0xdf } }
@@ -327,7 +331,10 @@ public:
   bool HasOpenWebSockets() const;
 
   mozilla::Maybe<mozilla::dom::ClientInfo> GetClientInfo() const;
+  mozilla::Maybe<mozilla::dom::ClientState> GetClientState() const;
   mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor> GetController() const;
+
+  void NoteCalledRegisterForServiceWorkerScope(const nsACString& aScope);
 
   mozilla::dom::TabGroup* TabGroup();
 
@@ -585,7 +592,7 @@ public:
   }
 
   virtual nsIDOMScreen* GetScreen() = 0;
-  virtual nsIDOMNavigator* GetNavigator() = 0;
+  mozilla::dom::Navigator* Navigator();
   virtual mozilla::dom::Location* GetLocation() = 0;
 
   virtual nsresult GetControllers(nsIControllers** aControllers) = 0;
@@ -607,8 +614,6 @@ public:
 
   virtual nsresult Focus() = 0;
   virtual nsresult Close() = 0;
-
-  virtual nsresult UpdateCommands(const nsAString& anAction, nsISelection* aSel, int16_t aReason) = 0;
 
   mozilla::dom::DocGroup* GetDocGroup() const;
   virtual nsISerialEventTarget*
@@ -642,6 +647,8 @@ protected:
 
   RefPtr<mozilla::dom::Performance> mPerformance;
   mozilla::UniquePtr<mozilla::dom::TimeoutManager> mTimeoutManager;
+
+  RefPtr<mozilla::dom::Navigator> mNavigator;
 
   typedef nsRefPtrHashtable<nsStringHashKey,
                             mozilla::dom::ServiceWorkerRegistration>
@@ -1094,7 +1101,7 @@ public:
   // XXX(nika): These feel like they should be inner window only, but they're
   // called on the outer window.
   virtual nsIDOMScreen* GetScreen() = 0;
-  virtual nsIDOMNavigator* GetNavigator() = 0;
+  virtual mozilla::dom::Navigator* GetNavigator() = 0;
   virtual mozilla::dom::Location* GetLocation() = 0;
 
   virtual nsresult GetPrompter(nsIPrompt** aPrompt) = 0;
@@ -1131,7 +1138,7 @@ public:
 
   virtual nsresult MoveBy(int32_t aXDif, int32_t aYDif) = 0;
 
-  virtual nsresult UpdateCommands(const nsAString& anAction, nsISelection* aSel, int16_t aReason) = 0;
+  virtual void UpdateCommands(const nsAString& anAction, nsISelection* aSel, int16_t aReason) = 0;
 
   mozilla::dom::DocGroup* GetDocGroup() const;
   virtual nsISerialEventTarget*

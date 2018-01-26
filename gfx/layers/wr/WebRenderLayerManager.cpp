@@ -267,7 +267,7 @@ WebRenderLayerManager::EndTransactionWithoutLayer(nsDisplayList* aDisplayList,
   LayoutDeviceIntSize size = mWidget->GetClientSize();
   wr::LayoutSize contentSize { (float)size.width, (float)size.height };
   wr::DisplayListBuilder builder(WrBridge()->GetPipeline(), contentSize, mLastDisplayListSize);
-  wr::IpcResourceUpdateQueue resourceUpdates(WrBridge()->GetShmemAllocator());
+  wr::IpcResourceUpdateQueue resourceUpdates(WrBridge());
 
   mWebRenderCommandBuilder.BuildWebRenderCommands(builder,
                                                   resourceUpdates,
@@ -390,7 +390,7 @@ WebRenderLayerManager::MakeSnapshotIfRequired(LayoutDeviceIntSize aSize)
   gfxUtils::WriteAsPNG(snapshot, filename);
   */
 
-  Rect dst(bounds.x, bounds.y, bounds.Width(), bounds.Height());
+  Rect dst(bounds.X(), bounds.Y(), bounds.Width(), bounds.Height());
   Rect src(0, 0, bounds.Width(), bounds.Height());
 
   // The data we get from webrender is upside down. So flip and translate up so the image is rightside up.
@@ -413,7 +413,7 @@ WebRenderLayerManager::AddImageKeyForDiscard(wr::ImageKey key)
 void
 WebRenderLayerManager::DiscardImages()
 {
-  wr::IpcResourceUpdateQueue resources(WrBridge()->GetShmemAllocator());
+  wr::IpcResourceUpdateQueue resources(WrBridge());
   for (const auto& key : mImageKeysToDeleteLater) {
     resources.DeleteImage(key);
   }
@@ -511,26 +511,16 @@ WebRenderLayerManager::DidComposite(uint64_t aTransactionId,
 }
 
 void
-WebRenderLayerManager::ClearLayer(Layer* aLayer)
-{
-  aLayer->ClearCachedResources();
-  if (aLayer->GetMaskLayer()) {
-    aLayer->GetMaskLayer()->ClearCachedResources();
-  }
-  for (size_t i = 0; i < aLayer->GetAncestorMaskLayerCount(); i++) {
-    aLayer->GetAncestorMaskLayerAt(i)->ClearCachedResources();
-  }
-  for (Layer* child = aLayer->GetFirstChild(); child;
-       child = child->GetNextSibling()) {
-    ClearLayer(child);
-  }
-}
-
-void
 WebRenderLayerManager::ClearCachedResources(Layer* aSubtree)
 {
   WrBridge()->BeginClearCachedResources();
+  mWebRenderCommandBuilder.ClearCachedResources();
   DiscardImages();
+  // Clear all active compositor animation ids.
+  // When ClearCachedResources is called, all animations are removed
+  // by WebRenderBridgeParent::RecvClearCachedResources().
+  mActiveCompositorAnimationIds.clear();
+  mDiscardedCompositorAnimationsIds.Clear();
   WrBridge()->EndClearCachedResources();
 }
 

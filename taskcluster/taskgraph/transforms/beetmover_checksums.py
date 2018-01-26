@@ -31,6 +31,9 @@ beetmover_checksums_description_schema = Schema({
     Optional('label'): basestring,
     Optional('treeherder'): task_description_schema['treeherder'],
     Optional('locale'): basestring,
+    Optional('shipping-phase'): task_description_schema['shipping-phase'],
+    Optional('shipping-product'): task_description_schema['shipping-product'],
+    Optional('notifications'): task_description_schema['notifications'],
 })
 
 
@@ -38,9 +41,10 @@ beetmover_checksums_description_schema = Schema({
 def validate(config, jobs):
     for job in jobs:
         label = job.get('dependent-task', object).__dict__.get('label', '?no-label?')
-        yield validate_schema(
+        validate_schema(
             beetmover_checksums_description_schema, job,
             "In checksums-signing ({!r} kind) task for {!r}:".format(config.kind, label))
+        yield job
 
 
 @transforms.add
@@ -50,7 +54,7 @@ def make_beetmover_checksums_description(config, jobs):
         attributes = dep_job.attributes
 
         treeherder = job.get('treeherder', {})
-        treeherder.setdefault('symbol', 'tc-BMcs(N)')
+        treeherder.setdefault('symbol', 'BMcs(N)')
         dep_th_platform = dep_job.task.get('extra', {}).get(
             'treeherder', {}).get('machine', {}).get('platform', '')
         treeherder.setdefault('platform',
@@ -87,7 +91,7 @@ def make_beetmover_checksums_description(config, jobs):
         attributes = copy_attributes_from_dependent_job(dep_job)
 
         if dep_job.attributes.get('locale'):
-            treeherder['symbol'] = 'tc-BMcs({})'.format(dep_job.attributes.get('locale'))
+            treeherder['symbol'] = 'BMcs({})'.format(dep_job.attributes.get('locale'))
             attributes['locale'] = dep_job.attributes.get('locale')
 
         bucket_scope = get_beetmover_bucket_scope(config)
@@ -104,6 +108,15 @@ def make_beetmover_checksums_description(config, jobs):
             'treeherder': treeherder,
             'extra': extra,
         }
+
+        if 'shipping-phase' in job:
+            task['shipping-phase'] = job['shipping-phase']
+
+        if 'shipping-product' in job:
+            task['shipping-product'] = job['shipping-product']
+
+        if 'notifications' in job:
+            task['notifications'] = job['notifications']
 
         yield task
 
@@ -129,15 +142,6 @@ def generate_upstream_artifacts(refs, platform, locale=None):
         "paths": ["public/balrog_props.json"],
         "locale": locale or "en-US",
     }]
-
-    if not locale and "android" in platform:
-        # edge case to support 'multi' locale paths
-        upstream_artifacts.extend([{
-            "taskId": {"task-reference": refs["signing"]},
-            "taskType": "signing",
-            "paths": common_paths,
-            "locale": "multi"
-        }])
 
     return upstream_artifacts
 

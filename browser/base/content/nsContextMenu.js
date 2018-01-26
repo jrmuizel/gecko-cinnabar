@@ -133,8 +133,8 @@ nsContextMenu.prototype = {
     this.isFrameImage = document.getElementById("isFrameImage");
     this.ellipsis = "\u2026";
     try {
-      this.ellipsis = gPrefService.getComplexValue("intl.ellipsis",
-                                                   Ci.nsIPrefLocalizedString).data;
+      this.ellipsis = Services.prefs.getComplexValue("intl.ellipsis",
+                                                     Ci.nsIPrefLocalizedString).data;
     } catch (e) { }
 
     // Reset after "on-build-contextmenu" notification in case selection was
@@ -433,7 +433,7 @@ nsContextMenu.prototype = {
                        this.onLink || this.onTextInput);
 
     var showInspect = this.inTabBrowser &&
-                      gPrefService.getBoolPref("devtools.inspector.enabled", true);
+                      Services.prefs.getBoolPref("devtools.inspector.enabled", true);
 
     this.showItem("context-viewsource", shouldShow);
     this.showItem("context-viewinfo", shouldShow);
@@ -864,16 +864,21 @@ nsContextMenu.prototype = {
   // View Partial Source
   viewPartialSource(aContext) {
     let inWindow = !Services.prefs.getBoolPref("view_source.tab");
+    let {browser} = this;
     let openSelectionFn = inWindow ? null : function() {
       let tabBrowser = gBrowser;
       // In the case of popups, we need to find a non-popup browser window.
-      if (!tabBrowser || !window.toolbar.visible) {
+      // We might also not have a tabBrowser reference (if this isn't in a
+      // a tabbrowser scope) or might have a fake/stub tabbrowser reference
+      // (in the sidebar). Deal with those cases:
+      if (!tabBrowser || !tabBrowser.loadOneTab || !window.toolbar.visible) {
         // This returns only non-popup browser windows by default.
         let browserWindow = RecentWindow.getMostRecentBrowserWindow();
         tabBrowser = browserWindow.gBrowser;
       }
+      let relatedToCurrent = gBrowser && gBrowser.selectedBrowser == browser;
       let tab = tabBrowser.loadOneTab("about:blank", {
-        relatedToCurrent: true,
+        relatedToCurrent,
         inBackground: false,
         triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
       });
@@ -881,7 +886,7 @@ nsContextMenu.prototype = {
     };
 
     let target = aContext == "mathml" ? this.target : null;
-    top.gViewSourceUtils.viewPartialSourceInBrowser(gBrowser.selectedBrowser, target, openSelectionFn);
+    top.gViewSourceUtils.viewPartialSourceInBrowser(browser, target, openSelectionFn);
   },
 
   // Open new "view source" window with the frame's URL.
@@ -1156,7 +1161,7 @@ nsContextMenu.prototype = {
     if (linkDownload)
       channel.contentDispositionFilename = linkDownload;
     if (channel instanceof Ci.nsIPrivateBrowsingChannel) {
-      let docIsPrivate = PrivateBrowsingUtils.isBrowserPrivate(gBrowser.selectedBrowser);
+      let docIsPrivate = PrivateBrowsingUtils.isBrowserPrivate(this.browser);
       channel.setPrivate(docIsPrivate);
     }
     channel.notificationCallbacks = new callbacks();
@@ -1179,7 +1184,7 @@ nsContextMenu.prototype = {
 
     // fallback to the old way if we don't see the headers quickly
     var timeToWait =
-      gPrefService.getIntPref("browser.download.saveLinkAsFilenameTimeout");
+      Services.prefs.getIntPref("browser.download.saveLinkAsFilenameTimeout");
     var timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
     timer.initWithCallback(new timerCallback(), timeToWait,
                            timer.TYPE_ONE_SHOT);
@@ -1383,8 +1388,8 @@ nsContextMenu.prototype = {
 
     var locale = "-";
     try {
-      locale = gPrefService.getComplexValue("intl.accept_languages",
-                                            Ci.nsIPrefLocalizedString).data;
+      locale = Services.prefs.getComplexValue("intl.accept_languages",
+                                              Ci.nsIPrefLocalizedString).data;
     } catch (e) { }
 
     var version = "-";
@@ -1394,7 +1399,7 @@ nsContextMenu.prototype = {
 
     uri = uri.replace(/%LOCALE%/, escape(locale)).replace(/%VERSION%/, version);
 
-    var newWindowPref = gPrefService.getIntPref("browser.link.open_newwindow");
+    var newWindowPref = Services.prefs.getIntPref("browser.link.open_newwindow");
     var where = newWindowPref == 3 ? "tab" : "window";
 
     openUILinkIn(uri, where);

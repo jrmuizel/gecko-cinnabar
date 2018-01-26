@@ -43,10 +43,6 @@ const SHADERS: &[Shader] = &[
     },
     // Prim shaders
     Shader {
-        name: "ps_line",
-        features: &["", "TRANSFORM", "CACHE"],
-    },
-    Shader {
         name: "ps_border_corner",
         features: PRIM_FEATURES,
     },
@@ -104,8 +100,12 @@ const SHADERS: &[Shader] = &[
         features: &[],
     },
     Shader {
-        name: "brush_image",
+        name: "brush_picture",
         features: &["COLOR_TARGET", "ALPHA_TARGET"],
+    },
+    Shader {
+        name: "brush_line",
+        features: &[],
     },
 ];
 

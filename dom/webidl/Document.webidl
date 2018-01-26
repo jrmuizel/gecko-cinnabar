@@ -12,7 +12,7 @@ interface URI;
 interface nsIDocShell;
 interface nsILoadGroup;
 
-enum VisibilityState { "hidden", "visible", "prerender" };
+enum VisibilityState { "hidden", "visible" };
 
 /* https://dom.spec.whatwg.org/#dictdef-elementcreationoptions */
 dictionary ElementCreationOptions {
@@ -98,6 +98,11 @@ interface Document : Node {
   Attr createAttribute(DOMString name);
   [NewObject, Throws]
   Attr createAttributeNS(DOMString? namespace, DOMString name);
+
+  // Allows setting innerHTML without automatic sanitization.
+  // Do not use this.
+  [ChromeOnly]
+  attribute boolean allowUnsafeHTML;
 };
 
 // http://www.whatwg.org/specs/web-apps/current-work/#the-document-object
@@ -137,7 +142,6 @@ partial interface Document {
   // user interaction
   [Pure]
   readonly attribute WindowProxy? defaultView;
-  readonly attribute Element? activeElement;
   [Throws]
   boolean hasFocus();
   //(HTML only)         attribute DOMString designMode;
@@ -274,8 +278,6 @@ partial interface Document {
 
 // http://dev.w3.org/csswg/cssom/#extensions-to-the-document-interface
 partial interface Document {
-    [Constant]
-    readonly attribute StyleSheetList styleSheets;
     attribute DOMString? selectedStyleSheetSet;
     readonly attribute DOMString? lastStyleSheetSet;
     readonly attribute DOMString? preferredStyleSheetSet;
@@ -304,7 +306,7 @@ partial interface Document {
   //(Not implemented)NodeList  findAll(DOMString selectors, optional (Element or sequence<Node>)? refNodes);
 };
 
-// http://w3c.github.io/web-animations/#extensions-to-the-document-interface
+// https://drafts.csswg.org/web-animations/#extensions-to-the-document-interface
 partial interface Document {
   [Func="nsDocument::IsWebAnimationsEnabled"]
   readonly attribute DocumentTimeline timeline;
@@ -445,6 +447,13 @@ partial interface Document {
   [ChromeOnly] readonly attribute boolean userHasInteracted;
 };
 
+// Extension to give chrome JS the ability to simulate activate the docuement
+// by user gesture.
+partial interface Document {
+  [ChromeOnly]
+  void notifyUserActivation();
+};
+
 // Extension to give chrome and XBL JS the ability to determine whether
 // the document is sandboxed without permission to run scripts
 // and whether inline scripts are blocked by the document's CSP.
@@ -475,3 +484,4 @@ Document implements ParentNode;
 Document implements OnErrorEventHandlerForNodes;
 Document implements GeometryUtils;
 Document implements FontFaceSource;
+Document implements DocumentOrShadowRoot;

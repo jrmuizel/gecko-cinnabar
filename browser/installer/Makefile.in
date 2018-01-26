@@ -99,9 +99,9 @@ DEFINES += -DHAVE_MAKENSISU=1
 endif
 
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
-MOZ_PKG_MAC_DSSTORE=branding/dsstore
-MOZ_PKG_MAC_BACKGROUND=branding/background.png
-MOZ_PKG_MAC_ICON=branding/disk.icns
+MOZ_PKG_MAC_DSSTORE=$(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/dsstore
+MOZ_PKG_MAC_BACKGROUND=$(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/background.png
+MOZ_PKG_MAC_ICON=$(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/disk.icns
 MOZ_PKG_MAC_EXTRA=--symlink '/Applications:/ '
 endif
 
@@ -122,7 +122,7 @@ RESPATH = $(_APPNAME)/Contents/Resources
 else
 RESPATH = $(BINPATH)
 endif
-DEFINES += -DRESPATH="$(RESPATH)"
+DEFINES += -DRESPATH='$(RESPATH)'
 
 LPROJ_ROOT = $(firstword $(subst -, ,$(AB_CD)))
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
@@ -174,7 +174,7 @@ FINDPATH=bin
 endif
 
 package-compare::
-	cd $(DIST); find $(PKGCOMP_FIND_OPTS) $(FINDPATH) -type f | sort > bin-list.txt
+	cd $(DIST); find $(PKGCOMP_FIND_OPTS) '$(FINDPATH)' -type f | sort > bin-list.txt
 	$(call py_action,preprocessor,$(DEFINES) $(ACDEFINES) $(MOZ_PKG_MANIFEST)) | grep '^$(BINPATH)' | sed -e 's/^\///' | sort > $(DIST)/pack-list.txt
 	-diff -u $(DIST)/pack-list.txt $(DIST)/bin-list.txt
 	rm -f $(DIST)/pack-list.txt $(DIST)/bin-list.txt

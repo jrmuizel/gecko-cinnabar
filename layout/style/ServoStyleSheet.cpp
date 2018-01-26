@@ -21,7 +21,6 @@
 
 
 #include "mozAutoDocUpdate.h"
-#include "nsIDOMCSSStyleSheet.h"
 
 using namespace mozilla::dom;
 
@@ -150,7 +149,7 @@ ServoStyleSheet::ServoStyleSheet(const ServoStyleSheet& aCopy,
                aDocumentToUse,
                aOwningNodeToUse)
 {
-  if (mDirty) { // CSSOM's been there, force full copy now
+  if (HasForcedUniqueInner()) { // CSSOM's been there, force full copy now
     NS_ASSERTION(mInner->mComplete,
                  "Why have rules been accessed on an incomplete sheet?");
     // FIXME: handle failure?
@@ -173,7 +172,6 @@ ServoStyleSheet::LastRelease()
 
 // QueryInterface implementation for ServoStyleSheet
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ServoStyleSheet)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMCSSStyleSheet)
   if (aIID.Equals(NS_GET_IID(ServoStyleSheet)))
     foundInterface = reinterpret_cast<nsISupports*>(this);
   else
@@ -329,6 +327,9 @@ ServoStyleSheet::ReparseSheet(const nsAString& aInput)
       RuleAdded(*rule);
     }
   }
+
+  // Our rules are no longer considered modified.
+  ClearModifiedRules();
 
   return NS_OK;
 }

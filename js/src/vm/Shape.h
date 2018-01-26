@@ -995,8 +995,6 @@ class Shape : public gc::TenuredCell
         return flags & OVERWRITTEN;
     }
 
-    void update(GetterOp getter, SetterOp setter, uint8_t attrs);
-
     bool matches(const Shape* other) const {
         return propid_.get() == other->propid_.get() &&
                matchesParamsAfterId(other->base(), other->maybeSlot(), other->attrs,
@@ -1152,6 +1150,7 @@ class Shape : public gc::TenuredCell
 
 #ifdef DEBUG
     void dump(js::GenericPrinter& out) const;
+    void dump() const;
     void dumpSubtree(int level, js::GenericPrinter& out) const;
 #endif
 
@@ -1222,7 +1221,7 @@ class MOZ_RAII AutoRooterGetterSetter
         inline Inner(JSContext* cx, uint8_t attrs, GetterOp* pgetter_, SetterOp* psetter_);
 
       private:
-        virtual void trace(JSTracer* trc);
+        virtual void trace(JSTracer* trc) override;
 
         uint8_t attrs;
         GetterOp* pgetter;

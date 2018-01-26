@@ -61,6 +61,7 @@
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/FullParseHandler.h"  // for JS_BufferIsCompileableUnit
 #include "frontend/Parser.h" // for JS_BufferIsCompileableUnit
+#include "gc/FreeOp.h"
 #include "gc/Marking.h"
 #include "gc/Policy.h"
 #include "jit/JitCommon.h"
@@ -653,6 +654,40 @@ JS_SetCompartmentNameCallback(JSContext* cx, JSCompartmentNameCallback callback)
     cx->runtime()->compartmentNameCallback = callback;
 }
 
+#if defined(NIGHTLY_BUILD)
+JS_PUBLIC_API(void)
+JS_SetErrorInterceptorCallback(JSRuntime* rt, JSErrorInterceptor* callback)
+{
+    rt->errorInterception.interceptor = callback;
+}
+
+JS_PUBLIC_API(JSErrorInterceptor*)
+JS_GetErrorInterceptorCallback(JSRuntime* rt)
+{
+    return rt->errorInterception.interceptor;
+}
+
+JS_PUBLIC_API(Maybe<JSExnType>)
+JS_GetErrorType(const JS::Value& val)
+{
+    // All errors are objects.
+    if (!val.isObject())
+        return mozilla::Nothing();
+
+    const JSObject& obj = val.toObject();
+
+    // All errors are `ErrorObject`.
+    if (!obj.is<js::ErrorObject>()) {
+        // Not one of the primitive errors.
+        return mozilla::Nothing();
+    }
+
+    const js::ErrorObject& err = obj.as<js::ErrorObject>();
+    return mozilla::Some(err.type());
+}
+
+#endif // defined(NIGHTLY_BUILD)
+
 JS_PUBLIC_API(void)
 JS_SetWrapObjectCallbacks(JSContext* cx, const JSWrapObjectCallbacks* callbacks)
 {
@@ -1190,7 +1225,11 @@ JS_GetClassObject(JSContext* cx, JSProtoKey key, MutableHandleObject objp)
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    return GetBuiltinConstructor(cx, key, objp);
+    JSObject* obj = GlobalObject::getOrCreateConstructor(cx, key);
+    if (!obj)
+        return false;
+    objp.set(obj);
+    return true;
 }
 
 JS_PUBLIC_API(bool)
@@ -1198,7 +1237,11 @@ JS_GetClassPrototype(JSContext* cx, JSProtoKey key, MutableHandleObject objp)
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    return GetBuiltinPrototype(cx, key, objp);
+    JSObject* proto = GlobalObject::getOrCreatePrototype(cx, key);
+    if (!proto)
+        return false;
+    objp.set(proto);
+    return true;
 }
 
 namespace JS {
@@ -3949,7 +3992,6 @@ JS::TransitiveCompileOptions::copyPODTransitiveOptions(const TransitiveCompileOp
     canLazilyParse = rhs.canLazilyParse;
     strictOption = rhs.strictOption;
     extraWarningsOption = rhs.extraWarningsOption;
-    forEachStatementOption = rhs.forEachStatementOption;
     werrorOption = rhs.werrorOption;
     asmJSOption = rhs.asmJSOption;
     throwOnAsmJSValidationFailureOption = rhs.throwOnAsmJSValidationFailureOption;
@@ -3971,6 +4013,7 @@ JS::ReadOnlyCompileOptions::copyPODOptions(const ReadOnlyCompileOptions& rhs)
     scriptSourceOffset = rhs.scriptSourceOffset;
     isRunOnce = rhs.isRunOnce;
     noScriptRval = rhs.noScriptRval;
+    nonSyntacticScope = rhs.nonSyntacticScope;
 }
 
 JS::OwningCompileOptions::OwningCompileOptions(JSContext* cx)
@@ -4070,7 +4113,6 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
 {
     strictOption = cx->options().strictMode();
     extraWarningsOption = cx->compartment()->behaviors().extraWarnings(cx);
-    forEachStatementOption = cx->options().forEachStatement();
     isProbablySystemOrAddonCode = cx->compartment()->isProbablySystemOrAddonCode();
     werrorOption = cx->options().werror();
     if (!cx->options().asmJS())
@@ -4083,10 +4125,11 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
 }
 
 static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& options, ScopeKind scopeKind,
+Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
         SourceBufferHolder& srcBuf, MutableHandleScript script)
 {
-    MOZ_ASSERT(scopeKind == ScopeKind::Global || scopeKind == ScopeKind::NonSyntactic);
+    ScopeKind scopeKind = options.nonSyntacticScope ? ScopeKind::NonSyntactic : ScopeKind::Global;
+
     MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
@@ -4096,15 +4139,15 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options, ScopeKind scopeKin
 }
 
 static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& options, ScopeKind scopeKind,
+Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
         const char16_t* chars, size_t length, MutableHandleScript script)
 {
     SourceBufferHolder srcBuf(chars, length, SourceBufferHolder::NoOwnership);
-    return ::Compile(cx, options, scopeKind, srcBuf, script);
+    return ::Compile(cx, options, srcBuf, script);
 }
 
 static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& options, ScopeKind scopeKind,
+Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
         const char* bytes, size_t length, MutableHandleScript script)
 {
     UniqueTwoByteChars chars;
@@ -4115,22 +4158,22 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& options, ScopeKind scopeKin
     if (!chars)
         return false;
 
-    return ::Compile(cx, options, scopeKind, chars.get(), length, script);
+    return ::Compile(cx, options, chars.get(), length, script);
 }
 
 static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& options, ScopeKind scopeKind,
+Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
         FILE* fp, MutableHandleScript script)
 {
     FileContents buffer(cx);
     if (!ReadCompleteFile(cx, fp, buffer))
         return false;
 
-    return ::Compile(cx, options, scopeKind, buffer.begin(), buffer.length(), script);
+    return ::Compile(cx, options, buffer.begin(), buffer.length(), script);
 }
 
 static bool
-Compile(JSContext* cx, const ReadOnlyCompileOptions& optionsArg, ScopeKind scopeKind,
+Compile(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
         const char* filename, MutableHandleScript script)
 {
     AutoFile file;
@@ -4138,78 +4181,88 @@ Compile(JSContext* cx, const ReadOnlyCompileOptions& optionsArg, ScopeKind scope
         return false;
     CompileOptions options(cx, optionsArg);
     options.setFileAndLine(filename, 1);
-    return ::Compile(cx, options, scopeKind, file.fp(), script);
+    return ::Compile(cx, options, file.fp(), script);
 }
 
 bool
 JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
             SourceBufferHolder& srcBuf, JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::Global, srcBuf, script);
+    return ::Compile(cx, options, srcBuf, script);
 }
 
 bool
 JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
             const char* bytes, size_t length, JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::Global, bytes, length, script);
+    return ::Compile(cx, options, bytes, length, script);
 }
 
 bool
 JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
             const char16_t* chars, size_t length, JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::Global, chars, length, script);
+    return ::Compile(cx, options, chars, length, script);
 }
 
 bool
 JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
             FILE* file, JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::Global, file, script);
+    return ::Compile(cx, options, file, script);
 }
 
 bool
 JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
             const char* filename, JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::Global, filename, script);
+    return ::Compile(cx, options, filename, script);
 }
 
 bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
+JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
                                 SourceBufferHolder& srcBuf, JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::NonSyntactic, srcBuf, script);
+    CompileOptions options(cx, optionsArg);
+    options.setNonSyntacticScope(true);
+    return ::Compile(cx, options, srcBuf, script);
 }
 
 bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
+JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
                                 const char* bytes, size_t length, JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::NonSyntactic, bytes, length, script);
+    CompileOptions options(cx, optionsArg);
+    options.setNonSyntacticScope(true);
+    return ::Compile(cx, options, bytes, length, script);
 }
 
 bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
+JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
                                 const char16_t* chars, size_t length,
                                 JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::NonSyntactic, chars, length, script);
+    CompileOptions options(cx, optionsArg);
+    options.setNonSyntacticScope(true);
+    return ::Compile(cx, options, chars, length, script);
 }
 
 bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
+JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
                                 FILE* file, JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::NonSyntactic, file, script);
+    CompileOptions options(cx, optionsArg);
+    options.setNonSyntacticScope(true);
+    return ::Compile(cx, options, file, script);
 }
 
 bool
-JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& options,
+JS::CompileForNonSyntacticScope(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
                                 const char* filename, JS::MutableHandleScript script)
 {
-    return ::Compile(cx, options, ScopeKind::NonSyntactic, filename, script);
+    CompileOptions options(cx, optionsArg);
+    options.setNonSyntacticScope(true);
+    return ::Compile(cx, options, filename, script);
 }
 
 enum class OffThread {
@@ -4377,14 +4430,14 @@ JS_PUBLIC_API(bool)
 JS_CompileScript(JSContext* cx, const char* ascii, size_t length,
                  const JS::CompileOptions& options, MutableHandleScript script)
 {
-    return Compile(cx, options, ascii, length, script);
+    return ::Compile(cx, options, ascii, length, script);
 }
 
 JS_PUBLIC_API(bool)
 JS_CompileUCScript(JSContext* cx, const char16_t* chars, size_t length,
                    const JS::CompileOptions& options, MutableHandleScript script)
 {
-    return Compile(cx, options, chars, length, script);
+    return ::Compile(cx, options, chars, length, script);
 }
 
 JS_PUBLIC_API(bool)
@@ -6602,14 +6655,13 @@ JS_NewRegExpObject(JSContext* cx, const char* bytes, size_t length, unsigned fla
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
+
     ScopedJSFreePtr<char16_t> chars(InflateString(cx, bytes, length));
     if (!chars)
         return nullptr;
 
-    RegExpObject* reobj = RegExpObject::create(cx, chars, length, RegExpFlag(flags),
-                                               nullptr, nullptr, cx->tempLifoAlloc(),
-                                               GenericObject);
-    return reobj;
+    return RegExpObject::create(cx, chars.get(), length, RegExpFlag(flags), cx->tempLifoAlloc(),
+                                GenericObject);
 }
 
 JS_PUBLIC_API(JSObject*)
@@ -6617,8 +6669,8 @@ JS_NewUCRegExpObject(JSContext* cx, const char16_t* chars, size_t length, unsign
 {
     AssertHeapIsIdle();
     CHECK_REQUEST(cx);
-    return RegExpObject::create(cx, chars, length, RegExpFlag(flags),
-                                nullptr, nullptr, cx->tempLifoAlloc(),
+
+    return RegExpObject::create(cx, chars, length, RegExpFlag(flags), cx->tempLifoAlloc(),
                                 GenericObject);
 }
 
@@ -7191,6 +7243,9 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
         break;
       case JSJITCOMPILER_SIMULATOR_ALWAYS_INTERRUPT:
         jit::JitOptions.simulatorAlwaysInterrupt = !!value;
+        break;
+      case JSJITCOMPILER_SPECTRE_INDEX_MASKING:
+        jit::JitOptions.spectreIndexMasking = !!value;
         break;
       case JSJITCOMPILER_ASMJS_ATOMICS_ENABLE:
         jit::JitOptions.asmJSAtomicsEnable = !!value;

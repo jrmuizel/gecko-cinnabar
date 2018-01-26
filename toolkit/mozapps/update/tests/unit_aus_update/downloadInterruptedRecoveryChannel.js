@@ -10,6 +10,12 @@ function run_test() {
 
   debugDump("testing recovery of mar download after pause and resume");
 
+  // This test assumes speculative connections enabled.
+  Services.prefs.setIntPref("network.http.speculative-parallel-limit", 6);
+  registerCleanupFunction(() => {
+    Services.prefs.clearUserPref("network.http.speculative-parallel-limit");
+  });
+
   Services.prefs.setBoolPref(PREF_APP_UPDATE_STAGING_ENABLED, false);
   start_httpserver({slowDownload: true});
   setUpdateURL(gURLData + gHTTPHandlerPath);
@@ -42,7 +48,7 @@ class TestDownloadListener {
     if (!this.stoppedOnce) {
       Assert.equal(aStatus, Cr.NS_NET_STATUS_WAITING_FOR,
                    "the download status" + MSG_SHOULD_EQUAL);
-      do_execute_soon(() => gAUS.pauseDownload());
+      executeSoon(() => gAUS.pauseDownload());
     }
   }
 
@@ -56,7 +62,7 @@ class TestDownloadListener {
                    "the update state" + MSG_SHOULD_EQUAL);
       Assert.equal(aStatus, Cr.NS_BINDING_ABORTED,
                    "the download status" + MSG_SHOULD_EQUAL);
-      do_execute_soon(resumeDownload);
+      executeSoon(resumeDownload);
     } else {
       // The second time we stop, it should be because the download is done.
       Assert.equal(gBestUpdate.state, STATE_PENDING,
@@ -68,7 +74,7 @@ class TestDownloadListener {
       // in doTestFinish will prevent writing the update xml files during
       // shutdown.
       gUpdateManager.cleanupActiveUpdate();
-      do_execute_soon(waitForUpdateXMLFiles);
+      executeSoon(waitForUpdateXMLFiles);
     }
   }
 

@@ -4,20 +4,15 @@
  * Test keyboard navigation in the app menu panel.
  */
 
-const {PanelMultiView} = Cu.import("resource:///modules/PanelMultiView.jsm", {});
+const {PanelView} = Cu.import("resource:///modules/PanelMultiView.jsm", {});
 const kHelpButtonId = "appMenu-help-button";
-let gHelperInstance;
-
-add_task(async function setup() {
-  gHelperInstance = new PanelMultiView(PanelUI.panel, true);
-});
 
 add_task(async function testUpDownKeys() {
   let promise = promisePanelShown(window);
   PanelUI.show();
   await promise;
 
-  let buttons = gHelperInstance._getNavigableElements(PanelUI.mainView);
+  let buttons = PanelView.forNode(PanelUI.mainView).getNavigableElements();
 
   for (let button of buttons) {
     if (button.disabled)
@@ -50,7 +45,7 @@ add_task(async function testEnterKeyBehaviors() {
   PanelUI.show();
   await promise;
 
-  let buttons = gHelperInstance._getNavigableElements(PanelUI.mainView);
+  let buttons = PanelView.forNode(PanelUI.mainView).getNavigableElements();
 
   // Navigate to the 'Help' button, which points to a subview.
   EventUtils.synthesizeKey("KEY_ArrowUp", { code: "ArrowUp" });
@@ -67,7 +62,7 @@ add_task(async function testEnterKeyBehaviors() {
   EventUtils.synthesizeKey("VK_RETURN", { code: "Enter" });
   await promise;
 
-  let helpButtons = gHelperInstance._getNavigableElements(PanelUI.helpView);
+  let helpButtons = PanelView.forNode(PanelUI.helpView).getNavigableElements();
   Assert.ok(helpButtons[0].classList.contains("subviewbutton-back"),
     "First button in help view should be a back button");
 
@@ -142,3 +137,97 @@ add_task(async function testLeftRightKeys() {
   await promise;
 });
 
+add_task(async function testTabKey() {
+  let promise = promisePanelShown(window);
+  PanelUI.show();
+  await promise;
+
+  let buttons = PanelView.forNode(PanelUI.mainView).getNavigableElements();
+
+  for (let button of buttons) {
+    if (button.disabled)
+      continue;
+    EventUtils.synthesizeKey("KEY_Tab", { code: "Tab" });
+    Assert.equal(document.commandDispatcher.focusedElement, button,
+      "The correct button should be focused after tabbing");
+  }
+
+  EventUtils.synthesizeKey("KEY_Tab", { code: "Tab" });
+  Assert.equal(document.commandDispatcher.focusedElement, buttons[0],
+    "Pressing tab should cycle around and select the first button again");
+
+  for (let i = buttons.length - 1; i >= 0; --i) {
+    let button = buttons[i];
+    if (button.disabled)
+      continue;
+    EventUtils.synthesizeKey("Tab", { code: "Tab", shiftKey: true });
+    Assert.equal(document.commandDispatcher.focusedElement, button,
+      "The correct button should be focused after shift + tabbing");
+  }
+
+  EventUtils.synthesizeKey("KEY_Tab", { code: "Tab", shiftKey: true });
+  Assert.equal(document.commandDispatcher.focusedElement, buttons[buttons.length - 1],
+    "Pressing shift + tab should cycle around and select the last button again");
+
+  promise = promisePanelHidden(window);
+  PanelUI.hide();
+  await promise;
+});
+
+add_task(async function testInterleavedTabAndArrowKeys() {
+  let promise = promisePanelShown(window);
+  PanelUI.show();
+  await promise;
+
+  let buttons = PanelView.forNode(PanelUI.mainView).getNavigableElements();
+  let tab = false;
+
+  for (let button of buttons) {
+    if (button.disabled)
+      continue;
+    if (tab) {
+      EventUtils.synthesizeKey("KEY_Tab", { code: "Tab" });
+    } else {
+      EventUtils.synthesizeKey("KEY_ArrowDown", { code: "ArrowDown" });
+    }
+    tab = !tab;
+  }
+
+  Assert.equal(document.commandDispatcher.focusedElement, buttons[buttons.length - 1],
+    "The last button should be focused after a mix of Tab and ArrowDown");
+
+  promise = promisePanelHidden(window);
+  PanelUI.hide();
+  await promise;
+});
+
+add_task(async function testSpaceDownAfterTabNavigation() {
+  let promise = promisePanelShown(window);
+  PanelUI.show();
+  await promise;
+
+  let buttons = PanelView.forNode(PanelUI.mainView).getNavigableElements();
+  let button;
+
+  for (button of buttons) {
+    if (button.disabled)
+      continue;
+    EventUtils.synthesizeKey("KEY_Tab", { code: "Tab" });
+    if (button.id == kHelpButtonId) {
+      break;
+    }
+  }
+
+  Assert.equal(document.commandDispatcher.focusedElement, button,
+               "Help button should be focused after tabbing to it.");
+
+  // Pressing down space on a button that points to a subview should navigate us
+  // there, before keyup.
+  promise = BrowserTestUtils.waitForEvent(PanelUI.helpView, "ViewShown");
+  EventUtils.synthesizeKey(" ", { code: "Space", type: "keydown" });
+  await promise;
+
+  promise = promisePanelHidden(window);
+  PanelUI.hide();
+  await promise;
+});

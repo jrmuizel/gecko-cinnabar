@@ -226,6 +226,24 @@ const SNAPSHOT_SCHEMA = {
         },
       },
     },
+    securitySoftware: {
+      required: false,
+      type: "object",
+      properties: {
+        registeredAntiVirus: {
+          required: true,
+          type: "string",
+        },
+        registeredAntiSpyware: {
+          required: true,
+          type: "string",
+        },
+        registeredFirewall: {
+          required: true,
+          type: "string",
+        },
+      },
+    },
     features: {
       required: true,
       type: "array",
@@ -339,8 +357,14 @@ const SNAPSHOT_SCHEMA = {
         directWriteVersion: {
           type: "string",
         },
+        usesTiling: {
+          type: "boolean",
+        },
         offMainThreadPaintEnabled: {
           type: "boolean",
+        },
+        offMainThreadPaintWorkerCount: {
+          type: "number",
         },
         clearTypeParameters: {
           type: "string",

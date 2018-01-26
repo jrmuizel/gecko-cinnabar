@@ -9,7 +9,6 @@ const { Component, createFactory } = require("devtools/client/shared/vendor/reac
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
-const I = require("devtools/client/shared/vendor/immutable");
 
 const Actions = require("../actions/index");
 const { FILTER_SEARCH_DELAY, FILTER_TAGS } = require("../constants");
@@ -18,9 +17,9 @@ const {
   getTypeFilteredRequests,
   isNetworkDetailsToggleButtonDisabled,
 } = require("../selectors/index");
-
 const { autocompleteProvider } = require("../utils/filter-autocomplete-provider");
 const { L10N } = require("../utils/l10n");
+const { fetchNetworkUpdatePacket } = require("../utils/request-utils");
 
 // Components
 const SearchBox = createFactory(require("devtools/client/shared/components/SearchBox"));
@@ -98,7 +97,7 @@ class Toolbar extends Component {
     || this.props.persistentLogsEnabled !== nextProps.persistentLogsEnabled
     || this.props.browserCacheDisabled !== nextProps.browserCacheDisabled
     || this.props.recording !== nextProps.recording
-    || !I.is(this.props.requestFilterTypes, nextProps.requestFilterTypes)
+    || !Object.is(this.props.requestFilterTypes, nextProps.requestFilterTypes)
 
     // Filtered requests are useful only when searchbox is focused
     || !!(this.refs.searchbox && this.refs.searchbox.focused);
@@ -135,9 +134,12 @@ class Toolbar extends Component {
   onSearchBoxFocus() {
     let { connector, filteredRequests } = this.props;
 
-    // Fetch responseCookies for building autocomplete list
+    // Fetch responseCookies & responseHeaders for building autocomplete list
     filteredRequests.forEach((request) => {
-      connector.requestData(request.id, "responseCookies");
+      fetchNetworkUpdatePacket(connector.requestData, request, [
+        "responseCookies",
+        "responseHeaders",
+      ]);
     });
   }
 
@@ -158,7 +160,7 @@ class Toolbar extends Component {
     } = this.props;
 
     // Render list of filter-buttons.
-    let buttons = requestFilterTypes.entrySeq().toArray().map(([type, checked]) => {
+    let buttons = Object.entries(requestFilterTypes).map(([type, checked]) => {
       let classList = ["devtools-button", `requests-list-filter-${type}-button`];
       checked && classList.push("checked");
 

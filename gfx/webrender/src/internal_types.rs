@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{ClipId, DevicePoint, DeviceUintRect, DocumentId, Epoch};
+use api::{ClipId, DeviceUintRect, DocumentId, Epoch};
 use api::{ExternalImageData, ExternalImageId};
 use api::{ImageFormat, PipelineId};
 use api::DebugCommand;
@@ -15,6 +15,9 @@ use std::f32;
 use std::hash::BuildHasherDefault;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+#[cfg(feature = "capture")]
+use capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
 use tiling;
 
 pub type FastHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
@@ -30,7 +33,12 @@ pub type FastHashSet<K> = HashSet<K, BuildHasherDefault<FxHasher>>;
 // map from cache texture ID to native texture.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct CacheTextureId(pub usize);
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
+pub struct RenderPassIndex(pub usize);
 
 // Represents the source for a texture.
 // These are passed from throughout the
@@ -39,49 +47,24 @@ pub struct CacheTextureId(pub usize);
 // native texture ID.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub enum SourceTexture {
     Invalid,
     TextureCache(CacheTextureId),
     External(ExternalImageData),
     CacheA8,
     CacheRGBA8,
+    // XXX Remove this once RenderTaskCacheA8 is used.
+    #[allow(dead_code)]
+    RenderTaskCacheA8(RenderPassIndex),
+    RenderTaskCacheRGBA8(RenderPassIndex),
 }
 
 pub const ORTHO_NEAR_PLANE: f32 = -1000000.0;
 pub const ORTHO_FAR_PLANE: f32 = 1000000.0;
 
-/// Optional textures that can be used as a source in the shaders.
-/// Textures that are not used by the batch are equal to TextureId::invalid().
-#[derive(Copy, Clone, Debug)]
-pub struct BatchTextures {
-    pub colors: [SourceTexture; 3],
-}
-
-impl BatchTextures {
-    pub fn no_texture() -> Self {
-        BatchTextures {
-            colors: [SourceTexture::Invalid; 3],
-        }
-    }
-
-    pub fn render_target_cache() -> Self {
-        BatchTextures {
-            colors: [
-                SourceTexture::CacheRGBA8,
-                SourceTexture::CacheA8,
-                SourceTexture::Invalid,
-            ],
-        }
-    }
-
-    pub fn color(texture: SourceTexture) -> Self {
-        BatchTextures {
-            colors: [texture, SourceTexture::Invalid, SourceTexture::Invalid],
-        }
-    }
-}
-
 #[derive(Copy, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct RenderTargetInfo {
     pub has_depth: bool,
 }
@@ -121,12 +104,13 @@ pub struct TextureUpdate {
     pub op: TextureUpdateOp,
 }
 
+#[derive(Default)]
 pub struct TextureUpdateList {
     pub updates: Vec<TextureUpdate>,
 }
 
 impl TextureUpdateList {
-    pub fn new() -> TextureUpdateList {
+    pub fn new() -> Self {
         TextureUpdateList {
             updates: Vec::new(),
         }
@@ -167,6 +151,10 @@ impl RenderedDocument {
 pub enum DebugOutput {
     FetchDocuments(String),
     FetchClipScrollTree(String),
+    #[cfg(feature = "capture")]
+    SaveCapture(CaptureConfig, Vec<ExternalCaptureImage>),
+    #[cfg(feature = "capture")]
+    LoadCapture(PathBuf, Vec<PlainExternalImage>),
 }
 
 pub enum ResultMsg {
@@ -183,10 +171,4 @@ pub enum ResultMsg {
         updates: TextureUpdateList,
         cancel_rendering: bool,
     },
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct UvRect {
-    pub uv0: DevicePoint,
-    pub uv1: DevicePoint,
 }

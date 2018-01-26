@@ -591,10 +591,7 @@ struct AutoResetLastProfilerFrameOnReturnFromException
 void
 HandleExceptionWasm(JSContext* cx, wasm::WasmFrameIter* iter, ResumeFromException* rfe)
 {
-    // Maintain the wasm invariant that we have wasm frames when unwinding.
-    JitActivation* act = cx->activation()->asJit();
-    act->setWasmExitFP((const wasm::Frame*) act->jsExitFP());
-
+    MOZ_ASSERT(cx->activation()->asJit()->hasWasmExitFP());
     rfe->kind = ResumeFromException::RESUME_WASM;
     rfe->framePointer = (uint8_t*) wasm::FailFP;
     rfe->stackPointer = (uint8_t*) wasm::HandleThrow(cx, *iter);
@@ -736,18 +733,7 @@ HandleException(ResumeFromException* rfe)
                 return;
         }
 
-        JitFrameLayout* current = frame.isScripted() ? frame.jsFrame() : nullptr;
-
         ++iter;
-
-        if (current) {
-            // Unwind the frame by updating packedExitFP. This is necessary so
-            // that (1) debugger exception unwind and leave frame hooks don't
-            // see this frame when they use ScriptFrameIter, and (2)
-            // ScriptFrameIter does not crash when accessing an IonScript
-            // that's destroyed by the ionScript->decref call.
-            EnsureBareExitFrame(cx, current);
-        }
 
         if (overrecursed) {
             // We hit an overrecursion error during bailout. Report it now.
@@ -763,11 +749,11 @@ HandleException(ResumeFromException* rfe)
 // Turns a JitFrameLayout into an ExitFrameLayout. Note that it has to be a
 // bare exit frame so it's ignored by TraceJitExitFrame.
 void
-EnsureBareExitFrame(JSContext* cx, JitFrameLayout* frame)
+EnsureBareExitFrame(JitActivation* act, JitFrameLayout* frame)
 {
     ExitFrameLayout* exitFrame = reinterpret_cast<ExitFrameLayout*>(frame);
 
-    if (cx->activation()->asJit()->jsExitFP() == (uint8_t*)frame) {
+    if (act->jsExitFP() == (uint8_t*)frame) {
         // If we already called this function for the current frame, do
         // nothing.
         MOZ_ASSERT(exitFrame->isBareExit());
@@ -775,17 +761,17 @@ EnsureBareExitFrame(JSContext* cx, JitFrameLayout* frame)
     }
 
 #ifdef DEBUG
-    JSJitFrameIter iter(cx);
+    JSJitFrameIter iter(act);
     while (!iter.isScripted())
         ++iter;
     MOZ_ASSERT(iter.current() == frame, "|frame| must be the top JS frame");
 
-    MOZ_ASSERT(!!cx->activation()->asJit()->jsExitFP());
-    MOZ_ASSERT((uint8_t*)exitFrame->footer() >= cx->activation()->asJit()->jsExitFP(),
+    MOZ_ASSERT(!!act->jsExitFP());
+    MOZ_ASSERT((uint8_t*)exitFrame->footer() >= act->jsExitFP(),
                "Must have space for ExitFooterFrame before jsExitFP");
 #endif
 
-    cx->activation()->asJit()->setJSExitFP((uint8_t*)frame);
+    act->setJSExitFP((uint8_t*)frame);
     exitFrame->footer()->setBareExitFrame();
     MOZ_ASSERT(exitFrame->isBareExit());
 }
@@ -1767,12 +1753,7 @@ SnapshotIterator::maybeRead(const RValueAllocation& a, MaybeReadFallback& fallba
 void
 SnapshotIterator::writeAllocationValuePayload(const RValueAllocation& alloc, const Value& v)
 {
-    uintptr_t payload = *v.payloadUIntPtr();
-#if defined(JS_PUNBOX64)
-    // Do not write back the tag, as this will trigger an assertion when we will
-    // reconstruct the JS Value while tracing again or when bailing out.
-    payload &= JSVAL_PAYLOAD_MASK;
-#endif
+    MOZ_ASSERT(v.isGCThing());
 
     switch (alloc.mode()) {
       case RValueAllocation::CONSTANT:
@@ -1788,7 +1769,7 @@ SnapshotIterator::writeAllocationValuePayload(const RValueAllocation& alloc, con
         break;
 
       case RValueAllocation::TYPED_REG:
-        machine_->write(alloc.reg2(), payload);
+        machine_->write(alloc.reg2(), uintptr_t(v.toGCThing()));
         break;
 
       case RValueAllocation::TYPED_STACK:
@@ -1799,7 +1780,7 @@ SnapshotIterator::writeAllocationValuePayload(const RValueAllocation& alloc, con
           case JSVAL_TYPE_STRING:
           case JSVAL_TYPE_SYMBOL:
           case JSVAL_TYPE_OBJECT:
-            WriteFrameSlot(fp_, alloc.stackOffset2(), payload);
+            WriteFrameSlot(fp_, alloc.stackOffset2(), uintptr_t(v.toGCThing()));
             break;
         }
         break;
@@ -1807,12 +1788,12 @@ SnapshotIterator::writeAllocationValuePayload(const RValueAllocation& alloc, con
 #if defined(JS_NUNBOX32)
       case RValueAllocation::UNTYPED_REG_REG:
       case RValueAllocation::UNTYPED_STACK_REG:
-        machine_->write(alloc.reg2(), payload);
+        machine_->write(alloc.reg2(), uintptr_t(v.toGCThing()));
         break;
 
       case RValueAllocation::UNTYPED_REG_STACK:
       case RValueAllocation::UNTYPED_STACK_STACK:
-        WriteFrameSlot(fp_, alloc.stackOffset2(), payload);
+        WriteFrameSlot(fp_, alloc.stackOffset2(), uintptr_t(v.toGCThing()));
         break;
 #elif defined(JS_PUNBOX64)
       case RValueAllocation::UNTYPED_REG:
@@ -2242,14 +2223,9 @@ MachineState::FromBailout(RegisterDump::GPRArray& regs, RegisterDump::FPUArray& 
     for (unsigned i = 0; i < FloatRegisters::TotalSingle; i++)
         machine.setRegisterLocation(FloatRegister(i, FloatRegister::Single), (double*)&fbase[i]);
 #elif defined(JS_CODEGEN_MIPS32)
-    float* fbase = (float*)&fpregs[0];
-    for (unsigned i = 0; i < FloatRegisters::TotalDouble; i++) {
-        machine.setRegisterLocation(FloatRegister::FromIndex(i, FloatRegister::Double),
-                                    &fpregs[i].d);
-    }
-    for (unsigned i = 0; i < FloatRegisters::TotalSingle; i++) {
-        machine.setRegisterLocation(FloatRegister::FromIndex(i, FloatRegister::Single),
-                                    (double*)&fbase[i]);
+    for (unsigned i = 0; i < FloatRegisters::TotalPhys; i++) {
+        machine.setRegisterLocation(FloatRegister::FromIndex(i, FloatRegister::Double), &fpregs[i]);
+        machine.setRegisterLocation(FloatRegister::FromIndex(i, FloatRegister::Single), &fpregs[i]);
     }
 #elif defined(JS_CODEGEN_MIPS64)
     for (unsigned i = 0; i < FloatRegisters::TotalPhys; i++) {

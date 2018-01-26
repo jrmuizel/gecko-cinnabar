@@ -1,16 +1,19 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
- 
+
 #ifndef nsHtml5SpeculativeLoad_h
 #define nsHtml5SpeculativeLoad_h
 
 #include "nsString.h"
 #include "nsContentUtils.h"
+#include "nsHtml5DocumentMode.h"
+#include "nsHtml5String.h"
 
 class nsHtml5TreeOpExecutor;
 
-enum eHtml5SpeculativeLoad {
+enum eHtml5SpeculativeLoad
+{
 #ifdef DEBUG
   eSpeculativeLoadUninitialized,
 #endif
@@ -23,6 +26,8 @@ enum eHtml5SpeculativeLoad {
   eSpeculativeLoadPictureSource,
   eSpeculativeLoadScript,
   eSpeculativeLoadScriptFromHead,
+  eSpeculativeLoadNoModuleScript,
+  eSpeculativeLoadNoModuleScriptFromHead,
   eSpeculativeLoadStyle,
   eSpeculativeLoadManifest,
   eSpeculativeLoadSetDocumentCharset,
@@ -31,6 +36,8 @@ enum eHtml5SpeculativeLoad {
 };
 
 class nsHtml5SpeculativeLoad {
+    using Encoding = mozilla::Encoding;
+    template <typename T> using NotNull = mozilla::NotNull<T>;
   public:
     nsHtml5SpeculativeLoad();
     ~nsHtml5SpeculativeLoad();
@@ -130,12 +137,18 @@ class nsHtml5SpeculativeLoad {
                            nsHtml5String aIntegrity,
                            bool aParserInHead,
                            bool aAsync,
-                           bool aDefer)
+                           bool aDefer,
+                           bool aNoModule)
     {
       NS_PRECONDITION(mOpCode == eSpeculativeLoadUninitialized,
                       "Trying to reinitialize a speculative load!");
-      mOpCode = aParserInHead ?
-          eSpeculativeLoadScriptFromHead : eSpeculativeLoadScript;
+      if (aNoModule) {
+          mOpCode = aParserInHead ? eSpeculativeLoadNoModuleScriptFromHead
+                                  : eSpeculativeLoadNoModuleScript;
+      } else {
+          mOpCode = aParserInHead ? eSpeculativeLoadScriptFromHead
+                                  : eSpeculativeLoadScript;
+      }
       aUrl.ToString(mUrlOrSizes);
       aCharset.ToString(mCharsetOrSrcset);
       aType.ToString(mTypeOrCharsetSourceOrDocumentModeOrMetaCSPOrSizesOrIntegrity);
@@ -190,13 +203,14 @@ class nsHtml5SpeculativeLoad {
      * sheets. Thus, encoding decisions by the parser thread have to maintain
      * the queue order relative to true speculative loads. See bug 675499.
      */
-    inline void InitSetDocumentCharset(nsACString& aCharset,
+    inline void InitSetDocumentCharset(NotNull<const Encoding*> aEncoding,
                                        int32_t aCharsetSource)
     {
       NS_PRECONDITION(mOpCode == eSpeculativeLoadUninitialized,
                       "Trying to reinitialize a speculative load!");
       mOpCode = eSpeculativeLoadSetDocumentCharset;
-      CopyUTF8toUTF16(aCharset, mCharsetOrSrcset);
+      mCharsetOrSrcset.~nsString();
+      mEncoding = aEncoding;
       mTypeOrCharsetSourceOrDocumentModeOrMetaCSPOrSizesOrIntegrity.Assign((char16_t)aCharsetSource);
     }
 
@@ -231,7 +245,6 @@ class nsHtml5SpeculativeLoad {
 
     eHtml5SpeculativeLoad mOpCode;
 
-
     /**
      * Whether the refering element has async and/or defer attributes.
      */
@@ -257,7 +270,10 @@ class nsHtml5SpeculativeLoad {
      * or eSpeculativeLoadPictureSource, this is the value of the "srcset" attribute.
      * If the attribute is not set, this will be a void string. Otherwise it's empty.
      */
-    nsString mCharsetOrSrcset;
+    union {
+      nsString mCharsetOrSrcset;
+      const Encoding* mEncoding;
+    };
     /**
      * If mOpCode is eSpeculativeLoadSetDocumentCharset, this is a
      * one-character string whose single character's code point is to be

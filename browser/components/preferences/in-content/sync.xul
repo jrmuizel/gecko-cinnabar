@@ -4,33 +4,6 @@
 
 <!-- Sync panel -->
 
-<preferences id="syncEnginePrefs" hidden="true" data-category="paneSync">
-  <preference id="engine.addons"
-              name="services.sync.engine.addons"
-              type="bool"/>
-  <preference id="engine.bookmarks"
-              name="services.sync.engine.bookmarks"
-              type="bool"/>
-  <preference id="engine.history"
-              name="services.sync.engine.history"
-              type="bool"/>
-  <preference id="engine.tabs"
-              name="services.sync.engine.tabs"
-              type="bool"/>
-  <preference id="engine.prefs"
-              name="services.sync.engine.prefs"
-              type="bool"/>
-  <preference id="engine.passwords"
-              name="services.sync.engine.passwords"
-              type="bool"/>
-  <preference id="engine.addresses"
-              name="services.sync.engine.addresses"
-              type="bool"/>
-  <preference id="engine.creditcards"
-              name="services.sync.engine.creditcards"
-              type="bool"/>
-</preferences>
-
 <script type="application/javascript"
         src="chrome://browser/content/preferences/in-content/sync.js"/>
 
@@ -133,8 +106,8 @@
                   </description>
                 </hbox>
                 <hbox class="fxaAccountBoxButtons">
-                  <button id="verifyFxaAccount" label="&verify.label;" accesskey="&verify.accesskey;"></button>
-                  <button id="unverifiedUnlinkFxaAccount" label="&forget.label;" accesskey="&forget.accesskey;"></button>
+                  <button id="verifyFxaAccount" label="&resendVerification.label;" accesskey="&resendVerification.accesskey;"></button>
+                  <button id="unverifiedUnlinkFxaAccount" label="&cancelSetup.label;" accesskey="&cancelSetup.accesskey;"></button>
                 </hbox>
               </vbox>
             </hbox>
@@ -155,7 +128,7 @@
                 </hbox>
                 <hbox class="fxaAccountBoxButtons">
                   <button id="rejectReSignIn" label="&signIn.label;" accesskey="&signIn.accesskey;"></button>
-                  <button id="rejectUnlinkFxaAccount" label="&forget.label;" accesskey="&forget.accesskey;"></button>
+                  <button id="rejectUnlinkFxaAccount" label="&cancelSetup.label;" accesskey="&cancelSetup.accesskey;"></button>
                 </hbox>
               </vbox>
             </hbox>
@@ -232,15 +205,10 @@
                 hidden="true"/>
       </hbox>
     </groupbox>
-    <label class="fxaMobilePromo">
-        &mobilePromo3.start;<!-- We put these comments to avoid inserting white spaces
-        --><image class="androidLink"></image><label class="text-link" id="fxaMobilePromo-android-hasFxaAccount"><!--
-        -->&mobilePromo3.androidLink;</label><!--
-        -->&mobilePromo3.iOSBefore;<!--
-        --><image class="iOSLink"></image><label class="text-link" id="fxaMobilePromo-ios-hasFxaAccount"><!--
-        -->&mobilePromo3.iOSLink;</label><!--
-        -->&mobilePromo3.end;
-    </label>
+    <label id="mobilePromo-singledevice"
+           class="text-link fxaMobilePromo">&mobilepromo.singledevice;</label>
+    <label id="mobilePromo-multidevice"
+           class="text-link fxaMobilePromo">&mobilepromo.multidevice;</label>
     <vbox id="tosPP-small" align="start">
       <label id="tosPP-small-ToS" class="text-link">
         &prefs.tosLink.label;

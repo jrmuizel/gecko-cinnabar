@@ -21,6 +21,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/ClientHandle.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ServiceWorkerCommon.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
@@ -39,6 +40,10 @@ namespace mozilla {
 
 class OriginAttributes;
 
+namespace ipc {
+class PrincipalInfo;
+} // namespace ipc
+
 namespace dom {
 
 class ServiceWorkerRegistrar;
@@ -46,7 +51,6 @@ class ServiceWorkerRegistrationListener;
 
 namespace workers {
 
-class ServiceWorkerClientInfo;
 class ServiceWorkerInfo;
 class ServiceWorkerJobQueue;
 class ServiceWorkerManagerChild;
@@ -104,30 +108,23 @@ public:
 
   nsTObserverArray<ServiceWorkerRegistrationListener*> mServiceWorkerRegistrationListeners;
 
-  nsRefPtrHashtable<nsISupportsHashKey, ServiceWorkerRegistrationInfo> mControlledDocuments;
+  struct ControlledClientData
+  {
+    RefPtr<ClientHandle> mClientHandle;
+    RefPtr<ServiceWorkerRegistrationInfo> mRegistrationInfo;
 
-  // Track all documents that have attempted to register a service worker for a
-  // given scope.
-  typedef nsTArray<nsCOMPtr<nsIWeakReference>> WeakDocumentList;
-  nsClassHashtable<nsCStringHashKey, WeakDocumentList> mRegisteringDocuments;
+    ControlledClientData(ClientHandle* aClientHandle,
+                         ServiceWorkerRegistrationInfo* aRegistrationInfo)
+      : mClientHandle(aClientHandle)
+      , mRegistrationInfo(aRegistrationInfo)
+    {
+    }
+  };
 
-  // Track all intercepted navigation channels for a given scope.  Channels are
-  // placed in the appropriate list before dispatch the FetchEvent to the worker
-  // thread and removed once FetchEvent processing dispatches back to the main
-  // thread.
-  //
-  // Note: Its safe to use weak references here because a RAII-style callback
-  //       is registered with the channel before its added to this list.  We
-  //       are guaranteed the callback will fire before and remove the ref
-  //       from this list before the channel is destroyed.
-  typedef nsTArray<nsIInterceptedChannel*> InterceptionList;
-  nsClassHashtable<nsCStringHashKey, InterceptionList> mNavigationInterceptions;
+  nsClassHashtable<nsIDHashKey, ControlledClientData> mControlledClients;
 
   bool
   IsAvailable(nsIPrincipal* aPrincipal, nsIURI* aURI);
-
-  bool
-  IsControlled(nsIDocument* aDocument, ErrorResult& aRv);
 
   // Return true if the given content process could potentially be executing
   // service worker code with the given principal.  At the current time, this
@@ -149,13 +146,7 @@ public:
                                      nsIPrincipal* aPrincipal);
 
   void
-  DispatchFetchEvent(const OriginAttributes& aOriginAttributes,
-                     nsIDocument* aDoc,
-                     const nsAString& aDocumentIdForTopLevelNavigation,
-                     nsIInterceptedChannel* aChannel,
-                     bool aIsReload,
-                     bool aIsSubresourceLoad,
-                     ErrorResult& aRv);
+  DispatchFetchEvent(nsIInterceptedChannel* aChannel, ErrorResult& aRv);
 
   void
   Update(nsIPrincipal* aPrincipal,
@@ -195,6 +186,10 @@ public:
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
   GetRegistration(nsIPrincipal* aPrincipal, const nsACString& aScope) const;
+
+  already_AddRefed<ServiceWorkerRegistrationInfo>
+  GetRegistration(const mozilla::ipc::PrincipalInfo& aPrincipal,
+                  const nsACString& aScope) const;
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
   CreateNewRegistration(const nsCString& aScope,
@@ -254,10 +249,6 @@ public:
                                 uint32_t aLineNumber = 0,
                                 uint32_t aColumnNumber = 0);
 
-  void
-  FlushReportsToAllClients(const nsACString& aScope,
-                           nsIConsoleReportCollector* aReporter);
-
   // Always consumes the error by reporting to consoles of all controlled
   // documents.
   void
@@ -273,24 +264,13 @@ public:
               uint32_t aFlags,
               JSExnType aExnType);
 
-  UniquePtr<ServiceWorkerClientInfo>
-  GetClient(nsIPrincipal* aPrincipal,
-            const nsAString& aClientId,
-            ErrorResult& aRv);
-
-  void
-  GetAllClients(nsIPrincipal* aPrincipal,
-                const nsCString& aScope,
-                uint64_t aServiceWorkerID,
-                bool aIncludeUncontrolled,
-                nsTArray<ServiceWorkerClientInfo>& aDocuments);
-
-  void
+  already_AddRefed<GenericPromise>
   MaybeClaimClient(nsIDocument* aDocument,
                    ServiceWorkerRegistrationInfo* aWorkerRegistration);
 
-  nsresult
-  ClaimClients(nsIPrincipal* aPrincipal, const nsCString& aScope, uint64_t aId);
+  already_AddRefed<GenericPromise>
+  MaybeClaimClient(nsIDocument* aDoc,
+                   const ServiceWorkerDescriptor& aServiceWorker);
 
   void
   SetSkipWaitingFlag(nsIPrincipal* aPrincipal, const nsCString& aScope,
@@ -320,7 +300,7 @@ public:
                                   ServiceWorkerRegistrationListener* aListener);
 
   void
-  MaybeCheckNavigationUpdate(nsIDocument* aDoc);
+  MaybeCheckNavigationUpdate(const ClientInfo& aClientInfo);
 
   nsresult
   SendPushEvent(const nsACString& aOriginAttributes,
@@ -344,6 +324,13 @@ private:
   void
   Init(ServiceWorkerRegistrar* aRegistrar);
 
+  RefPtr<GenericPromise>
+  StartControllingClient(const ClientInfo& aClientInfo,
+                         ServiceWorkerRegistrationInfo* aRegistrationInfo);
+
+  void
+  StopControllingClient(const ClientInfo& aClientInfo);
+
   void
   MaybeStartShutdown();
 
@@ -365,8 +352,8 @@ private:
   Update(ServiceWorkerRegistrationInfo* aRegistration);
 
   nsresult
-  GetDocumentRegistration(nsIDocument* aDoc,
-                          ServiceWorkerRegistrationInfo** aRegistrationInfo);
+  GetClientRegistration(const ClientInfo& aClientInfo,
+                        ServiceWorkerRegistrationInfo** aRegistrationInfo);
 
   nsresult
   GetServiceWorkerForScope(nsPIDOMWindowInner* aWindow,
@@ -391,13 +378,8 @@ private:
   void
   NotifyServiceWorkerRegistrationRemoved(ServiceWorkerRegistrationInfo* aRegistration);
 
-  RefPtr<GenericPromise>
-  StartControllingADocument(ServiceWorkerRegistrationInfo* aRegistration,
-                            nsIDocument* aDoc,
-                            const nsAString& aDocumentId);
-
   void
-  StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration);
+  StopControllingRegistration(ServiceWorkerRegistrationInfo* aRegistration);
 
   already_AddRefed<ServiceWorkerRegistrationInfo>
   GetServiceWorkerRegistrationInfo(nsPIDOMWindowInner* aWindow);
@@ -417,6 +399,10 @@ private:
   // loading.
   static nsresult
   PrincipalToScopeKey(nsIPrincipal* aPrincipal, nsACString& aKey);
+
+  static nsresult
+  PrincipalInfoToScopeKey(const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
+                          nsACString& aKey);
 
   static void
   AddScopeAndRegistration(const nsACString& aScope,
@@ -441,7 +427,7 @@ private:
   FireUpdateFoundOnServiceWorkerRegistrations(ServiceWorkerRegistrationInfo* aRegistration);
 
   void
-  FireControllerChange(ServiceWorkerRegistrationInfo* aRegistration);
+  UpdateClientControllers(ServiceWorkerRegistrationInfo* aRegistration);
 
   void
   StorePendingReadyPromise(nsPIDOMWindowInner* aWindow, nsIURI* aURI,
@@ -481,19 +467,6 @@ private:
 
   void
   NotifyListenersOnUnregister(nsIServiceWorkerRegistrationInfo* aRegistration);
-
-  void
-  AddRegisteringDocument(const nsACString& aScope, nsIDocument* aDoc);
-
-  class InterceptionReleaseHandle;
-
-  void
-  AddNavigationInterception(const nsACString& aScope,
-                            nsIInterceptedChannel* aChannel);
-
-  void
-  RemoveNavigationInterception(const nsACString& aScope,
-                               nsIInterceptedChannel* aChannel);
 
   void
   ScheduleUpdateTimer(nsIPrincipal* aPrincipal, const nsACString& aScope);

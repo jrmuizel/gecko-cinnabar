@@ -163,11 +163,9 @@ nsresult nsMenuBarX::Create(nsIWidget* aParent, Element* aContent)
 
 void nsMenuBarX::ConstructNativeMenus()
 {
-  uint32_t count = mContent->GetChildCount();
-  for (uint32_t i = 0; i < count; i++) {
-    nsIContent *menuContent = mContent->GetChildAt(i);
-    if (menuContent &&
-        menuContent->IsXULElement(nsGkAtoms::menu)) {
+  for (nsIContent* menuContent = mContent->GetFirstChild();
+       menuContent; menuContent = menuContent->GetNextSibling()) {
+    if (menuContent->IsXULElement(nsGkAtoms::menu)) {
       nsMenuX* newMenu = new nsMenuX();
       if (newMenu) {
         nsresult rv = newMenu->Create(this, this, menuContent->AsElement());
@@ -318,7 +316,7 @@ void nsMenuBarX::ObserveContentRemoved(nsIDocument* aDocument,
 {
   nsINode* parent = NODE_FROM(aContainer, aDocument);
   MOZ_ASSERT(parent);
-  int32_t index = parent->IndexOf(aPreviousSibling) + 1;
+  int32_t index = parent->ComputeIndexOf(aPreviousSibling) + 1;
   RemoveMenuAtIndex(index);
 }
 
@@ -330,7 +328,7 @@ void nsMenuBarX::ObserveContentInserted(nsIDocument* aDocument,
   if (newMenu) {
     nsresult rv = newMenu->Create(this, this, aChild);
     if (NS_SUCCEEDED(rv))
-      InsertMenuAtIndex(newMenu, aContainer->IndexOf(aChild));
+      InsertMenuAtIndex(newMenu, aContainer->ComputeIndexOf(aChild));
     else
       delete newMenu;
   }
@@ -489,7 +487,7 @@ char nsMenuBarX::GetLocalizedAccelKey(const char *shortcutID)
   NS_ConvertASCIItoUTF16 shortcutIDStr((const char *)shortcutID);
   nsCOMPtr<nsIDOMElement> shortcutElement;
   domDoc->GetElementById(shortcutIDStr, getter_AddRefs(shortcutElement));
-  nsCOMPtr<nsIContent> shortcutContent = do_QueryInterface(shortcutElement);
+  nsCOMPtr<Element> shortcutContent = do_QueryInterface(shortcutElement);
   if (!shortcutContent)
     return 0;
 
@@ -627,7 +625,7 @@ NSMenuItem* nsMenuBarX::CreateNativeAppMenuItem(nsMenuX* inMenu, const nsAString
     nsCOMPtr<nsIDOMElement> keyElement;
     domdoc->GetElementById(key, getter_AddRefs(keyElement));
     if (keyElement) {
-      nsCOMPtr<nsIContent> keyContent (do_QueryInterface(keyElement));
+      nsCOMPtr<Element> keyContent (do_QueryInterface(keyElement));
       // first grab the key equivalent character
       nsAutoString keyChar(NS_LITERAL_STRING(" "));
       keyContent->GetAttr(kNameSpaceID_None, nsGkAtoms::key, keyChar);

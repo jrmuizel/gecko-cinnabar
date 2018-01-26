@@ -13,9 +13,6 @@ Cu.import("resource://gre/modules/Log.jsm");
 // default.  Note "Debug" is usually appropriate so that when this log is
 // included in the Sync file logs we get verbose output.
 const PREF_LOG_LEVEL = "identity.fxaccounts.loglevel";
-// The level of messages that will be dumped to the console.  If not specified,
-// "Error" will be used.
-const PREF_LOG_LEVEL_DUMP = "identity.fxaccounts.log.appender.dump";
 
 // A pref that can be set so "sensitive" information (eg, personally
 // identifiable info, credentials, etc) will be logged.
@@ -25,30 +22,7 @@ var exports = Object.create(null);
 
 XPCOMUtils.defineLazyGetter(exports, "log", function() {
   let log = Log.repository.getLogger("FirefoxAccounts");
-  // We set the log level to debug, but the default dump appender is set to
-  // the level reflected in the pref.  Other code that consumes FxA may then
-  // choose to add another appender at a different level.
-  log.level = Log.Level.Debug;
-  let appender = new Log.DumpAppender();
-  appender.level = Log.Level.Error;
-
-  log.addAppender(appender);
-  try {
-    // The log itself.
-    let level =
-      Services.prefs.getPrefType(PREF_LOG_LEVEL) == Ci.nsIPrefBranch.PREF_STRING
-      && Services.prefs.getCharPref(PREF_LOG_LEVEL);
-    log.level = Log.Level[level] || Log.Level.Debug;
-
-    // The appender.
-    level =
-      Services.prefs.getPrefType(PREF_LOG_LEVEL_DUMP) == Ci.nsIPrefBranch.PREF_STRING
-      && Services.prefs.getCharPref(PREF_LOG_LEVEL_DUMP);
-    appender.level = Log.Level[level] || Log.Level.Error;
-  } catch (e) {
-    log.error(e);
-  }
-
+  log.manageLevelFromPref(PREF_LOG_LEVEL);
   return log;
 });
 
@@ -231,6 +205,8 @@ exports.ERROR_INVALID_PARAMETER              = "INVALID_PARAMETER";
 exports.ERROR_CODE_METHOD_NOT_ALLOWED        = 405;
 exports.ERROR_MSG_METHOD_NOT_ALLOWED         = "METHOD_NOT_ALLOWED";
 
+exports.DERIVED_KEYS_NAMES = ["kSync", "kXCS", "kExtSync", "kExtKbHash"];
+
 // FxAccounts has the ability to "split" the credentials between a plain-text
 // JSON file in the profile dir and in the login manager.
 // In order to prevent new fields accidentally ending up in the "wrong" place,
@@ -244,7 +220,7 @@ exports.FXA_PWDMGR_PLAINTEXT_FIELDS = new Set(
 
 // Fields we store in secure storage if it exists.
 exports.FXA_PWDMGR_SECURE_FIELDS = new Set(
-  ["kA", "kB", "keyFetchToken", "unwrapBKey", "assertion"]);
+  [...exports.DERIVED_KEYS_NAMES, "keyFetchToken", "unwrapBKey", "assertion"]);
 
 // Fields we keep in memory and don't persist anywhere.
 exports.FXA_PWDMGR_MEMORY_FIELDS = new Set(

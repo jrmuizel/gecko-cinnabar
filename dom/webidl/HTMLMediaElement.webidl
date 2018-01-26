@@ -17,7 +17,7 @@ interface HTMLMediaElement : HTMLElement {
   readonly attribute MediaError? error;
 
   // network state
-  [CEReactions, SetterNeedsSubjectPrincipal, SetterThrows]
+  [CEReactions, SetterNeedsSubjectPrincipal=NonSystem, SetterThrows]
            attribute DOMString src;
   readonly attribute DOMString currentSrc;
 
@@ -124,9 +124,9 @@ partial interface HTMLMediaElement {
   [Func="IsChromeOrXBL"] attribute boolean mozIsCasting;
 
   // Mozilla extension: stream capture
-  [Throws, UnsafeInPrerendering]
+  [Throws]
   MediaStream mozCaptureStream();
-  [Throws, UnsafeInPrerendering]
+  [Throws]
   MediaStream mozCaptureStreamUntilEnded();
   readonly attribute boolean mozAudioCaptured;
 

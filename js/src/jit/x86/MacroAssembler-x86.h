@@ -94,47 +94,30 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
 
     template <typename T>
-    void add64(const T& address, Register64 dest) {
+    void add64FromMemory(const T& address, Register64 dest) {
         addl(Operand(LowWord(address)), dest.low);
         adcl(Operand(HighWord(address)), dest.high);
     }
     template <typename T>
-    void sub64(const T& address, Register64 dest) {
+    void sub64FromMemory(const T& address, Register64 dest) {
         subl(Operand(LowWord(address)), dest.low);
         sbbl(Operand(HighWord(address)), dest.high);
     }
     template <typename T>
-    void and64(const T& address, Register64 dest) {
+    void and64FromMemory(const T& address, Register64 dest) {
         andl(Operand(LowWord(address)), dest.low);
         andl(Operand(HighWord(address)), dest.high);
     }
     template <typename T>
-    void or64(const T& address, Register64 dest) {
+    void or64FromMemory(const T& address, Register64 dest) {
         orl(Operand(LowWord(address)), dest.low);
         orl(Operand(HighWord(address)), dest.high);
     }
     template <typename T>
-    void xor64(const T& address, Register64 dest) {
+    void xor64FromMemory(const T& address, Register64 dest) {
         xorl(Operand(LowWord(address)), dest.low);
         xorl(Operand(HighWord(address)), dest.high);
     }
-
-    // Here, `value` is an address to an Int64 because we don't have enough
-    // registers for all the operands.  It is allowed to be SP-relative.
-    template <typename T, typename U>
-    void atomicFetchAdd64(const T& value, const U& address, Register64 temp, Register64 output);
-
-    template <typename T, typename U>
-    void atomicFetchSub64(const T& value, const U& address, Register64 temp, Register64 output);
-
-    template <typename T, typename U>
-    void atomicFetchAnd64(const T& value, const U& address, Register64 temp, Register64 output);
-
-    template <typename T, typename U>
-    void atomicFetchOr64(const T& value, const U& address, Register64 temp, Register64 output);
-
-    template <typename T, typename U>
-    void atomicFetchXor64(const T& value, const U& address, Register64 temp, Register64 output);
 
     /////////////////////////////////////////////////////////////////
     // X86/X64-common interface.
@@ -675,50 +658,6 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         movl(imm.hi(), Operand(HighWord(address)));
     }
 
-    template <typename T>
-    void atomicLoad64(const T& address, Register64 temp, Register64 output) {
-        MOZ_ASSERT(temp.low == ebx);
-        MOZ_ASSERT(temp.high == ecx);
-        MOZ_ASSERT(output.high == edx);
-        MOZ_ASSERT(output.low == eax);
-
-        // In the event edx:eax matches what's in memory, ecx:ebx will be
-        // stored.  The two pairs must therefore have the same values.
-        movl(edx, ecx);
-        movl(eax, ebx);
-
-        lock_cmpxchg8b(edx, eax, ecx, ebx, Operand(address));
-    }
-
-    template <typename T>
-    void atomicExchange64(const T& address, Register64 value, Register64 output) {
-        MOZ_ASSERT(value.low == ebx);
-        MOZ_ASSERT(value.high == ecx);
-        MOZ_ASSERT(output.high == edx);
-        MOZ_ASSERT(output.low == eax);
-
-        // edx:eax has garbage initially, and that is the best we can do unless
-        // we can guess with high probability what's in memory.
-
-        Label again;
-        bind(&again);
-        lock_cmpxchg8b(edx, eax, ecx, ebx, Operand(address));
-        j(Assembler::Condition::NonZero, &again);
-    }
-
-    template <typename T>
-    void compareExchange64(const T& address, Register64 expected, Register64 replacement,
-                           Register64 output)
-    {
-        MOZ_ASSERT(expected == output);
-        MOZ_ASSERT(expected.high == edx);
-        MOZ_ASSERT(expected.low == eax);
-        MOZ_ASSERT(replacement.high == ecx);
-        MOZ_ASSERT(replacement.low == ebx);
-
-        lock_cmpxchg8b(edx, eax, ecx, ebx, Operand(address));
-    }
-
     void setStackArg(Register reg, uint32_t arg) {
         movl(reg, Operand(esp, arg * sizeof(intptr_t)));
     }
@@ -741,27 +680,49 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         movl(ImmType(type), dest.typeReg());
     }
 
-    void unboxNonDouble(const ValueOperand& src, Register dest) {
+    void unboxNonDouble(const ValueOperand& src, Register dest, JSValueType type) {
         if (src.payloadReg() != dest)
             movl(src.payloadReg(), dest);
     }
-    void unboxNonDouble(const Address& src, Register dest) {
+    void unboxNonDouble(const Address& src, Register dest, JSValueType type) {
         movl(payloadOf(src), dest);
     }
-    void unboxNonDouble(const BaseIndex& src, Register dest) {
+    void unboxNonDouble(const BaseIndex& src, Register dest, JSValueType type) {
         movl(payloadOf(src), dest);
     }
-    void unboxInt32(const ValueOperand& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxInt32(const Address& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxBoolean(const ValueOperand& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxBoolean(const Address& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxString(const ValueOperand& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxString(const Address& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxSymbol(const ValueOperand& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxSymbol(const Address& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxObject(const ValueOperand& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxObject(const Address& src, Register dest) { unboxNonDouble(src, dest); }
-    void unboxObject(const BaseIndex& src, Register dest) { unboxNonDouble(src, dest); }
+    void unboxInt32(const ValueOperand& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_INT32);
+    }
+    void unboxInt32(const Address& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_INT32);
+    }
+    void unboxBoolean(const ValueOperand& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_BOOLEAN);
+    }
+    void unboxBoolean(const Address& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_BOOLEAN);
+    }
+    void unboxString(const ValueOperand& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_STRING);
+    }
+    void unboxString(const Address& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_STRING);
+    }
+    void unboxSymbol(const ValueOperand& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_SYMBOL);
+    }
+    void unboxSymbol(const Address& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_SYMBOL);
+    }
+    void unboxObject(const ValueOperand& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_OBJECT);
+    }
+    void unboxObject(const Address& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_OBJECT);
+    }
+    void unboxObject(const BaseIndex& src, Register dest) {
+        unboxNonDouble(src, dest, JSVAL_TYPE_OBJECT);
+    }
     void unboxDouble(const Address& src, FloatRegister dest) {
         loadDouble(Operand(src), dest);
     }
@@ -792,10 +753,15 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
             vunpcklps(ScratchDoubleReg, dest, dest);
         }
     }
-    inline void unboxValue(const ValueOperand& src, AnyRegister dest);
+    inline void unboxValue(const ValueOperand& src, AnyRegister dest, JSValueType type);
     void unboxPrivate(const ValueOperand& src, Register dest) {
         if (src.payloadReg() != dest)
             movl(src.payloadReg(), dest);
+    }
+
+    // See comment in MacroAssembler-x64.h.
+    void unboxGCThingForPreBarrierTrampoline(const Address& src, Register dest) {
+        movl(payloadOf(src), dest);
     }
 
     void notBoolean(const ValueOperand& val) {
@@ -810,6 +776,12 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         return scratch;
     }
     Register extractObject(const ValueOperand& value, Register scratch) {
+        return value.payloadReg();
+    }
+    Register extractString(const ValueOperand& value, Register scratch) {
+        return value.payloadReg();
+    }
+    Register extractSymbol(const ValueOperand& value, Register scratch) {
         return value.payloadReg();
     }
     Register extractInt32(const ValueOperand& value, Register scratch) {
@@ -862,7 +834,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     inline void loadUnboxedValue(const T& src, MIRType type, AnyRegister dest);
 
     template <typename T>
-    void storeUnboxedPayload(ValueOperand value, T address, size_t nbytes) {
+    void storeUnboxedPayload(ValueOperand value, T address, size_t nbytes, JSValueType) {
         switch (nbytes) {
           case 4:
             storePtr(value.payloadReg(), address);
@@ -883,21 +855,6 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
 
     // Note: this function clobbers the source register.
     inline void convertUInt32ToFloat32(Register src, FloatRegister dest);
-
-    void convertUInt64ToFloat32(Register64 src, FloatRegister dest, Register temp);
-    void convertInt64ToFloat32(Register64 src, FloatRegister dest);
-    static bool convertUInt64ToDoubleNeedsTemp();
-    void convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp);
-    void convertInt64ToDouble(Register64 src, FloatRegister dest);
-
-    void wasmTruncateDoubleToInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                   Label* oolRejoin, FloatRegister tempDouble);
-    void wasmTruncateDoubleToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                    Label* oolRejoin, FloatRegister tempDouble);
-    void wasmTruncateFloat32ToInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                    Label* oolRejoin, FloatRegister tempDouble);
-    void wasmTruncateFloat32ToUInt64(FloatRegister input, Register64 output, Label* oolEntry,
-                                     Label* oolRejoin, FloatRegister tempDouble);
 
     void incrementInt32Value(const Address& addr) {
         addl(Imm32(1), payloadOf(addr));

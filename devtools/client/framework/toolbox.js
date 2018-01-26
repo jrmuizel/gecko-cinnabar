@@ -69,6 +69,8 @@ loader.lazyRequireGetter(this, "viewSource",
   "devtools/client/shared/view-source");
 loader.lazyRequireGetter(this, "StyleSheetsFront",
   "devtools/shared/fronts/stylesheets", true);
+loader.lazyRequireGetter(this, "buildHarLog",
+  "devtools/client/netmonitor/src/har/har-builder-utils", true);
 
 loader.lazyGetter(this, "domNodeConstants", () => {
   return require("devtools/shared/dom-node-constants");
@@ -179,6 +181,20 @@ function Toolbox(target, selectedTool, hostType, contentWindow, frameId) {
 
   this.on("picker-started", this._onPickerStarted);
   this.on("picker-stopped", this._onPickerStopped);
+
+  /**
+   * Get text direction for the current locale direction.
+   *
+   * `getComputedStyle` forces a synchronous reflow, so use a lazy getter in order to
+   * call it only once.
+   */
+  loader.lazyGetter(this, "direction", () => {
+    // Get the direction from browser.xul document
+    let top = this.win.top;
+    let topDocEl = top.document.documentElement;
+    let isRtl = top.getComputedStyle(topDocEl).direction === "rtl";
+    return isRtl ? "rtl" : "ltr";
+  });
 }
 exports.Toolbox = Toolbox;
 
@@ -504,7 +520,15 @@ Toolbox.prototype = {
       // can take a few hundred milliseconds seconds to start up.
       // But wait for toolbar buttons to be set before updating this react component.
       buttonsPromise.then(() => {
-        this.component.setCanRender();
+        // Delay React rendering as Toolbox.open and buttonsPromise are synchronous.
+        // Even if this involve promises, this is synchronous. Toolbox.open already loads
+        // react modules and freeze the event loop for a significant time.
+        // requestIdleCallback allows releasing it to allow user events to be processed.
+        // Use 16ms maximum delay to allow one frame to be rendered at 60FPS
+        // (1000ms/60FPS=16ms)
+        this.win.requestIdleCallback(() => {
+          this.component.setCanRender();
+        }, {timeout: 16});
       });
 
       yield this.selectTool(this._defaultToolId);
@@ -1732,10 +1756,7 @@ Toolbox.prototype = {
 
     if (docEl.hasAttribute("dir")) {
       // Set the dir attribute value only if dir is already present on the document.
-      let top = this.win.top;
-      let topDocEl = top.document.documentElement;
-      let isRtl = top.getComputedStyle(topDocEl).direction === "rtl";
-      docEl.setAttribute("dir", isRtl ? "rtl" : "ltr");
+      docEl.setAttribute("dir", this.direction);
     }
   },
 
@@ -2987,4 +3008,21 @@ Toolbox.prototype = {
   viewSource: function (sourceURL, sourceLine) {
     return viewSource.viewSource(this, sourceURL, sourceLine);
   },
+
+  /**
+   * Returns data (HAR) collected by the Network panel.
+   */
+  getHARFromNetMonitor: function () {
+    let netPanel = this.getPanel("netmonitor");
+
+    // The panel doesn't have to exist (it must be selected
+    // by the user at least once to be created).
+    // Return default empty HAR file in such case.
+    if (!netPanel) {
+      return Promise.resolve(buildHarLog(Services.appinfo));
+    }
+
+    // Use Netmonitor object to get the current HAR log.
+    return netPanel.panelWin.Netmonitor.getHar();
+  }
 };

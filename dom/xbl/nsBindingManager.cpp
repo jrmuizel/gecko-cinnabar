@@ -216,7 +216,7 @@ nsBindingManager::RemovedFromDocumentInternal(nsIContent* aContent,
       binding->ChangeDocument(aOldDocument, nullptr);
     }
 
-    aContent->SetXBLBinding(nullptr, this);
+    aContent->AsElement()->SetXBLBinding(nullptr, this);
   }
 
   // Clear out insertion point and content lists.
@@ -722,11 +722,18 @@ nsBindingManager::EnumerateBoundContentBindings(
     return true;
   }
 
+  nsTHashtable<nsPtrHashKey<nsXBLBinding>> bindings;
   for (auto iter = mBoundContentSet->Iter(); !iter.Done(); iter.Next()) {
     nsIContent* boundContent = iter.Get()->GetKey();
     for (nsXBLBinding* binding = boundContent->GetXBLBinding();
          binding;
          binding = binding->GetBaseBinding()) {
+      // If we have already invoked the callback with a binding, we
+      // should have also invoked it for all its base bindings, so we
+      // don't need to continue this loop anymore.
+      if (!bindings.EnsureInserted(binding)) {
+        break;
+      }
       if (!aCallback(binding)) {
         return false;
       }
@@ -1097,44 +1104,6 @@ nsBindingManager::HandleChildInsertion(nsIContent* aContainer,
   }
 }
 
-
-nsIContent*
-nsBindingManager::FindNestedInsertionPoint(nsIContent* aContainer,
-                                           nsIContent* aChild)
-{
-  NS_PRECONDITION(aChild->GetParent() == aContainer,
-                  "Wrong container");
-
-  nsIContent* parent = aContainer;
-  if (aContainer->IsActiveChildrenElement()) {
-    if (static_cast<XBLChildrenElement*>(aContainer)->
-          HasInsertedChildren()) {
-      return nullptr;
-    }
-    parent = aContainer->GetParent();
-  }
-
-  while (parent) {
-    nsXBLBinding* binding = GetBindingWithContent(parent);
-    if (!binding) {
-      break;
-    }
-
-    XBLChildrenElement* point = binding->FindInsertionPointFor(aChild);
-    if (!point) {
-      return nullptr;
-    }
-
-    nsIContent* newParent = point->GetParent();
-    if (newParent == parent) {
-      break;
-    }
-    parent = newParent;
-  }
-
-  return parent;
-}
-
 nsIContent*
 nsBindingManager::FindNestedSingleInsertionPoint(nsIContent* aContainer,
                                                  bool* aMulti)
@@ -1174,21 +1143,4 @@ nsBindingManager::FindNestedSingleInsertionPoint(nsIContent* aContainer,
   }
 
   return parent;
-}
-
-bool
-nsBindingManager::AnyBindingHasDocumentStateDependency(EventStates aStateMask)
-{
-  MOZ_ASSERT(mDocument->IsStyledByServo());
-
-  bool result = false;
-  EnumerateBoundContentBindings([&](nsXBLBinding* aBinding) {
-    ServoStyleSet* styleSet = aBinding->PrototypeBinding()->GetServoStyleSet();
-    if (styleSet && styleSet->HasDocumentStateDependency(aStateMask)) {
-      result = true;
-      return false;
-    }
-    return true;
-  });
-  return result;
 }

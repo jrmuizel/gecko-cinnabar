@@ -18,6 +18,12 @@ const { getToplevelWindow } = require("../utils/window");
 
 const FRAME_SCRIPT = "resource://devtools/client/responsive.html/browser/content.js";
 
+// Allow creation of HTML fragments without automatic sanitization, even
+// though we're in a chrome-privileged document.
+// This is, unfortunately, necessary in order to React to function
+// correctly.
+document.allowUnsafeHTML = true;
+
 class Browser extends PureComponent {
   /**
    * This component is not allowed to depend directly on frequently changing
@@ -119,7 +125,7 @@ class Browser extends PureComponent {
 
     await e10s.request(mm, "Start", {
       requiresFloatingScrollbars,
-      // Tests expect events on resize to yield on various size changes
+      // Tests expect events on resize to wait for various size changes
       notifyOnResize: flags.testing,
     });
   }

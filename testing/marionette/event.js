@@ -76,6 +76,7 @@ event.DoubleClickTracker = {
   },
   resetClick() {
     event.DoubleClickTracker.firstClick = false;
+    event.DoubleClickTracker.cancelTimer();
   },
   startTimer() {
     dblclickTimer.initWithCallback(event.DoubleClickTracker.resetClick,
@@ -1376,16 +1377,6 @@ event.sendEvent = function(eventType, el, modifiers = {}, opts = {}) {
   ev.ctrlKey = modifiers.ctrl;
 
   ev.initEvent(eventType, opts.canBubble, true);
-  el.dispatchEvent(ev);
-};
-
-event.focus = function(el, opts = {}) {
-  opts.canBubble = opts.canBubble || true;
-  let doc = el.ownerDocument || el.document;
-  let win = doc.defaultView;
-
-  let ev = new win.FocusEvent(el);
-  ev.initEvent("focus", opts.canBubble, true);
   el.dispatchEvent(ev);
 };
 

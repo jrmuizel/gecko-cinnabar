@@ -19,7 +19,7 @@
 
 // This is the schema version. Update it at any schema change and add a
 // corresponding migrateVxx method below.
-#define DATABASE_SCHEMA_VERSION 41
+#define DATABASE_SCHEMA_VERSION 42
 
 // Fired after Places inited.
 #define TOPIC_PLACES_INIT_COMPLETE "places-init-complete"
@@ -241,8 +241,19 @@ protected:
    *
    * @param aStorage
    *        mozStorage service instance.
+   * @param aTryToClone
+   *        whether we should try to clone a corrupt database.
    */
-  nsresult BackupAndReplaceDatabaseFile(nsCOMPtr<mozIStorageService>& aStorage);
+  nsresult BackupAndReplaceDatabaseFile(nsCOMPtr<mozIStorageService>& aStorage,
+                                        bool aTryToClone);
+
+  /**
+   * Tries to recover tables and their contents from a corrupt database.
+   *
+   * @param aStorage
+   *        mozStorage service instance.
+   */
+  nsresult TryToCloneTablesFromCorruptDatabase(nsCOMPtr<mozIStorageService>& aStorage);
 
   /**
    * Set up the connection environment through PRAGMAs.
@@ -291,6 +302,7 @@ protected:
   nsresult MigrateV39Up();
   nsresult MigrateV40Up();
   nsresult MigrateV41Up();
+  nsresult MigrateV42Up();
 
   nsresult UpdateBookmarkRootTitles();
 
@@ -323,6 +335,9 @@ private:
   // Used to track whether icon payloads should be converted at the end of
   // schema migration.
   bool mShouldConvertIconPayloads;
+  // Used to track whether the favicons database should be vacuumed at the end
+  // of the schema migration.
+  bool mShouldVacuumIcons;
 
   /**
    * Phases for shutting down the Database.

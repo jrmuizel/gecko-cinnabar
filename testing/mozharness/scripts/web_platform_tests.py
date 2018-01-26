@@ -207,7 +207,8 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
                 "--symbols-path=%s" % self.query_symbols_url(),
                 "--stackwalk-binary=%s" % self.query_minidump_stackwalk(),
                 "--stackfix-dir=%s" % os.path.join(dirs["abs_test_install_dir"], "bin"),
-                "--run-by-dir=3"]
+                "--run-by-dir=3",
+                "--no-pause-after-test"]
 
         if not sys.platform.startswith("linux"):
             cmd += ["--exclude=css"]
@@ -223,10 +224,17 @@ class WebPlatformTest(TestingMixin, MercurialScript, BlobUploadMixin, CodeCovera
         else:
             cmd.append("--stylo-threads=4")
 
-        for opt in ["total_chunks", "this_chunk"]:
-            val = c.get(opt)
-            if val:
-                cmd.append("--%s=%s" % (opt.replace("_", "-"), val))
+        if os.environ.get('MOZHARNESS_TEST_PATHS'):
+            prefix = 'testing/web-platform'
+            paths = os.environ['MOZHARNESS_TEST_PATHS'].split(':')
+            paths = [os.path.join(dirs["abs_wpttest_dir"], os.path.relpath(p, prefix))
+                     for p in paths if p.startswith(prefix)]
+            cmd.extend(paths)
+        else:
+            for opt in ["total_chunks", "this_chunk"]:
+                val = c.get(opt)
+                if val:
+                    cmd.append("--%s=%s" % (opt.replace("_", "-"), val))
 
         if "wdspec" in test_types:
             geckodriver_path = self._query_geckodriver()

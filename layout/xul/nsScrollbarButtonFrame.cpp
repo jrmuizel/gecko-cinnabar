@@ -24,10 +24,8 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/layers/ScrollInputMethods.h"
 
 using namespace mozilla;
-using mozilla::layers::ScrollInputMethod;
 
 //
 // NS_NewToolbarFrame
@@ -115,9 +113,9 @@ nsScrollbarButtonFrame::HandleButtonPress(nsPresContext* aPresContext,
   if (scrollbar == nullptr)
     return false;
 
-  static nsIContent::AttrValuesArray strings[] = { &nsGkAtoms::increment,
-                                                   &nsGkAtoms::decrement,
-                                                   nullptr };
+  static Element::AttrValuesArray strings[] = { &nsGkAtoms::increment,
+                                                &nsGkAtoms::decrement,
+                                                nullptr };
   int32_t index = mContent->AsElement()->FindAttrValueIn(kNameSpaceID_None,
                                                          nsGkAtoms::type,
                                                          strings, eCaseMatters);
@@ -172,9 +170,6 @@ nsScrollbarButtonFrame::HandleButtonPress(nsPresContext* aPresContext,
     if (!weakFrame.IsAlive()) {
       return false;
     }
-
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::SCROLL_INPUT_METHODS,
-        (uint32_t) ScrollInputMethod::MainThreadScrollbarButtonClick);
 
     if (!m) {
       sb->MoveToNewPosition();

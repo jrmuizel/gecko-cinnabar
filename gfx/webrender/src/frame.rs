@@ -4,7 +4,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{BuiltDisplayListIter, ClipAndScrollInfo, ClipId, ColorF, ComplexClipRegion};
-use api::{DeviceUintRect, DeviceUintSize, DisplayItemRef, DocumentLayer, Epoch, FilterOp};
+use api::{DevicePixelScale, DeviceUintRect, DeviceUintSize};
+use api::{DisplayItemRef, DocumentLayer, Epoch, FilterOp};
 use api::{ImageDisplayItem, ItemRange, LayerPoint, LayerPrimitiveInfo, LayerRect};
 use api::{LayerSize, LayerVector2D, LayoutSize};
 use api::{LocalClip, PipelineId, ScrollClamping, ScrollEventPhase, ScrollLayerState};
@@ -17,13 +18,13 @@ use euclid::rect;
 use frame_builder::{FrameBuilder, FrameBuilderConfig, ScrollbarInfo};
 use gpu_cache::GpuCache;
 use internal_types::{FastHashMap, FastHashSet, RenderedDocument};
-use prim_store::{BrushAntiAliasMode};
 use profiler::{GpuCacheProfileCounters, TextureCacheProfileCounters};
 use resource_cache::{FontInstanceMap,ResourceCache, TiledImageMap};
 use scene::{Scene, StackingContextHelpers, ScenePipeline, SceneProperties};
-use tiling::CompositeOps;
+use tiling::{CompositeOps, Frame};
 
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug, Eq, Ord)]
+#[cfg_attr(feature = "capture", derive(Deserialize, Serialize))]
 pub struct FrameId(pub u32);
 
 static DEFAULT_SCROLLBAR_COLOR: ColorF = ColorF {
@@ -74,6 +75,24 @@ impl<'a> FlattenContext<'a> {
             .collect()
     }
 
+    fn get_clip_chain_items(
+        &self,
+        pipeline_id: PipelineId,
+        items: ItemRange<ClipId>,
+    ) -> Vec<ClipId> {
+        if items.is_empty() {
+            return vec![];
+        }
+
+        self.scene
+            .pipelines
+            .get(&pipeline_id)
+            .expect("No display list?")
+            .display_list
+            .get(items)
+            .collect()
+    }
+
     fn flatten_root(
         &mut self,
         traversal: &mut BuiltDisplayListIter<'a>,
@@ -106,7 +125,6 @@ impl<'a> FlattenContext<'a> {
                         &info,
                         bg_color,
                         None,
-                        BrushAntiAliasMode::Primitive,
                     );
                 }
             }
@@ -401,11 +419,12 @@ impl<'a> FlattenContext<'a> {
                         self.builder.add_image(
                             clip_and_scroll,
                             &prim_info,
-                            &info.stretch_size,
-                            &info.tile_spacing,
+                            info.stretch_size,
+                            info.tile_spacing,
                             None,
                             info.image_key,
                             info.image_rendering,
+                            info.alpha_type,
                             None,
                         );
                     }
@@ -448,7 +467,6 @@ impl<'a> FlattenContext<'a> {
                     &prim_info,
                     info.color,
                     None,
-                    BrushAntiAliasMode::Primitive,
                 );
             }
             SpecificDisplayItem::ClearRectangle => {
@@ -560,6 +578,10 @@ impl<'a> FlattenContext<'a> {
                     clip_region,
                 );
             }
+            SpecificDisplayItem::ClipChain(ref info) => {
+                let items = self.get_clip_chain_items(pipeline_id, item.clip_chain_items());
+                self.clip_scroll_tree.add_clip_chain_descriptor(info.id, info.parent, items);
+            },
             SpecificDisplayItem::ScrollFrame(ref info) => {
                 let complex_clips = self.get_complex_clips(pipeline_id, item.complex_clip().0);
                 let clip_region = ClipRegion::create_for_clip_node(
@@ -912,11 +934,12 @@ impl<'a> FlattenContext<'a> {
             self.builder.add_image(
                 clip_and_scroll,
                 &prim_info,
-                &stretched_size,
-                &info.tile_spacing,
+                stretched_size,
+                info.tile_spacing,
                 None,
                 info.image_key,
                 info.image_rendering,
+                info.alpha_type,
                 Some(tile_offset),
             );
         }
@@ -930,7 +953,7 @@ pub struct FrameContext {
     clip_scroll_tree: ClipScrollTree,
     pipeline_epoch_map: FastHashMap<PipelineId, Epoch>,
     id: FrameId,
-    frame_builder_config: FrameBuilderConfig,
+    pub frame_builder_config: FrameBuilderConfig,
 }
 
 impl FrameContext {
@@ -992,7 +1015,7 @@ impl FrameContext {
         resource_cache: &mut ResourceCache,
         window_size: DeviceUintSize,
         inner_rect: DeviceUintRect,
-        device_pixel_ratio: f32,
+        device_pixel_scale: DevicePixelScale,
         output_pipelines: &FastHashSet<PipelineId>,
     ) -> FrameBuilder {
         let root_pipeline_id = match scene.root_pipeline_id {
@@ -1043,9 +1066,8 @@ impl FrameContext {
             );
 
             roller.builder.setup_viewport_offset(
-                window_size,
                 inner_rect,
-                device_pixel_ratio,
+                device_pixel_scale,
                 roller.clip_scroll_tree,
             );
 
@@ -1074,15 +1096,22 @@ impl FrameContext {
         self.pipeline_epoch_map.insert(pipeline_id, epoch);
     }
 
+    pub fn make_rendered_document(&self, frame: Frame) -> RenderedDocument {
+        let nodes_bouncing_back = self.clip_scroll_tree.collect_nodes_bouncing_back();
+        RenderedDocument::new(self.pipeline_epoch_map.clone(), nodes_bouncing_back, frame)
+    }
+
+    //TODO: this can probably be simplified if `build()` is called directly by RB.
+    // The only things it needs from the frame context is the CST and frame ID.
     pub fn build_rendered_document(
         &mut self,
         frame_builder: &mut FrameBuilder,
         resource_cache: &mut ResourceCache,
         gpu_cache: &mut GpuCache,
         pipelines: &FastHashMap<PipelineId, ScenePipeline>,
-        device_pixel_ratio: f32,
+        device_pixel_scale: DevicePixelScale,
         layer: DocumentLayer,
-        pan: LayerPoint,
+        pan: WorldPoint,
         texture_cache_profile: &mut TextureCacheProfileCounters,
         gpu_cache_profile: &mut GpuCacheProfileCounters,
 		scene_properties: &SceneProperties,
@@ -1094,15 +1123,13 @@ impl FrameContext {
             &mut self.clip_scroll_tree,
             pipelines,
             self.window_size,
-            device_pixel_ratio,
+            device_pixel_scale,
             layer,
             pan,
             texture_cache_profile,
             gpu_cache_profile,
             scene_properties,
         );
-
-        let nodes_bouncing_back = self.clip_scroll_tree.collect_nodes_bouncing_back();
-        RenderedDocument::new(self.pipeline_epoch_map.clone(), nodes_bouncing_back, frame)
+        self.make_rendered_document(frame)
     }
 }

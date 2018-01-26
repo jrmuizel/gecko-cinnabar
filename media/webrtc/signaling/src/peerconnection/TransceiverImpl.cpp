@@ -37,7 +37,7 @@ TransceiverImpl::TransceiverImpl(
     JsepTransceiver* aJsepTransceiver,
     nsIEventTarget* aMainThread,
     nsIEventTarget* aStsThread,
-    DOMMediaStream& aReceiveStream,
+    dom::MediaStreamTrack* aReceiveTrack,
     dom::MediaStreamTrack* aSendTrack,
     WebRtcCallWrapper* aCallWrapper) :
   mPCHandle(aPCHandle),
@@ -46,7 +46,7 @@ TransceiverImpl::TransceiverImpl(
   mHaveSetupTransport(false),
   mMainThread(aMainThread),
   mStsThread(aStsThread),
-  mReceiveStream(&aReceiveStream),
+  mReceiveTrack(aReceiveTrack),
   mSendTrack(aSendTrack),
   mCallWrapper(aCallWrapper)
 {
@@ -95,7 +95,7 @@ TransceiverImpl::InitAudio()
       mMainThread.get(),
       mStsThread.get(),
       static_cast<AudioSessionConduit*>(mConduit.get()),
-      mReceiveStream->GetInputStream()->AsSourceStream());
+      mReceiveTrack);
 }
 
 void
@@ -116,11 +116,11 @@ TransceiverImpl::InitVideo()
       mMainThread.get(),
       mStsThread.get(),
       static_cast<VideoSessionConduit*>(mConduit.get()),
-      mReceiveStream->GetInputStream()->AsSourceStream());
+      mReceiveTrack);
 }
 
 nsresult
-TransceiverImpl::UpdateSinkIdentity(dom::MediaStreamTrack* aTrack,
+TransceiverImpl::UpdateSinkIdentity(const dom::MediaStreamTrack* aTrack,
                                     nsIPrincipal* aPrincipal,
                                     const PeerIdentity* aSinkIdentity)
 {
@@ -252,7 +252,7 @@ TransceiverImpl::UpdateConduit()
   }
 
   if (mJsepTransceiver->mRecvTrack.GetActive()) {
-    MOZ_ASSERT(mReceiveStream);
+    MOZ_ASSERT(mReceiveTrack);
     mReceivePipeline->Start();
     mHaveStartedReceiving = true;
   }
@@ -275,22 +275,11 @@ TransceiverImpl::UpdatePrincipal(nsIPrincipal* aPrincipal)
     return NS_OK;
   }
 
-  nsTArray<RefPtr<dom::MediaStreamTrack>> receiveTracks;
-  mReceiveStream->GetTracks(receiveTracks);
-  if (receiveTracks.Length() != 1) {
-    MOZ_MTLOG(ML_ERROR, mPCHandle << "[" << mMid << "]: " << __FUNCTION__ <<
-                        " mReceiveStream doesn't have exactly one track "
-                        "(it has " << receiveTracks.Length() << ")");
-    MOZ_CRASH();
-    return NS_ERROR_FAILURE;
-  }
-
   // This blasts away the existing principal.
-  // We only do this when we become certain that the all tracks are safe to make
+  // We only do this when we become certain that all tracks are safe to make
   // accessible to the script principal.
-  RemoteTrackSource& source =
-    static_cast<RemoteTrackSource&>(receiveTracks[0]->GetSource());
-  source.SetPrincipal(aPrincipal);
+  static_cast<RemoteTrackSource&>(mReceiveTrack->GetSource()).SetPrincipal(
+      aPrincipal);
 
   mReceivePipeline->SetPrincipalHandle_m(MakePrincipalHandle(aPrincipal));
   return NS_OK;
@@ -428,29 +417,31 @@ TransceiverImpl::SyncWithJS(dom::RTCRtpTransceiver& aJsTransceiver,
     return;
   }
 
+  std::string trackId = mJsepTransceiver->mSendTrack.GetTrackId();
+
   if (sendTrack) {
     nsString wideTrackId;
     sendTrack->GetId(wideTrackId);
-    std::string trackId = NS_ConvertUTF16toUTF8(wideTrackId).get();
+    trackId = NS_ConvertUTF16toUTF8(wideTrackId).get();
     MOZ_ASSERT(!trackId.empty());
-
-    nsTArray<RefPtr<DOMMediaStream>> streams;
-    sender->GetStreams(streams, aRv);
-    if (aRv.Failed()) {
-      return;
-    }
-
-    std::vector<std::string> streamIds;
-    for (const auto& stream : streams) {
-      nsString wideStreamId;
-      stream->GetId(wideStreamId);
-      std::string streamId = NS_ConvertUTF16toUTF8(wideStreamId).get();
-      MOZ_ASSERT(!streamId.empty());
-      streamIds.push_back(streamId);
-    }
-
-    mJsepTransceiver->mSendTrack.UpdateTrackIds(streamIds, trackId);
   }
+
+  nsTArray<RefPtr<DOMMediaStream>> streams;
+  sender->GetStreams(streams, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  std::vector<std::string> streamIds;
+  for (const auto& stream : streams) {
+    nsString wideStreamId;
+    stream->GetId(wideStreamId);
+    std::string streamId = NS_ConvertUTF16toUTF8(wideStreamId).get();
+    MOZ_ASSERT(!streamId.empty());
+    streamIds.push_back(streamId);
+  }
+
+  mJsepTransceiver->mSendTrack.UpdateTrackIds(streamIds, trackId);
 
   // Update RTCRtpParameters
   // TODO: Both ways for things like ssrc, codecs, header extensions, etc
@@ -514,29 +505,50 @@ TransceiverImpl::SyncWithJS(dom::RTCRtpTransceiver& aJsTransceiver,
 
   // currentDirection from JSEP, but not if "this transceiver has never been
   // represented in an offer/answer exchange"
-  if (mJsepTransceiver->HasLevel()) {
-    dom::RTCRtpTransceiverDirection currentDirection;
-    if (mJsepTransceiver->mSendTrack.GetActive()) {
-      if (mJsepTransceiver->mRecvTrack.GetActive()) {
-        currentDirection = dom::RTCRtpTransceiverDirection::Sendrecv;
+  if (mJsepTransceiver->HasLevel() && mJsepTransceiver->IsNegotiated()) {
+    if (mJsepTransceiver->mRecvTrack.GetActive()) {
+      if (mJsepTransceiver->mSendTrack.GetActive()) {
+        aJsTransceiver.SetCurrentDirection(
+            dom::RTCRtpTransceiverDirection::Sendrecv, aRv);
       } else {
-        currentDirection = dom::RTCRtpTransceiverDirection::Sendonly;
+        aJsTransceiver.SetCurrentDirection(
+            dom::RTCRtpTransceiverDirection::Recvonly, aRv);
       }
     } else {
-      if (mJsepTransceiver->mRecvTrack.GetActive()) {
-        currentDirection = dom::RTCRtpTransceiverDirection::Recvonly;
+      if (mJsepTransceiver->mSendTrack.GetActive()) {
+        aJsTransceiver.SetCurrentDirection(
+            dom::RTCRtpTransceiverDirection::Sendonly, aRv);
       } else {
-        currentDirection = dom::RTCRtpTransceiverDirection::Inactive;
+        aJsTransceiver.SetCurrentDirection(
+            dom::RTCRtpTransceiverDirection::Inactive, aRv);
       }
-    }
-
-    if (mJsepTransceiver->IsNegotiated()) {
-      aJsTransceiver.SetCurrentDirection(currentDirection, aRv);
     }
 
     if (aRv.Failed()) {
       return;
     }
+  }
+
+  RefPtr<dom::RTCRtpReceiver> receiver = aJsTransceiver.GetReceiver(aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  // receive stream ids from JSEP
+  dom::Sequence<nsString> receiveStreamIds;
+  for (const auto& id : mJsepTransceiver->mRecvTrack.GetStreamIds()) {
+    receiveStreamIds.AppendElement(NS_ConvertUTF8toUTF16(id.c_str()),
+                                   fallible);
+  }
+  receiver->SetStreamIds(receiveStreamIds, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  receiver->SetRemoteSendBit(mJsepTransceiver->mRecvTrack.GetRemoteSetSendBit(),
+                             aRv);
+  if (aRv.Failed()) {
+    return;
   }
 
   // AddTrack magic from JS
@@ -549,7 +561,7 @@ TransceiverImpl::SyncWithJS(dom::RTCRtpTransceiver& aJsTransceiver,
   }
 
   if (mJsepTransceiver->IsRemoved()) {
-    aJsTransceiver.Remove(aRv);
+    aJsTransceiver.SetShouldRemove(true, aRv);
   }
 }
 
@@ -580,7 +592,7 @@ TransceiverImpl::HasReceiveTrack(const dom::MediaStreamTrack* aRecvTrack) const
     return true;
   }
 
-  return mReceiveStream->HasTrack(*aRecvTrack);
+  return mReceiveTrack == aRecvTrack;
 }
 
 bool
@@ -593,13 +605,7 @@ TransceiverImpl::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto,
 already_AddRefed<dom::MediaStreamTrack>
 TransceiverImpl::GetReceiveTrack()
 {
-  nsTArray<RefPtr<dom::MediaStreamTrack>> receiveTracks;
-  mReceiveStream->GetTracks(receiveTracks);
-  if (receiveTracks.Length() != 1) {
-    return nullptr;
-  }
-
-  return receiveTracks[0].forget();
+  return do_AddRef(mReceiveTrack);
 }
 
 RefPtr<MediaPipeline>
@@ -1075,10 +1081,7 @@ void
 TransceiverImpl::StartReceiveStream()
 {
   MOZ_MTLOG(ML_DEBUG, mPCHandle << "[" << mMid << "]: " << __FUNCTION__);
-  // TODO: Can this be simplified? There's an awful lot of moving pieces here.
-  SourceMediaStream* source(mReceiveStream->GetInputStream()->AsSourceStream());
-  mReceiveStream->SetLogicalStreamStartTime(
-      mReceiveStream->GetPlaybackStream()->GetCurrentTime());
+  SourceMediaStream* source(mReceiveTrack->GetInputStream()->AsSourceStream());
 
   nsAutoPtr<MediaSegment> segment;
   if (IsVideo()) {

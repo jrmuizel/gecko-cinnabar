@@ -370,8 +370,7 @@ MinorGC(JSContext* cx, unsigned argc, Value* vp)
     _("allocationThreshold",        JSGC_ALLOCATION_THRESHOLD,           true)  \
     _("minEmptyChunkCount",         JSGC_MIN_EMPTY_CHUNK_COUNT,          true)  \
     _("maxEmptyChunkCount",         JSGC_MAX_EMPTY_CHUNK_COUNT,          true)  \
-    _("compactingEnabled",          JSGC_COMPACTING_ENABLED,             true)  \
-    _("refreshFrameSlicesEnabled",  JSGC_REFRESH_FRAME_SLICES_ENABLED,   true)
+    _("compactingEnabled",          JSGC_COMPACTING_ENABLED,             true)
 
 static const struct ParamInfo {
     const char*     name;
@@ -555,6 +554,19 @@ WasmThreadsSupported(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
+WasmSignExtensionSupported(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef ENABLE_WASM_SIGNEXTEND_OPS
+    bool isSupported = true;
+#else
+    bool isSupported = false;
+#endif
+    args.rval().setBoolean(isSupported);
+    return true;
+}
+
+static bool
 WasmCompileMode(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -602,9 +614,11 @@ WasmTextToBinary(JSContext* cx, unsigned argc, Value* vp)
         }
     }
 
+    uintptr_t stackLimit = GetNativeStackLimit(cx);
+
     wasm::Bytes bytes;
     UniqueChars error;
-    if (!wasm::TextToBinary(twoByteChars.twoByteChars(), &bytes, &error)) {
+    if (!wasm::TextToBinary(twoByteChars.twoByteChars(), stackLimit, &bytes, &error)) {
         JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_WASM_TEXT_FAIL,
                                   error.get() ? error.get() : "out of memory");
         return false;
@@ -2528,7 +2542,7 @@ testingFunc_inIon(JSContext* cx, unsigned argc, Value* vp)
     ScriptFrameIter iter(cx);
     if (!iter.done() && iter.isIon()) {
         // Reset the counter of the IonScript's script.
-        jit::JSJitFrameIter jitIter(cx);
+        jit::JSJitFrameIter jitIter(cx->activation()->asJit());
         ++jitIter;
         jitIter.script()->resetWarmUpResetCounter();
     } else {
@@ -3098,6 +3112,17 @@ HelperThreadCount(JSContext* cx, unsigned argc, Value* vp)
     else
         args.rval().setInt32(0);
 #endif
+    return true;
+}
+
+static bool
+EnableShapeConsistencyChecks(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef DEBUG
+    NativeObject::enableShapeConsistencyChecks();
+#endif
+    args.rval().setUndefined();
     return true;
 }
 
@@ -5251,6 +5276,11 @@ gc::ZealModeHelpText),
 "  Returns a boolean indicating whether the WebAssembly threads proposal is\n"
 "  supported on the current device."),
 
+    JS_FN_HELP("wasmSignExtensionSupported", WasmSignExtensionSupported, 0, 0,
+"wasmSignExtensionSupported()",
+"  Returns a boolean indicating whether the WebAssembly sign extension opcodes are\n"
+"  supported on the current device."),
+
     JS_FN_HELP("wasmCompileMode", WasmCompileMode, 0, 0,
 "wasmCompileMode()",
 "  Returns a string indicating the available compile policy: 'baseline', 'ion',\n"
@@ -5333,7 +5363,9 @@ gc::ZealModeHelpText),
 "      to specify whether SharedArrayBuffers may be serialized.\n"
 "    'scope' - SameProcessSameThread, SameProcessDifferentThread, or\n"
 "      DifferentProcess. Determines how some values will be serialized.\n"
-"      Clone buffers may only be deserialized with a compatible scope."),
+"      Clone buffers may only be deserialized with a compatible scope.\n"
+"      NOTE - For DifferentProcess, must also set SharedArrayBuffer:'deny'\n"
+"      if data contains any shared memory object."),
 
     JS_FN_HELP("deserialize", Deserialize, 1, 0,
 "deserialize(clonebuffer[, opts])",
@@ -5352,6 +5384,10 @@ gc::ZealModeHelpText),
     JS_FN_HELP("helperThreadCount", HelperThreadCount, 0, 0,
 "helperThreadCount()",
 "  Returns the number of helper threads available for off-thread tasks."),
+
+    JS_FN_HELP("enableShapeConsistencyChecks", EnableShapeConsistencyChecks, 0, 0,
+"enableShapeConsistencyChecks()",
+"  Enable some slow Shape assertions.\n"),
 
 #ifdef JS_TRACE_LOGGING
     JS_FN_HELP("startTraceLogger", EnableTraceLogger, 0, 0,

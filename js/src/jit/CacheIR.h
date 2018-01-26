@@ -175,6 +175,7 @@ extern const char* CacheKindNames[];
     _(GuardAnyClass)                      /* Guard an arbitrary class for an object */ \
     _(GuardCompartment)                   \
     _(GuardIsNativeFunction)              \
+    _(GuardIsNativeObject)                \
     _(GuardIsProxy)                       \
     _(GuardHasProxyHandler)               \
     _(GuardNotDOMProxy)                   \
@@ -259,6 +260,7 @@ extern const char* CacheKindNames[];
     _(CallProxyGetResult)                 \
     _(CallProxyGetByValueResult)          \
     _(CallProxyHasPropResult)             \
+    _(CallObjectHasSparseElementResult)   \
     _(LoadUndefinedResult)                \
     _(LoadBooleanResult)                  \
     _(LoadStringResult)                   \
@@ -321,15 +323,12 @@ class StubField
     }
 
   private:
-    union {
-        uintptr_t dataWord_;
-        uint64_t dataInt64_;
-    };
+    uint64_t data_;
     Type type_;
 
   public:
     StubField(uint64_t data, Type type)
-      : dataInt64_(data), type_(type)
+      : data_(data), type_(type)
     {
         MOZ_ASSERT_IF(sizeIsWord(), data <= UINTPTR_MAX);
     }
@@ -339,8 +338,8 @@ class StubField
     bool sizeIsWord() const { return sizeIsWord(type_); }
     bool sizeIsInt64() const { return sizeIsInt64(type_); }
 
-    uintptr_t asWord() const { MOZ_ASSERT(sizeIsWord()); return dataWord_; }
-    uint64_t asInt64() const { MOZ_ASSERT(sizeIsInt64()); return dataInt64_; }
+    uintptr_t asWord() const { MOZ_ASSERT(sizeIsWord()); return uintptr_t(data_); }
+    uint64_t asInt64() const { MOZ_ASSERT(sizeIsInt64()); return data_; }
 } JS_HAZ_GC_POINTER;
 
 // We use this enum as GuardClass operand, instead of storing Class* pointers
@@ -555,6 +554,9 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
     void guardIsNativeFunction(ObjOperandId obj, JSNative nativeFunc) {
         writeOpWithOperandId(CacheOp::GuardIsNativeFunction, obj);
         writePointer(JS_FUNC_TO_DATA_PTR(void*, nativeFunc));
+    }
+    void guardIsNativeObject(ObjOperandId obj) {
+        writeOpWithOperandId(CacheOp::GuardIsNativeObject, obj);
     }
     void guardIsProxy(ObjOperandId obj) {
         writeOpWithOperandId(CacheOp::GuardIsProxy, obj);
@@ -974,6 +976,10 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter
         writeOpWithOperandId(CacheOp::CallProxyHasPropResult, obj);
         writeOperandId(idVal);
         buffer_.writeByte(uint32_t(hasOwn));
+    }
+    void callObjectHasSparseElementResult(ObjOperandId obj, Int32OperandId index) {
+        writeOpWithOperandId(CacheOp::CallObjectHasSparseElementResult, obj);
+        writeOperandId(index);
     }
     void loadEnvironmentFixedSlotResult(ObjOperandId obj, size_t offset) {
         writeOpWithOperandId(CacheOp::LoadEnvironmentFixedSlotResult, obj);
@@ -1447,6 +1453,8 @@ class MOZ_RAII HasPropIRGenerator : public IRGenerator
                             uint32_t index, Int32OperandId indexId);
     bool tryAttachTypedArray(HandleObject obj, ObjOperandId objId,
                              uint32_t index, Int32OperandId indexId);
+    bool tryAttachSparse(HandleObject obj, ObjOperandId objId,
+                         uint32_t index, Int32OperandId indexId);
     bool tryAttachNamedProp(HandleObject obj, ObjOperandId objId,
                             HandleId key, ValOperandId keyId);
     bool tryAttachMegamorphic(ObjOperandId objId, ValOperandId keyId);

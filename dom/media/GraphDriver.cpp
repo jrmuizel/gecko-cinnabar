@@ -49,6 +49,7 @@ void GraphDriver::SetGraphTime(GraphDriver* aPreviousDriver,
 
   MOZ_ASSERT(!PreviousDriver());
   MOZ_ASSERT(aPreviousDriver);
+  MOZ_DIAGNOSTIC_ASSERT(GraphImpl()->CurrentDriver() == aPreviousDriver);
 
   LOG(LogLevel::Debug,
       ("Setting previous driver: %p (%s)",
@@ -573,7 +574,7 @@ bool IsMacbookOrMacbookAir()
     char* substring = strstr(model.get(), "MacBook");
     if (substring) {
       const size_t offset = strlen("MacBook");
-      if (strncmp(model.get() + offset, "Air", len - offset) ||
+      if (!strncmp(model.get() + offset, "Air", 3) ||
           isdigit(model[offset + 1])) {
         return true;
       }
@@ -625,7 +626,7 @@ AudioCallbackDriver::Init()
   mScratchBuffer = SpillBuffer<AudioDataValue, WEBAUDIO_BLOCK_SIZE * 2>(mOutputChannels);
 
   output.channels = mOutputChannels;
-  output.layout = CUBEB_LAYOUT_UNDEFINED;
+  output.layout = CubebUtils::GetPreferredChannelLayoutOrSMPTE(cubebContext, mOutputChannels);
 
   Maybe<uint32_t> latencyPref = CubebUtils::GetCubebMSGLatencyInFrames();
   if (latencyPref) {

@@ -290,8 +290,7 @@ protected:
     // the elements of the Tuple into the final function call.
     auto copiedArgs = MakeTuple(Forward<Ts>(aArgs)...);
 
-    // keep mMaster in a local object because mMaster will become invalid after
-    // the current state object is deleted.
+    // Copy mMaster which will reset to null.
     auto master = mMaster;
 
     auto* s = new S(master);
@@ -302,6 +301,14 @@ protected:
     SLOG("change state to: %s", ToStateStr(s->GetState()));
 
     Exit();
+
+    // Delete the old state asynchronously to avoid UAF if the caller tries to
+    // access its members after SetState() returns.
+    master->OwnerThread()->DispatchDirectTask(
+      NS_NewRunnableFunction("MDSM::StateObject::DeleteOldState",
+                             [toDelete = Move(master->mStateObj)](){}));
+    // Also reset mMaster to catch potentail UAF.
+    mMaster = nullptr;
 
     master->mStateObj.reset(s);
     return CallEnterMemberFunction(s, copiedArgs,
@@ -403,6 +410,7 @@ public:
     // Calculate the position to seek to when exiting dormant.
     auto t = mMaster->mMediaSink->IsStarted()
       ? mMaster->GetClock() : mMaster->GetMediaTime();
+    Reader()->AdjustByLooping(t);
     mPendingSeek.mTarget.emplace(t, SeekTarget::Accurate);
     // SeekJob asserts |mTarget.IsValid() == !mPromise.IsEmpty()| so we
     // need to create the promise even it is not used at all.
@@ -833,15 +841,6 @@ public:
     mSeekJob = Move(aSeekJob);
     mVisibility = aVisibility;
 
-    // Always switch off the blank decoder otherwise we might become visible
-    // in the middle of seeking and won't have a valid video frame to show
-    // when seek is done.
-    if (mMaster->mVideoDecodeSuspended) {
-      mMaster->mVideoDecodeSuspended = false;
-      mMaster->mOnPlaybackEvent.Notify(MediaPlaybackEvent::ExitVideoSuspend);
-      Reader()->SetVideoBlankDecode(false);
-    }
-
     // Suppressed visibility comes from two cases: (1) leaving dormant state,
     // and (2) resuming suspended video decoder. We want both cases to be
     // transparent to the user. So we only notify the change when the seek
@@ -884,8 +883,7 @@ public:
 
   void HandleResumeVideoDecoding(const TimeUnit&) override
   {
-    // We set mVideoDecodeSuspended to false in Enter().
-    MOZ_ASSERT(false, "Shouldn't have suspended video decoding.");
+    // Do nothing. We will resume video decoding in the decoding state.
   }
 
 protected:
@@ -1503,6 +1501,7 @@ public:
     RefPtr<Runnable> r = mAsyncSeekTask = new AysncNextFrameSeekTask(this);
     nsresult rv = OwnerThread()->Dispatch(r.forget());
     MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
+    Unused << rv;
   }
 
 private:
@@ -2116,6 +2115,10 @@ StateObject::HandleResumeVideoDecoding(const TimeUnit& aTarget)
 {
   MOZ_ASSERT(mMaster->mVideoDecodeSuspended);
 
+  mMaster->mVideoDecodeSuspended = false;
+  mMaster->mOnPlaybackEvent.Notify(MediaPlaybackEvent::ExitVideoSuspend);
+  Reader()->SetVideoBlankDecode(false);
+
   // Start counting recovery time from right now.
   TimeStamp start = TimeStamp::Now();
 
@@ -2277,6 +2280,12 @@ MediaDecoderStateMachine::
 DecodingState::Enter()
 {
   MOZ_ASSERT(mMaster->mSentFirstFrameLoadedEvent);
+
+  if (mMaster->mVideoDecodeSuspended &&
+      mMaster->mVideoDecodeMode == VideoDecodeMode::Normal) {
+    StateObject::HandleResumeVideoDecoding(mMaster->GetMediaTime());
+    return;
+  }
 
   if (mMaster->mVideoDecodeMode == VideoDecodeMode::Suspend &&
       !mMaster->mVideoDecodeSuspendTimer.IsScheduled() &&
@@ -2680,7 +2689,7 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
     "MDSM::mTaskQueue", /* aSupportsTailDispatch = */ true)),
   mWatchManager(this, mTaskQueue),
   mDispatchedStateMachine(false),
-  mDelayedScheduler(mTaskQueue),
+  mDelayedScheduler(mTaskQueue, true /*aFuzzy*/),
   mCurrentFrameID(0),
   mReader(new ReaderProxy(mTaskQueue, aReader)),
   mPlaybackRate(1.0),
@@ -3610,6 +3619,7 @@ MediaDecoderStateMachine::ScheduleStateMachine()
                         this,
                         &MediaDecoderStateMachine::RunStateMachine));
   MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
+  Unused << rv;
 }
 
 void
@@ -3854,6 +3864,7 @@ MediaDecoderStateMachine::RequestDebugInfo()
       [self, p]() { p->Resolve(self->GetDebugInfo(), __func__); }),
     AbstractThread::TailDispatch);
   MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
+  Unused << rv;
   return p.forget();
 }
 
@@ -3870,6 +3881,7 @@ void MediaDecoderStateMachine::AddOutputStream(ProcessedMediaStream* aStream,
                             true);
   nsresult rv = OwnerThread()->Dispatch(r.forget());
   MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
+  Unused << rv;
 }
 
 void MediaDecoderStateMachine::RemoveOutputStream(MediaStream* aStream)
@@ -3885,6 +3897,7 @@ void MediaDecoderStateMachine::RemoveOutputStream(MediaStream* aStream)
                               false);
     nsresult rv = OwnerThread()->Dispatch(r.forget());
     MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
+    Unused << rv;
   }
 }
 
@@ -3898,7 +3911,7 @@ public:
 
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf);
 
-  virtual void operator()(void* aObject)
+  virtual void operator()(void* aObject) override
   {
     const VideoData* v = static_cast<const VideoData*>(aObject);
     mSize += v->SizeOfIncludingThis(MallocSizeOf);
@@ -3917,7 +3930,7 @@ public:
 
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf);
 
-  virtual void operator()(void* aObject)
+  virtual void operator()(void* aObject) override
   {
     const AudioData* audioData = static_cast<const AudioData*>(aObject);
     mSize += audioData->SizeOfIncludingThis(MallocSizeOf);

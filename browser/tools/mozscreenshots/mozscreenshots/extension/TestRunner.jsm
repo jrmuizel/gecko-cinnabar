@@ -11,6 +11,7 @@ const env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironmen
 const APPLY_CONFIG_TIMEOUT_MS = 60 * 1000;
 const HOME_PAGE = "chrome://mozscreenshots/content/lib/mozscreenshots.html";
 
+Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
@@ -34,6 +35,7 @@ this.TestRunner = {
 
   init(extensionPath) {
     this._extensionPath = extensionPath;
+    this.setupOS();
   },
 
   /**
@@ -46,6 +48,28 @@ this.TestRunner = {
     this.mochitestScope = mochitestScope;
   },
 
+  setupOS() {
+    switch (AppConstants.platform) {
+      case "macosx": {
+        this.disableNotificationCenter();
+        break;
+      }
+    }
+  },
+
+  disableNotificationCenter() {
+    let killall = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+    killall.initWithPath("/bin/bash");
+
+    let killallP = Cc["@mozilla.org/process/util;1"].createInstance(Ci.nsIProcess);
+    killallP.init(killall);
+    let ncPlist = "/System/Library/LaunchAgents/com.apple.notificationcenterui.plist";
+    let killallArgs = ["-c",
+                       `/bin/launchctl unload -w ${ncPlist} && ` +
+                       "/usr/bin/killall -v NotificationCenter"];
+    killallP.run(true, killallArgs, killallArgs.length);
+  },
+
   /**
    * Load specified sets, execute all combinations of them, and capture screenshots.
    */
@@ -55,11 +79,14 @@ this.TestRunner = {
     let screenshotPath = FileUtils.getFile("TmpD", subDirs).path;
 
     const MOZ_UPLOAD_DIR = env.get("MOZ_UPLOAD_DIR");
-    if (MOZ_UPLOAD_DIR) {
+    const GECKO_HEAD_REPOSITORY = env.get("GECKO_HEAD_REPOSITORY");
+    // We don't want to upload images (from MOZ_UPLOAD_DIR) on integration
+    // branches in order to reduce bandwidth/storage.
+    if (MOZ_UPLOAD_DIR && !GECKO_HEAD_REPOSITORY.includes("/integration/")) {
       screenshotPath = MOZ_UPLOAD_DIR;
     }
 
-    this.mochitestScope.info("Saving screenshots to:", screenshotPath);
+    this.mochitestScope.info(`Saving screenshots to: ${screenshotPath}`);
 
     let screenshotPrefix = Services.appinfo.appBuildID;
     if (jobName) {
@@ -74,7 +101,7 @@ this.TestRunner = {
 
     let sets = this.loadSets(setNames);
 
-    this.mochitestScope.info(sets.length + " sets:", setNames);
+    this.mochitestScope.info(`${sets.length} sets: ${setNames}`);
     this.combos = new LazyProduct(sets);
     this.mochitestScope.info(this.combos.length + " combinations");
 
@@ -205,9 +232,10 @@ this.TestRunner = {
     windowType = windowType || "navigator:browser";
     let browserWindow = Services.wm.getMostRecentWindow(windowType);
     // Scale for high-density displays
-    const scale = browserWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                        .getInterface(Ci.nsIDocShell).QueryInterface(Ci.nsIBaseWindow)
-                        .devicePixelsPerDesktopPixel;
+    const scale = Cc["@mozilla.org/gfx/screenmanager;1"]
+                    .getService(Ci.nsIScreenManager)
+                    .screenForRect(browserWindow.screenX, browserWindow.screenY, 1, 1)
+                    .defaultCSSScaleFactor;
 
     const windowLeft = browserWindow.screenX * scale;
     const windowTop = browserWindow.screenY * scale;
@@ -251,6 +279,22 @@ this.TestRunner = {
     return {bounds, rects};
   },
 
+  _do_skip(reason, combo, config, func) {
+    const { todo } = reason;
+    if (todo) {
+      this.mochitestScope.todo(
+        false,
+        `Skipped configuration ` +
+        `[ ${combo.map((e) => e.name).join(", ")} ] for failure in ` +
+        `${config.name}.${func}: ${todo}`);
+    } else {
+      this.mochitestScope.info(
+        `\tSkipped configuration ` +
+        `[ ${combo.map((e) => e.name).join(", ")} ] ` +
+        `for "${reason}" in  ${config.name}.${func}`);
+    }
+  },
+
   async _performCombo(combo) {
     let paddedComboIndex = padLeft(this.currentComboIndex + 1, String(this.combos.length).length);
     this.mochitestScope.info(
@@ -270,9 +314,9 @@ this.TestRunner = {
       this.mochitestScope.info("called " + config.name);
       // Add a default timeout of 500ms to avoid conflicts when configurations
       // try to apply at the same time. e.g WindowSize and TabsInTitlebar
-      return Promise.race([applyPromise, timeoutPromise]).then(() => {
+      return Promise.race([applyPromise, timeoutPromise]).then(result => {
         return new Promise((resolve) => {
-          setTimeout(resolve, 500);
+          setTimeout(() => resolve(result), 500);
         });
       });
     };
@@ -283,7 +327,11 @@ this.TestRunner = {
         let config = combo[i];
         if (!this._lastCombo || config !== this._lastCombo[i]) {
           this.mochitestScope.info(`promising ${config.name}`);
-          await changeConfig(config);
+          const reason = await changeConfig(config);
+          if (reason) {
+            this._do_skip(reason, combo, config, "applyConfig");
+            return;
+          }
         }
       }
 
@@ -302,18 +350,22 @@ this.TestRunner = {
         // have invalidated it.
         if (config.verifyConfig) {
           this.mochitestScope.info(`checking if the combo is valid with ${config.name}`);
-          await config.verifyConfig();
+          const reason = await config.verifyConfig();
+          if (reason) {
+            this._do_skip(reason, combo, config, "applyConfig");
+            return;
+          }
         }
       }
     } catch (ex) {
-      this.mochitestScope.info(`\tskipped configuration [ ${combo.map((e) => e.name).join(", ")} ]`);
-      this.mochitestScope.info(`\treason: ${ex.toString()}`);
-      // Don't set lastCombo here so that we properly know which configurations
-      // need to be applied since the last screenshot
-
-      // Return so we don't take a screenshot.
+      this.mochitestScope.ok(false, `Unexpected exception in [ ${combo.map(({ name }) => name).join(", ")} ]: ${ex.toString()}`);
+      this.mochitestScope.info(`\t${ex}`);
+      if (ex.stack) {
+        this.mochitestScope.info(`\t${ex.stack}`);
+      }
       return;
     }
+    this.mochitestScope.info(`Configured UI for [ ${combo.map(({ name }) => name).join(", ")} ] successfully`);
 
     // Collect selectors from combo configs for cropping region
     let windowType;
@@ -376,6 +428,9 @@ this.TestRunner = {
         canvas.width = bounds.width;
         canvas.height = bounds.height;
         const ctx = canvas.getContext("2d");
+
+        ctx.fillStyle = "hotpink";
+        ctx.fillRect(0, 0, bounds.width, bounds.height);
 
         for (const rect of rects) {
           rect.left = Math.max(0, rect.left);

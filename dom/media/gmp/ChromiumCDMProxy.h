@@ -98,12 +98,9 @@ public:
 
   const nsString& KeySystem() const override;
 
-  CDMCaps& Capabilites() override;
+  DataMutex<CDMCaps>& Capabilites() override;
 
   void OnKeyStatusesChange(const nsAString& aSessionId) override;
-
-  void GetSessionIdsForKeyId(const nsTArray<uint8_t>& aKeyId,
-                             nsTArray<nsCString>& aSessionIds) override;
 
   void GetStatusForPolicy(PromiseId aPromiseId,
                           const nsAString& aMinHdcpVersion) override;

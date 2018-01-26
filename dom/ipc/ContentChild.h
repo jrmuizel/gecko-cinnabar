@@ -362,7 +362,7 @@ public:
   virtual mozilla::ipc::IPCResult RecvBidiKeyboardNotify(const bool& isLangRTL,
                                                          const bool& haveBidiKeyboards) override;
 
-  virtual mozilla::ipc::IPCResult RecvNotifyVisited(const URIParams& aURI) override;
+  virtual mozilla::ipc::IPCResult RecvNotifyVisited(nsTArray<URIParams>&& aURIs) override;
 
   // auto remove when alertfinished is received.
   nsresult AddRemoteAlertObserver(const nsString& aData, nsIObserver* aObserver);
@@ -410,6 +410,7 @@ public:
 
   virtual mozilla::ipc::IPCResult RecvGarbageCollect() override;
   virtual mozilla::ipc::IPCResult RecvCycleCollect() override;
+  virtual mozilla::ipc::IPCResult RecvUnlinkGhosts() override;
 
   virtual mozilla::ipc::IPCResult RecvAppInfo(const nsCString& version, const nsCString& buildID,
                                               const nsCString& name, const nsCString& UAName,
@@ -661,6 +662,12 @@ public:
                                 const nsCString& aTables) override;
   virtual bool
   DeallocPURLClassifierLocalChild(PURLClassifierLocalChild* aActor) override;
+
+  virtual PLoginReputationChild*
+  AllocPLoginReputationChild(const URIParams& aUri) override;
+
+  virtual bool
+  DeallocPLoginReputationChild(PLoginReputationChild* aActor) override;
 
   nsTArray<LookAndFeelInt>&
   LookAndFeelCache() {

@@ -10,7 +10,7 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/StartupTimeline.h"
 #include "nsTArray.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsXULAppAPI.h"
 
 #include "mozilla/TelemetryHistogramEnums.h"
@@ -59,6 +59,13 @@ void Init();
 void Accumulate(HistogramID id, uint32_t sample);
 
 /**
+ * Adds an array of samples to a histogram defined in TelemetryHistograms.h
+ * @param id - histogram id
+ * @param samples - values to record.
+ */
+void Accumulate(HistogramID id, const nsTArray<uint32_t>& samples);
+
+/**
  * Adds sample to a keyed histogram defined in TelemetryHistogramEnums.h
  *
  * @param id - keyed histogram id
@@ -66,6 +73,14 @@ void Accumulate(HistogramID id, uint32_t sample);
  * @param sample - (optional) value to record, defaults to 1.
  */
 void Accumulate(HistogramID id, const nsCString& key, uint32_t sample = 1);
+
+/**
+ * Adds an array of samples to a histogram defined in TelemetryHistograms.h
+ * @param id - histogram id
+ * @param samples - values to record.
+ * @param key - the string key
+ */
+void Accumulate(HistogramID id, const nsCString& key, const nsTArray<uint32_t>& samples);
 
 /**
  * Adds a sample to a histogram defined in TelemetryHistogramEnums.h.
@@ -169,9 +184,17 @@ template<>
 struct AccumulateDelta_impl<Millisecond>
 {
   static void compute(HistogramID id, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    if (start > end) {
+      Accumulate(id, 0);
+      return;
+    }
     Accumulate(id, static_cast<uint32_t>((end - start).ToMilliseconds()));
   }
   static void compute(HistogramID id, const nsCString& key, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    if (start > end) {
+      Accumulate(id, key, 0);
+      return;
+    }
     Accumulate(id, key, static_cast<uint32_t>((end - start).ToMilliseconds()));
   }
 };
@@ -180,9 +203,17 @@ template<>
 struct AccumulateDelta_impl<Microsecond>
 {
   static void compute(HistogramID id, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    if (start > end) {
+      Accumulate(id, 0);
+      return;
+    }
     Accumulate(id, static_cast<uint32_t>((end - start).ToMicroseconds()));
   }
   static void compute(HistogramID id, const nsCString& key, TimeStamp start, TimeStamp end = TimeStamp::Now()) {
+    if (start > end) {
+      Accumulate(id, key, 0);
+      return;
+    }
     Accumulate(id, key, static_cast<uint32_t>((end - start).ToMicroseconds()));
   }
 };

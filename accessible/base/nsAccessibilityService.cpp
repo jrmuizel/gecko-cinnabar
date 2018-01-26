@@ -209,20 +209,25 @@ static Accessible* New_HTMLLabel(nsIContent* aContent, Accessible* aContext)
 
 static Accessible* New_HTMLInput(nsIContent* aContent, Accessible* aContext)
 {
-  if (aContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
-                            nsGkAtoms::checkbox, eIgnoreCase)) {
+  if (!aContent->IsElement()) {
+    return nullptr;
+  }
+
+  Element* element = aContent->AsElement();
+  if (element->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                           nsGkAtoms::checkbox, eIgnoreCase)) {
     return new HTMLCheckboxAccessible(aContent, aContext->Document());
   }
-  if (aContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
-                            nsGkAtoms::radio, eIgnoreCase)) {
+  if (element->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                           nsGkAtoms::radio, eIgnoreCase)) {
     return new HTMLRadioButtonAccessible(aContent, aContext->Document());
   }
-  if (aContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
-                            nsGkAtoms::time, eIgnoreCase)) {
+  if (element->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                           nsGkAtoms::time, eIgnoreCase)) {
     return new EnumRoleAccessible<roles::GROUPING>(aContent, aContext->Document());
   }
-  if (aContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
-                            nsGkAtoms::date, eIgnoreCase)) {
+  if (element->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                           nsGkAtoms::date, eIgnoreCase)) {
     return new EnumRoleAccessible<roles::DATE_EDITOR>(aContent, aContext->Document());
   }
   return nullptr;
@@ -261,7 +266,8 @@ static Accessible*
 New_HTMLTableHeaderCellIfScope(nsIContent* aContent, Accessible* aContext)
 {
   if (aContext->IsTableRow() && aContext->GetContent() == aContent->GetParent() &&
-      aContent->HasAttr(kNameSpaceID_None, nsGkAtoms::scope))
+      aContent->IsElement() &&
+      aContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::scope))
     return new HTMLTableHeaderCellAccessibleWrap(aContent, aContext->Document());
   return nullptr;
 }
@@ -271,12 +277,14 @@ static Accessible*
 New_MaybeImageOrToolbarButtonAccessible(nsIContent* aContent,
                                         Accessible* aContext)
 {
-  if (aContent->HasAttr(kNameSpaceID_None, nsGkAtoms::onclick)) {
+  if (aContent->IsElement() &&
+      aContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::onclick)) {
     return new XULToolbarButtonAccessible(aContent, aContext->Document());
   }
 
   // Don't include nameless images in accessible tree.
-  if (!aContent->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltiptext)) {
+  if (!aContent->IsElement() ||
+      !aContent->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::tooltiptext)) {
     return nullptr;
   }
 
@@ -474,7 +482,7 @@ public:
 
   NS_DECL_ISUPPORTS
 
-  NS_IMETHOD Notify(nsITimer* aTimer) final
+  NS_IMETHOD Notify(nsITimer* aTimer) final override
   {
     if (!mContent->IsInUncomposedDoc())
       return NS_OK;
@@ -498,7 +506,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHOD GetName(nsACString& aName) final
+  NS_IMETHOD GetName(nsACString& aName) final override
   {
     aName.AssignLiteral("PluginTimerCallBack");
     return NS_OK;
@@ -1334,9 +1342,6 @@ nsAccessibilityService::Init()
   }
 #endif // defined(XP_WIN)
 
-  static const char16_t kInitIndicator[] = { '1', 0 };
-  observerService->NotifyObservers(nullptr, "a11y-init-or-shutdown", kInitIndicator);
-
   // Subscribe to EventListenerService.
   nsCOMPtr<nsIEventListenerService> eventListenerService =
     do_GetService("@mozilla.org/eventlistenerservice;1");
@@ -1398,6 +1403,9 @@ nsAccessibilityService::Init()
 
   statistics::A11yInitialized();
 
+  static const char16_t kInitIndicator[] = { '1', 0 };
+  observerService->NotifyObservers(nullptr, "a11y-init-or-shutdown", kInitIndicator);
+
   return true;
 }
 
@@ -1417,9 +1425,6 @@ nsAccessibilityService::Shutdown()
       mozilla::services::GetObserverService();
   if (observerService) {
     observerService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
-
-    static const char16_t kShutdownIndicator[] = { '0', 0 };
-    observerService->NotifyObservers(nullptr, "a11y-init-or-shutdown", kShutdownIndicator);
   }
 
   // Stop accessible document loader.
@@ -1449,6 +1454,11 @@ nsAccessibilityService::Shutdown()
 
   NS_RELEASE(gAccessibilityService);
   gAccessibilityService = nullptr;
+
+  if (observerService) {
+    static const char16_t kShutdownIndicator[] = { '0', 0 };
+    observerService->NotifyObservers(nullptr, "a11y-init-or-shutdown", kShutdownIndicator);
+  }
 }
 
 already_AddRefed<Accessible>
@@ -1551,8 +1561,10 @@ nsAccessibilityService::CreateAccessibleByType(nsIContent* aContent,
     accessible = new EnumRoleAccessible<roles::PANE>(aContent, aDoc);
 
   } else if (role.EqualsLiteral("xul:panel")) {
-    if (aContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::noautofocus,
-                              nsGkAtoms::_true, eCaseMatters))
+    if (aContent->IsElement() &&
+        aContent->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                           nsGkAtoms::noautofocus,
+                                           nsGkAtoms::_true, eCaseMatters))
       accessible = new XULAlertAccessible(aContent, aDoc);
     else
       accessible = new EnumRoleAccessible<roles::PANE>(aContent, aDoc);
@@ -1765,15 +1777,22 @@ nsAccessibilityService::MarkupAttributes(const nsIContent* aContent,
 
     if (info->DOMAttrName) {
       if (info->DOMAttrValue) {
-        if (aContent->AttrValueIs(kNameSpaceID_None, *info->DOMAttrName,
-                                  *info->DOMAttrValue, eCaseMatters)) {
+        if (aContent->IsElement() &&
+            aContent->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                               *info->DOMAttrName,
+                                               *info->DOMAttrValue,
+                                               eCaseMatters)) {
           nsAccUtils::SetAccAttr(aAttributes, *info->name, *info->DOMAttrValue);
         }
         continue;
       }
 
       nsAutoString value;
-      aContent->GetAttr(kNameSpaceID_None, *info->DOMAttrName, value);
+
+      if (aContent->IsElement()) {
+        aContent->AsElement()->GetAttr(kNameSpaceID_None, *info->DOMAttrName, value);
+      }
+
       if (!value.IsEmpty())
         nsAccUtils::SetAccAttr(aAttributes, *info->name, value);
 

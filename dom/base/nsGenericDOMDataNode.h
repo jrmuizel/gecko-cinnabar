@@ -105,11 +105,14 @@ public:
 
   // nsINode methods
   virtual uint32_t GetChildCount() const override;
-  virtual nsIContent *GetChildAt(uint32_t aIndex) const override;
-  virtual int32_t IndexOf(const nsINode* aPossibleChild) const override;
-  virtual nsresult InsertChildAt(nsIContent* aKid, uint32_t aIndex,
-                                 bool aNotify) override;
-  virtual void RemoveChildAt(uint32_t aIndex, bool aNotify) override;
+  virtual nsIContent *GetChildAt_Deprecated(uint32_t aIndex) const override;
+  virtual int32_t ComputeIndexOf(const nsINode* aPossibleChild) const override;
+  virtual nsresult InsertChildBefore(nsIContent* aKid, nsIContent* aBeforeThis,
+                                     bool aNotify) override;
+  virtual nsresult InsertChildAt_Deprecated(nsIContent* aKid, uint32_t aIndex,
+                                            bool aNotify) override;
+  virtual void RemoveChildAt_Deprecated(uint32_t aIndex, bool aNotify) override;
+  virtual void RemoveChildNode(nsIContent* aKid, bool aNotify) override;
   virtual void GetTextContentInternal(nsAString& aTextContent,
                                       mozilla::OOMReporter& aError) override
   {
@@ -145,7 +148,7 @@ public:
   virtual nsresult AppendText(const char16_t* aBuffer, uint32_t aLength,
                               bool aNotify) override;
   virtual bool TextIsOnlyWhitespace() override;
-  virtual bool ThreadSafeTextIsOnlyWhitespace() const final;
+  virtual bool ThreadSafeTextIsOnlyWhitespace() const final override;
   virtual bool HasTextForTranslation() override;
   virtual void AppendTextTo(nsAString& aResult) override;
   MOZ_MUST_USE
@@ -158,18 +161,7 @@ public:
   virtual void DumpContent(FILE* out, int32_t aIndent, bool aDumpAll) const override;
 #endif
 
-  virtual nsIContent* GetBindingParent() const override;
   virtual nsXBLBinding* DoGetXBLBinding() const override;
-  virtual void SetXBLBinding(nsXBLBinding* aBinding,
-                             nsBindingManager* aOldBindingManager = nullptr) override;
-  virtual mozilla::dom::ShadowRoot *GetContainingShadow() const override;
-  virtual nsTArray<nsIContent*> &DestInsertionPoints() override;
-  virtual nsTArray<nsIContent*> *GetExistingDestInsertionPoints() const override;
-  virtual void SetShadowRoot(mozilla::dom::ShadowRoot* aShadowRoot) override;
-  virtual mozilla::dom::HTMLSlotElement* GetAssignedSlot() const override;
-  virtual void SetAssignedSlot(mozilla::dom::HTMLSlotElement* aSlot) override;
-  virtual nsIContent *GetXBLInsertionPoint() const override;
-  virtual void SetXBLInsertionPoint(nsIContent* aContent) override;
   virtual bool IsNodeOfType(uint32_t aFlags) const override;
   virtual bool IsLink(nsIURI** aURI) const override;
 
@@ -240,72 +232,9 @@ protected:
     return parent && parent->IsElement() ? parent->AsElement() : nullptr;
   }
 
-  /**
-   * There are a set of DOM- and scripting-specific instance variables
-   * that may only be instantiated when a content object is accessed
-   * through the DOM. Rather than burn actual slots in the content
-   * objects for each of these instance variables, we put them off
-   * in a side structure that's only allocated when the content is
-   * accessed through the DOM.
-   */
-  class nsDataSlots : public nsINode::nsSlots
-  {
-  public:
-    nsDataSlots();
-
-    void Traverse(nsCycleCollectionTraversalCallback &cb);
-    void Unlink();
-
-    /**
-     * The nearest enclosing content node with a binding that created us.
-     * @see nsIContent::GetBindingParent
-     */
-    nsIContent* mBindingParent;  // [Weak]
-
-    /**
-     * @see nsIContent::GetXBLInsertionPoint
-     */
-    nsCOMPtr<nsIContent> mXBLInsertionPoint;
-
-    /**
-     * @see nsIContent::GetContainingShadow
-     */
-    RefPtr<mozilla::dom::ShadowRoot> mContainingShadow;
-
-    /**
-     * @see nsIContent::GetDestInsertionPoints
-     */
-    nsTArray<nsIContent*> mDestInsertionPoints;
-
-    /**
-     * @see nsIContent::GetAssignedSlot
-     */
-    RefPtr<mozilla::dom::HTMLSlotElement> mAssignedSlot;
-  };
-
-  // Override from nsINode
-  virtual nsINode::nsSlots* CreateSlots() override;
-
-  nsDataSlots* DataSlots()
-  {
-    return static_cast<nsDataSlots*>(Slots());
-  }
-
-  nsDataSlots *GetExistingDataSlots() const
-  {
-    return static_cast<nsDataSlots*>(GetExistingSlots());
-  }
-
   nsresult SplitText(uint32_t aOffset, nsIDOMText** aReturn);
 
   nsresult GetWholeText(nsAString& aWholeText);
-
-  static int32_t FirstLogicallyAdjacentTextNode(nsIContent* aParent,
-                                                int32_t aIndex);
-
-  static int32_t LastLogicallyAdjacentTextNode(nsIContent* aParent,
-                                               int32_t aIndex,
-                                               uint32_t aCount);
 
   nsresult SetTextInternal(uint32_t aOffset, uint32_t aCount,
                            const char16_t* aBuffer, uint32_t aLength,

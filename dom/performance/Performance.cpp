@@ -136,7 +136,8 @@ Performance::TimeOrigin()
   }
 
   MOZ_ASSERT(mPerformanceService);
-  return mPerformanceService->TimeOrigin(CreationTimeStamp());
+  return nsRFPService::ReduceTimePrecisionAsMSecs(
+    mPerformanceService->TimeOrigin(CreationTimeStamp()));
 }
 
 JSObject*
@@ -236,17 +237,15 @@ Performance::ClearUserEntries(const Optional<nsAString>& aEntryName,
 void
 Performance::ClearResourceTimings()
 {
-  MOZ_ASSERT(NS_IsMainThread());
   mResourceEntries.Clear();
 }
 
 DOMHighResTimeStamp
 Performance::RoundTime(double aTime) const
 {
-  // Round down to the nearest 5us, because if the timer is too accurate people
-  // can do nasty timing attacks with it.  See similar code in the worker
-  // Performance implementation.
-  const double maxResolutionMs = 0.005;
+  // Round down to the nearest 20us, because if the timer is too accurate people
+  // can do nasty timing attacks with it.
+  const double maxResolutionMs = 0.020;
   return nsRFPService::ReduceTimePrecisionAsMSecs(
     floor(aTime / maxResolutionMs) * maxResolutionMs);
 }
@@ -431,13 +430,14 @@ void
 Performance::InsertResourceEntry(PerformanceEntry* aEntry)
 {
   MOZ_ASSERT(aEntry);
-  MOZ_ASSERT(mResourceEntries.Length() < mResourceTimingBufferSize);
+  MOZ_ASSERT(mResourceEntries.Length() <= mResourceTimingBufferSize);
 
   // We won't add an entry when 'privacy.resistFingerprint' is true.
   if (nsContentUtils::ShouldResistFingerprinting()) {
     return;
   }
 
+  // Don't add the entry if the buffer is full
   if (mResourceEntries.Length() >= mResourceTimingBufferSize) {
     return;
   }

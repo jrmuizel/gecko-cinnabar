@@ -299,7 +299,7 @@ private:
                                    uint32_t aFlags,
                                    PlaybackType aPlaybackType);
 
-  DrawResult DrawInternal(DrawableSurface&& aFrameRef,
+  ImgDrawResult DrawInternal(DrawableSurface&& aFrameRef,
                           gfxContext* aContext,
                           const nsIntSize& aSize,
                           const ImageRegion& aRegion,
@@ -307,7 +307,7 @@ private:
                           uint32_t aFlags,
                           float aOpacity);
 
-  Tuple<DrawResult, gfx::IntSize, RefPtr<gfx::SourceSurface>>
+  Tuple<ImgDrawResult, gfx::IntSize, RefPtr<gfx::SourceSurface>>
     GetFrameInternal(const gfx::IntSize& aSize,
                      const Maybe<SVGImageContext>& aSVGContext,
                      uint32_t aWhichFrame,
@@ -454,7 +454,7 @@ private: // data
      */
     static void DispatchIfNeeded(RasterImage* aImage);
 
-    NS_IMETHOD Run();
+    NS_IMETHOD Run() override;
 
   private:
     explicit HandleErrorWorker(RasterImage* aImage);

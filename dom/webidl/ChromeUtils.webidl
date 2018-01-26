@@ -89,6 +89,40 @@ namespace ChromeUtils {
   ArrayBuffer base64URLDecode(ByteString string,
                               Base64URLDecodeOptions options);
 
+#ifdef NIGHTLY_BUILD
+
+  /**
+   * If the chrome code has thrown a JavaScript Dev Error
+   * in the current JSRuntime. the first such error, or `undefined`
+   * otherwise.
+   *
+   * A JavaScript Dev Error is an exception thrown by JavaScript
+   * code that matches both conditions:
+   * - it was thrown by chrome code;
+   * - it is either a `ReferenceError`, a `TypeError` or a `SyntaxError`.
+   *
+   * Such errors are stored regardless of whether they have been
+   * caught.
+   *
+   * This mechanism is designed to help ensure that the code of
+   * Firefox is free from Dev Errors, even if they are accidentally
+   * caught by clients.
+   *
+   * The object returned is not an exception. It has fields:
+   * - DOMString stack
+   * - DOMString filename
+   * - DOMString lineNumber
+   * - DOMString message
+   */
+  [Throws]
+  readonly attribute any recentJSDevError;
+
+  /**
+   * Reset `recentJSDevError` to `undefined` for the current JSRuntime.
+   */
+  void clearRecentJSDevError();
+#endif // NIGHTLY_BUILD
+
   /**
    * IF YOU ADD NEW METHODS HERE, MAKE SURE THEY ARE THREAD-SAFE.
    */
@@ -200,6 +234,66 @@ partial namespace ChromeUtils {
   [Throws]
   void idleDispatch(IdleRequestCallback callback,
                     optional IdleRequestOptions options);
+
+  /**
+   * Synchronously loads and evaluates the js file located at
+   * 'aResourceURI' with a new, fully privileged global object.
+   *
+   * If 'aTargetObj' is specified and null, this method just returns
+   * the module's global object. Otherwise (if 'aTargetObj' is not
+   * specified, or 'aTargetObj' is != null) looks for a property
+   * 'EXPORTED_SYMBOLS' on the new global object. 'EXPORTED_SYMBOLS'
+   * is expected to be an array of strings identifying properties on
+   * the global object.  These properties will be installed as
+   * properties on 'targetObj', or, if 'aTargetObj' is not specified,
+   * on the caller's global object. If 'EXPORTED_SYMBOLS' is not
+   * found, an error is thrown.
+   *
+   * @param aResourceURI A resource:// URI string to load the module from.
+   * @param aTargetObj the object to install the exported properties on or null.
+   * @returns the module code's global object.
+   *
+   * The implementation maintains a hash of aResourceURI->global obj.
+   * Subsequent invocations of import with 'aResourceURI' pointing to
+   * the same file will not cause the module to be re-evaluated, but
+   * the symbols in EXPORTED_SYMBOLS will be exported into the
+   * specified target object and the global object returned as above.
+   */
+  [Throws]
+  object import(DOMString aResourceURI, optional object? aTargetObj);
+
+  /**
+   * Defines a property on the given target which lazily imports a JavaScript
+   * module when accessed.
+   *
+   * The first time the property is accessed, the module at the given URL is
+   * imported, and the property is replaced with the module's exported symbol
+   * of the same name.
+   *
+   * Some points to note when using this utility:
+   *
+   * - The cached module export is always stored on the `this` object that was
+   *   used to access the getter. This means that if you define the lazy
+   *   getter on a prototype, the module will be re-imported every time the
+   *   property is accessed on a new instance.
+   *
+   * - The getter property may be overwritten by simple assignment, but as
+   *   with imports, the new property value is always defined on the `this`
+   *   object that the setter is called with.
+   *
+   * - If the module import fails, the getter will throw an error, and the
+   *   property will not be replaced. Each subsequent attempt to access the
+   *   getter will attempt to re-import the object, which will likely continue
+   *   to result in errors.
+   *
+   * @param target The target object on which to define the property.
+   * @param id The name of the property to define, and of the symbol to
+   *           import.
+   * @param resourceURI The resource URI of the module, as passed to
+   *                    ChromeUtils.import.
+   */
+  [Throws]
+  void defineModuleGetter(object target, DOMString id, DOMString resourceURI);
 };
 
 /**

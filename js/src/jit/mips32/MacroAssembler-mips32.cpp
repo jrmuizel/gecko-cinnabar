@@ -77,25 +77,6 @@ MacroAssemblerMIPSCompat::convertUInt32ToDouble(Register src, FloatRegister dest
     as_addd(dest, dest, SecondScratchDoubleReg);
 }
 
-static const double TO_DOUBLE_HIGH_SCALE = 0x100000000;
-
-bool
-MacroAssemblerMIPSCompat::convertUInt64ToDoubleNeedsTemp()
-{
-    return false;
-}
-
-void
-MacroAssemblerMIPSCompat::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
-{
-    MOZ_ASSERT(temp == Register::Invalid());
-    convertUInt32ToDouble(src.high, dest);
-    loadConstantDouble(TO_DOUBLE_HIGH_SCALE, ScratchDoubleReg);
-    asMasm().mulDouble(ScratchDoubleReg, dest);
-    convertUInt32ToDouble(src.low, ScratchDoubleReg);
-    asMasm().addDouble(ScratchDoubleReg, dest);
-}
-
 void
 MacroAssemblerMIPSCompat::convertUInt32ToFloat32(Register src, FloatRegister dest)
 {
@@ -238,8 +219,8 @@ template void
 MacroAssemblerMIPS::ma_addTestOverflow<Label*>(Register rd, Register rs,
                                                Register rt, Label* overflow);
 template void
-MacroAssemblerMIPS::ma_addTestOverflow<wasm::TrapDesc>(Register rd, Register rs, Register rt,
-                                                       wasm::TrapDesc overflow);
+MacroAssemblerMIPS::ma_addTestOverflow<wasm::OldTrapDesc>(Register rd, Register rs, Register rt,
+                                                          wasm::OldTrapDesc overflow);
 
 template <typename L>
 void
@@ -270,8 +251,8 @@ template void
 MacroAssemblerMIPS::ma_addTestOverflow<Label*>(Register rd, Register rs,
                                                Imm32 imm, Label* overflow);
 template void
-MacroAssemblerMIPS::ma_addTestOverflow<wasm::TrapDesc>(Register rd, Register rs, Imm32 imm,
-                                                       wasm::TrapDesc overflow);
+MacroAssemblerMIPS::ma_addTestOverflow<wasm::OldTrapDesc>(Register rd, Register rs, Imm32 imm,
+                                                          wasm::OldTrapDesc overflow);
 
 // Subtract.
 void
@@ -647,6 +628,9 @@ MacroAssemblerMIPS::ma_lid(FloatRegister dest, double value)
         uint32_t hi;
     } ;
     DoubleStruct intStruct = mozilla::BitwiseCast<DoubleStruct>(value);
+#if MOZ_BIG_ENDIAN
+    mozilla::Swap(intStruct.hi, intStruct.lo);
+#endif
 
     // put hi part of 64 bit value into the odd register
     if (intStruct.hi == 0) {
@@ -702,13 +686,14 @@ MacroAssemblerMIPS::ma_ld(FloatRegister ft, Address address)
     // Use single precision load instructions so we don't have to worry about
     // alignment.
 
+    int32_t off = address.offset + PAYLOAD_OFFSET;
     int32_t off2 = address.offset + TAG_OFFSET;
-    if (Imm16::IsInSignedRange(address.offset) && Imm16::IsInSignedRange(off2)) {
-        as_ls(ft, address.base, address.offset);
+    if (Imm16::IsInSignedRange(off) && Imm16::IsInSignedRange(off2)) {
+        as_ls(ft, address.base, off);
         as_ls(getOddPair(ft), address.base, off2);
     } else {
         MOZ_ASSERT(address.base != ScratchRegister);
-        ma_li(ScratchRegister, Imm32(address.offset));
+        ma_li(ScratchRegister, Imm32(off));
         as_addu(ScratchRegister, address.base, ScratchRegister);
         as_ls(ft, ScratchRegister, PAYLOAD_OFFSET);
         as_ls(getOddPair(ft), ScratchRegister, TAG_OFFSET);
@@ -718,13 +703,14 @@ MacroAssemblerMIPS::ma_ld(FloatRegister ft, Address address)
 void
 MacroAssemblerMIPS::ma_sd(FloatRegister ft, Address address)
 {
+    int32_t off = address.offset + PAYLOAD_OFFSET;
     int32_t off2 = address.offset + TAG_OFFSET;
-    if (Imm16::IsInSignedRange(address.offset) && Imm16::IsInSignedRange(off2)) {
-        as_ss(ft, address.base, address.offset);
+    if (Imm16::IsInSignedRange(off) && Imm16::IsInSignedRange(off2)) {
+        as_ss(ft, address.base, off);
         as_ss(getOddPair(ft), address.base, off2);
     } else {
         MOZ_ASSERT(address.base != ScratchRegister);
-        ma_li(ScratchRegister, Imm32(address.offset));
+        ma_li(ScratchRegister, Imm32(off));
         as_addu(ScratchRegister, address.base, ScratchRegister);
         as_ss(ft, ScratchRegister, PAYLOAD_OFFSET);
         as_ss(getOddPair(ft), ScratchRegister, TAG_OFFSET);
@@ -751,7 +737,7 @@ MacroAssemblerMIPS::ma_ss(FloatRegister ft, Address address)
 void
 MacroAssemblerMIPS::ma_pop(FloatRegister fs)
 {
-    ma_ld(fs.doubleOverlay(0), Address(StackPointer, 0));
+    ma_ld(fs.doubleOverlay(), Address(StackPointer, 0));
     as_addiu(StackPointer, StackPointer, sizeof(double));
 }
 
@@ -759,7 +745,7 @@ void
 MacroAssemblerMIPS::ma_push(FloatRegister fs)
 {
     as_addiu(StackPointer, StackPointer, -sizeof(double));
-    ma_sd(fs.doubleOverlay(0), Address(StackPointer, 0));
+    ma_sd(fs.doubleOverlay(), Address(StackPointer, 0));
 }
 
 bool
@@ -938,6 +924,7 @@ void
 MacroAssemblerMIPSCompat::loadUnalignedDouble(const wasm::MemoryAccessDesc& access,
                                               const BaseIndex& src, Register temp, FloatRegister dest)
 {
+    MOZ_ASSERT(MOZ_LITTLE_ENDIAN, "Wasm-only; wasm is disabled on big-endian.");
     computeScaledAddress(src, SecondScratchReg);
 
     uint32_t framePushed = asMasm().framePushed();
@@ -996,6 +983,7 @@ void
 MacroAssemblerMIPSCompat::loadUnalignedFloat32(const wasm::MemoryAccessDesc& access,
                                                const BaseIndex& src, Register temp, FloatRegister dest)
 {
+    MOZ_ASSERT(MOZ_LITTLE_ENDIAN, "Wasm-only; wasm is disabled on big-endian.");
     computeScaledAddress(src, SecondScratchReg);
     BufferOffset load;
     if (Imm16::IsInSignedRange(src.offset) && Imm16::IsInSignedRange(src.offset + 3)) {
@@ -1148,6 +1136,7 @@ void
 MacroAssemblerMIPSCompat::storeUnalignedFloat32(const wasm::MemoryAccessDesc& access,
                                                 FloatRegister src, Register temp, const BaseIndex& dest)
 {
+    MOZ_ASSERT(MOZ_LITTLE_ENDIAN, "Wasm-only; wasm is disabled on big-endian.");
     computeScaledAddress(dest, SecondScratchReg);
     moveFromFloat32(src, temp);
 
@@ -1168,6 +1157,7 @@ void
 MacroAssemblerMIPSCompat::storeUnalignedDouble(const wasm::MemoryAccessDesc& access,
                                                FloatRegister src, Register temp, const BaseIndex& dest)
 {
+    MOZ_ASSERT(MOZ_LITTLE_ENDIAN, "Wasm-only; wasm is disabled on big-endian.");
     computeScaledAddress(dest, SecondScratchReg);
 
     uint32_t framePushed = asMasm().framePushed();
@@ -2110,18 +2100,22 @@ MacroAssembler::PushRegsInMask(LiveRegisterSet set)
     }
     MOZ_ASSERT(diffG == 0);
 
-    // Double values have to be aligned. We reserve extra space so that we can
-    // start writing from the first aligned location.
-    // We reserve a whole extra double so that the buffer has even size.
-    ma_and(SecondScratchReg, sp, Imm32(~(ABIStackAlignment - 1)));
-    reserveStack(diffF + sizeof(double));
+    if (diffF > 0) {
+        // Double values have to be aligned. We reserve extra space so that we can
+        // start writing from the first aligned location.
+        // We reserve a whole extra double so that the buffer has even size.
+        ma_and(SecondScratchReg, sp, Imm32(~(ABIStackAlignment - 1)));
+        reserveStack(diffF);
 
-    for (FloatRegisterForwardIterator iter(set.fpus().reduceSetForPush()); iter.more(); ++iter) {
-        if ((*iter).code() % 2 == 0)
-            as_sd(*iter, SecondScratchReg, -diffF);
         diffF -= sizeof(double);
+
+        for (FloatRegisterForwardIterator iter(set.fpus().reduceSetForPush()); iter.more(); ++iter) {
+            as_sd(*iter, SecondScratchReg, -diffF);
+            diffF -= sizeof(double);
+        }
+
+        MOZ_ASSERT(diffF == 0);
     }
-    MOZ_ASSERT(diffF == 0);
 }
 
 void
@@ -2132,18 +2126,22 @@ MacroAssembler::PopRegsInMaskIgnore(LiveRegisterSet set, LiveRegisterSet ignore)
     const int32_t reservedG = diffG;
     const int32_t reservedF = diffF;
 
-    // Read the buffer form the first aligned location.
-    ma_addu(SecondScratchReg, sp, Imm32(reservedF + sizeof(double)));
-    ma_and(SecondScratchReg, SecondScratchReg, Imm32(~(ABIStackAlignment - 1)));
+    if (reservedF > 0) {
+        // Read the buffer form the first aligned location.
+        ma_addu(SecondScratchReg, sp, Imm32(reservedF));
+        ma_and(SecondScratchReg, SecondScratchReg, Imm32(~(ABIStackAlignment - 1)));
 
-    for (FloatRegisterForwardIterator iter(set.fpus().reduceSetForPush()); iter.more(); ++iter) {
-        if (!ignore.has(*iter) && ((*iter).code() % 2 == 0))
-            // Use assembly l.d because we have alligned the stack.
-            as_ld(*iter, SecondScratchReg, -diffF);
         diffF -= sizeof(double);
+
+        LiveFloatRegisterSet fpignore(ignore.fpus().reduceSetForPush());
+        for (FloatRegisterForwardIterator iter(set.fpus().reduceSetForPush()); iter.more(); ++iter) {
+            if (!ignore.has(*iter))
+                as_ld(*iter, SecondScratchReg, -diffF);
+            diffF -= sizeof(double);
+        }
+        freeStack(reservedF);
+        MOZ_ASSERT(diffF == 0);
     }
-    freeStack(reservedF + sizeof(double));
-    MOZ_ASSERT(diffF == 0);
 
     for (GeneralRegisterBackwardIterator iter(set.gprs()); iter.more(); ++iter) {
         diffG -= sizeof(intptr_t);
@@ -2155,14 +2153,13 @@ MacroAssembler::PopRegsInMaskIgnore(LiveRegisterSet set, LiveRegisterSet ignore)
 }
 
 void
-MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest, Register)
+MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest, Register scratch)
 {
-    FloatRegisterSet fpuSet(set.fpus().reduceSetForPush());
-    unsigned numFpu = fpuSet.size();
-    int32_t diffF = fpuSet.getPushSizeInBytes();
+    int32_t diffF = set.fpus().getPushSizeInBytes();
     int32_t diffG = set.gprs().size() * sizeof(intptr_t);
 
     MOZ_ASSERT(dest.offset >= diffG + diffF);
+    MOZ_ASSERT(dest.base == StackPointer);
 
     for (GeneralRegisterBackwardIterator iter(set.gprs()); iter.more(); ++iter) {
         diffG -= sizeof(intptr_t);
@@ -2171,21 +2168,19 @@ MacroAssembler::storeRegsInMask(LiveRegisterSet set, Address dest, Register)
     }
     MOZ_ASSERT(diffG == 0);
 
-    for (FloatRegisterBackwardIterator iter(fpuSet); iter.more(); ++iter) {
-        FloatRegister reg = *iter;
-        diffF -= reg.size();
-        numFpu -= 1;
-        dest.offset -= reg.size();
-        if (reg.isDouble())
-            storeDouble(reg, dest);
-        else if (reg.isSingle())
-            storeFloat32(reg, dest);
-        else
-            MOZ_CRASH("Unknown register type.");
+    if (diffF > 0) {
+
+        computeEffectiveAddress(dest, scratch);
+        ma_and(scratch, scratch, Imm32(~(ABIStackAlignment - 1)));
+
+        diffF -= sizeof(double);
+
+        for (FloatRegisterForwardIterator iter(set.fpus().reduceSetForPush()); iter.more(); ++iter) {
+            as_sd(*iter, scratch, -diffF);
+            diffF -= sizeof(double);
+        }
+        MOZ_ASSERT(diffF == 0);
     }
-    MOZ_ASSERT(numFpu == 0);
-    diffF -= diffF % sizeof(uintptr_t);
-    MOZ_ASSERT(diffF == 0);
 }
 // ===============================================================
 // ABI function calls.
@@ -2490,6 +2485,28 @@ MacroAssembler::wasmTruncateFloat32ToUInt32(FloatRegister input, Register output
     as_truncws(ScratchDoubleReg, input);
     moveFromFloat32(ScratchDoubleReg, output);
     bind(&done);
+}
+
+// ========================================================================
+// Convert floating point.
+
+static const double TO_DOUBLE_HIGH_SCALE = 0x100000000;
+
+bool
+MacroAssembler::convertUInt64ToDoubleNeedsTemp()
+{
+    return false;
+}
+
+void
+MacroAssembler::convertUInt64ToDouble(Register64 src, FloatRegister dest, Register temp)
+{
+    MOZ_ASSERT(temp == Register::Invalid());
+    convertUInt32ToDouble(src.high, dest);
+    loadConstantDouble(TO_DOUBLE_HIGH_SCALE, ScratchDoubleReg);
+    mulDouble(ScratchDoubleReg, dest);
+    convertUInt32ToDouble(src.low, ScratchDoubleReg);
+    addDouble(ScratchDoubleReg, dest);
 }
 
 //}}} check_macroassembler_style

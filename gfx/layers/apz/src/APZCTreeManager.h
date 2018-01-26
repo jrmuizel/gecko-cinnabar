@@ -31,6 +31,7 @@ namespace mozilla {
 class MultiTouchInput;
 
 namespace wr {
+class TransactionBuilder;
 class WebRenderAPI;
 struct WrTransformProperty;
 }
@@ -51,6 +52,7 @@ class InputQueue;
 class GeckoContentController;
 class HitTestingTreeNode;
 class WebRenderScrollData;
+struct AncestorTransform;
 
 /**
  * ****************** NOTE ON LOCK ORDERING IN APZ **************************
@@ -178,7 +180,7 @@ public:
    * Returns true if any APZ animations are in progress and we need to keep
    * compositing.
    */
-  bool PushStateToWR(wr::WebRenderAPI* aWrApi,
+  bool PushStateToWR(wr::TransactionBuilder& aTxn,
                      const TimeStamp& aSampleTime,
                      nsTArray<wr::WrTransformProperty>& aTransformArray);
 
@@ -265,6 +267,13 @@ public:
    * for the different touch points. In the case where the touch point has no
    * target, or the target is not a scrollable frame, the target's |mScrollId|
    * should be set to FrameMetrics::NULL_SCROLL_ID.
+   * Note: For mouse events that start a scrollbar drag, both SetTargetAPZC()
+   *       and StartScrollbarDrag() will be called, and the calls may happen
+   *       in either order. That's fine - whichever arrives first will confirm
+   *       the block, and StartScrollbarDrag() will fill in the drag metrics.
+   *       If the block is confirmed before we have drag metrics, some events
+   *       in the drag block may be handled as no-ops until the drag metrics
+   *       arrive.
    */
   void SetTargetAPZC(
       uint64_t aInputBlockId,
@@ -601,7 +610,7 @@ private:
   HitTestingTreeNode* PrepareNodeForLayer(const ScrollNode& aLayer,
                                           const FrameMetrics& aMetrics,
                                           uint64_t aLayersId,
-                                          const gfx::Matrix4x4& aAncestorTransform,
+                                          const AncestorTransform& aAncestorTransform,
                                           HitTestingTreeNode* aParent,
                                           HitTestingTreeNode* aNextSibling,
                                           TreeBuildingState& aState);
@@ -619,6 +628,9 @@ private:
   // Returns a pointer to the WebRenderAPI for the root layers id this APZCTreeManager
   // is for. This might be null (for example, if WebRender is not enabled).
   already_AddRefed<wr::WebRenderAPI> GetWebRenderAPI() const;
+
+  // Returns a pointer to the GeckoContentController for the given layers id.
+  already_AddRefed<GeckoContentController> GetContentController(uint64_t aLayersId) const;
 
 protected:
   /* The input queue where input events are held until we know enough to

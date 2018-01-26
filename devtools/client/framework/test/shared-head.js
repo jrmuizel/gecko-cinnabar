@@ -88,7 +88,7 @@ const ConsoleObserver = {
   observe: function (subject, topic, data) {
     let message = subject.wrappedJSObject.arguments[0];
 
-    if (/Failed propType/.test(message)) {
+    if (message && /Failed propType/.test(message.toString())) {
       ok(false, message);
     }
   }
@@ -98,6 +98,23 @@ Services.obs.addObserver(ConsoleObserver, "console-api-log-event");
 registerCleanupFunction(() => {
   Services.obs.removeObserver(ConsoleObserver, "console-api-log-event");
 });
+
+// Print allocation count if DEBUG_DEVTOOLS_ALLOCATIONS is set to "normal",
+// and allocation sites if DEBUG_DEVTOOLS_ALLOCATIONS is set to "verbose".
+const env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
+const DEBUG_ALLOCATIONS = env.get("DEBUG_DEVTOOLS_ALLOCATIONS");
+if (DEBUG_ALLOCATIONS) {
+  const { allocationTracker } = require("devtools/shared/test-helpers/allocation-tracker");
+  let tracker = allocationTracker();
+  registerCleanupFunction(() => {
+    if (DEBUG_ALLOCATIONS == "normal") {
+      tracker.logCount();
+    } else if (DEBUG_ALLOCATIONS == "verbose") {
+      tracker.logAllocationSites();
+    }
+    tracker.stop();
+  });
+}
 
 var waitForTime = DevToolsUtils.waitForTime;
 
@@ -692,4 +709,48 @@ function createTestHTTPServer() {
 
   server.start(-1);
   return server;
+}
+
+/**
+ * Inject `EventUtils` helpers into ContentTask scope.
+ *
+ * This helper is automatically exposed to mochitest browser tests,
+ * but is missing from content task scope.
+ * You should call this method only once per <browser> tag
+ *
+ * @param {xul:browser} browser
+ *        Reference to the browser in which we load content task
+ */
+async function injectEventUtilsInContentTask(browser) {
+  await ContentTask.spawn(browser, {}, function* () {
+    if ("EventUtils" in this) {
+      return;
+    }
+
+    let EventUtils = this.EventUtils = {};
+
+    EventUtils.window = {};
+    EventUtils.parent = EventUtils.window;
+    /* eslint-disable camelcase */
+    EventUtils._EU_Ci = Components.interfaces;
+    EventUtils._EU_Cc = Components.classes;
+    /* eslint-enable camelcase */
+    // EventUtils' `sendChar` function relies on the navigator to synthetize events.
+    EventUtils.navigator = content.navigator;
+    EventUtils.KeyboardEvent = content.KeyboardEvent;
+
+    EventUtils.synthesizeClick = element => new Promise(resolve => {
+      element.addEventListener("click", function () {
+        resolve();
+      }, {once: true});
+
+      EventUtils.synthesizeMouseAtCenter(element,
+        { type: "mousedown", isSynthesized: false }, content);
+      EventUtils.synthesizeMouseAtCenter(element,
+        { type: "mouseup", isSynthesized: false }, content);
+    });
+
+    Services.scriptloader.loadSubScript(
+      "chrome://mochikit/content/tests/SimpleTest/EventUtils.js", EventUtils);
+  });
 }

@@ -32,6 +32,7 @@
 #include "jswrapper.h"
 
 #include "builtin/Promise.h"
+#include "gc/FreeOp.h"
 #include "gc/GCInternals.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/arm64/vixl/Simulator-vixl.h"
@@ -753,7 +754,7 @@ JSRuntime::addUnhandledRejectedPromise(JSContext* cx, js::HandleObject promise)
 
     void* data = cx->promiseRejectionTrackerCallbackData;
     cx->promiseRejectionTrackerCallback(cx, promise,
-                                        PromiseRejectionHandlingState::Unhandled, data);
+                                        JS::PromiseRejectionHandlingState::Unhandled, data);
 }
 
 void
@@ -765,7 +766,7 @@ JSRuntime::removeUnhandledRejectedPromise(JSContext* cx, js::HandleObject promis
 
     void* data = cx->promiseRejectionTrackerCallbackData;
     cx->promiseRejectionTrackerCallback(cx, promise,
-                                        PromiseRejectionHandlingState::Handled, data);
+                                        JS::PromiseRejectionHandlingState::Handled, data);
 }
 
 mozilla::non_crypto::XorShift128PlusRNG&

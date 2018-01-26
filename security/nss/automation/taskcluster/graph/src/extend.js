@@ -30,6 +30,11 @@ const HACL_GEN_IMAGE = {
   path: "automation/taskcluster/docker-hacl"
 };
 
+const SAW_IMAGE = {
+  name: "saw",
+  path: "automation/taskcluster/docker-saw"
+};
+
 const WINDOWS_CHECKOUT_CMD =
   "bash -c \"hg clone -r $NSS_HEAD_REVISION $NSS_HEAD_REPOSITORY nss || " +
     "(sleep 2; hg clone -r $NSS_HEAD_REVISION $NSS_HEAD_REPOSITORY nss) || " +
@@ -82,8 +87,8 @@ queue.filter(task => {
   }
 
   if (task.group == "Test") {
-    // Don't run test builds on old make platforms
-    if (task.collection == "make") {
+    // Don't run test builds on old make platforms, and not for fips gyp.
+    if (task.collection == "make" || task.collection == "fips") {
       return false;
     }
   }
@@ -159,6 +164,18 @@ export default async function main() {
     ],
   });
 
+  await scheduleLinux("Linux 64 (opt, make)", {
+    env: {USE_64: "1", BUILD_OPT: "1"},
+    platform: "linux64",
+    image: LINUX_IMAGE,
+    collection: "make",
+    command: [
+       "/bin/bash",
+       "-c",
+       "bin/checkout.sh && nss/automation/taskcluster/scripts/build.sh"
+    ],
+  });
+
   await scheduleLinux("Linux 32 (debug, make)", {
     platform: "linux32",
     image: LINUX_IMAGE,
@@ -183,6 +200,12 @@ export default async function main() {
     image: LINUX_IMAGE,
     features: ["allowPtrace"],
   }, "--ubsan --asan");
+
+  await scheduleLinux("Linux 64 (FIPS opt)", {
+    platform: "linux64",
+    collection: "fips",
+    image: LINUX_IMAGE,
+  }, "--enable-fips --opt");
 
   await scheduleWindows("Windows 2012 64 (debug, make)", {
     platform: "windows2012-64",
@@ -356,7 +379,6 @@ async function scheduleLinux(name, base, args = "") {
       parent: extra_build,
       symbol: "Certs-F",
       group: "FIPS",
-      env: { NSS_TEST_ENABLE_FIPS: "1" }
     }));
 
     // Schedule FIPS tests.
@@ -799,7 +821,6 @@ async function scheduleWindows(name, base, build_script) {
       parent: extra_build,
       symbol: "Certs-F",
       group: "FIPS",
-      env: { NSS_TEST_ENABLE_FIPS: "1" }
     }));
 
     // Schedule FIPS tests.
@@ -972,6 +993,57 @@ async function scheduleTools() {
       "/bin/bash",
       "-c",
       "bin/checkout.sh && nss/automation/taskcluster/scripts/run_hacl.sh"
+    ]
+  }));
+
+  let task_saw = queue.scheduleTask(merge(base, {
+    symbol: "B",
+    group: "SAW",
+    name: "LLVM bitcode build (32 bit)",
+    image: SAW_IMAGE,
+    kind: "build",
+    env: {
+      AR: "llvm-ar-3.8",
+      CC: "clang-3.8",
+      CCC: "clang++-3.8"
+    },
+    artifacts: {
+      public: {
+        expires: 24 * 7,
+        type: "directory",
+        path: "/home/worker/artifacts"
+      }
+    },
+    command: [
+      "/bin/bash",
+      "-c",
+      "bin/checkout.sh && nss/automation/taskcluster/scripts/build_gyp.sh --disable-tests --emit-llvm -m32"
+    ]
+  }));
+
+  queue.scheduleTask(merge(base, {
+    parent: task_saw,
+    symbol: "bmul",
+    group: "SAW",
+    name: "bmul.saw",
+    image: SAW_IMAGE,
+    command: [
+      "/bin/bash",
+      "-c",
+      "bin/checkout.sh && nss/automation/taskcluster/scripts/run_saw.sh bmul"
+    ]
+  }));
+
+  queue.scheduleTask(merge(base, {
+    parent: task_saw,
+    symbol: "ChaCha20",
+    group: "SAW",
+    name: "chacha20.saw",
+    image: SAW_IMAGE,
+    command: [
+      "/bin/bash",
+      "-c",
+      "bin/checkout.sh && nss/automation/taskcluster/scripts/run_saw.sh chacha20"
     ]
   }));
 

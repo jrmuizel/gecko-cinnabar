@@ -29,6 +29,7 @@ loader.lazyRequireGetter(this, "TabClient", "devtools/shared/client/tab-client")
 loader.lazyRequireGetter(this, "ThreadClient", "devtools/shared/client/thread-client");
 loader.lazyRequireGetter(this, "TraceClient", "devtools/shared/client/trace-client");
 loader.lazyRequireGetter(this, "WorkerClient", "devtools/shared/client/worker-client");
+loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/object-client");
 
 const noop = () => {};
 
@@ -315,8 +316,8 @@ DebuggerClient.prototype = {
    * This function exists only to preserve DebuggerClient's interface;
    * new code should say 'client.mainRoot.listTabs()'.
    */
-  listTabs: function (onResponse) {
-    return this.mainRoot.listTabs(onResponse);
+  listTabs: function (options, onResponse) {
+    return this.mainRoot.listTabs(options, onResponse);
   },
 
   /*
@@ -910,20 +911,6 @@ DebuggerClient.prototype = {
       this._clients.get(packet.from)._onThreadState(packet);
     }
 
-    // TODO: Bug 1151156 - Remove once Gecko 40 is on b2g-stable.
-    if (!this.traits.noNeedToFakeResumptionOnNavigation) {
-      // On navigation the server resumes, so the client must resume as well.
-      // We achieve that by generating a fake resumption packet that triggers
-      // the client's thread state change listeners.
-      if (packet.type == UnsolicitedNotifications.tabNavigated &&
-          this._clients.has(packet.from) &&
-          this._clients.get(packet.from).thread) {
-        let thread = this._clients.get(packet.from).thread;
-        let resumption = { from: thread._actor, type: "resumed" };
-        thread._onThreadState(resumption);
-      }
-    }
-
     // Only try to notify listeners on events, not responses to requests
     // that lack a packet type.
     if (packet.type) {
@@ -1208,7 +1195,16 @@ DebuggerClient.prototype = {
   /**
    * Currently attached addon.
    */
-  activeAddon: null
+  activeAddon: null,
+
+  /**
+   * Creates an object client for this DebuggerClient and the grip in parameter,
+   * @param {Object} grip: The grip to create the ObjectClient for.
+   * @returns {ObjectClient}
+   */
+  createObjectClient: function (grip) {
+    return new ObjectClient(this, grip);
+  }
 };
 
 eventSource(DebuggerClient.prototype);

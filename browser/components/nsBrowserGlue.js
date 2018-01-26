@@ -32,6 +32,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   ContentClick: "resource:///modules/ContentClick.jsm",
   ContextualIdentityService: "resource://gre/modules/ContextualIdentityService.jsm",
+  CustomizableUI: "resource:///modules/CustomizableUI.jsm",
   DateTimePickerHelper: "resource://gre/modules/DateTimePickerHelper.jsm",
   DirectoryLinksProvider: "resource:///modules/DirectoryLinksProvider.jsm",
   ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
@@ -39,6 +40,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   FileUtils: "resource://gre/modules/FileUtils.jsm",
   FileSource: "resource://gre/modules/L10nRegistry.jsm",
   FormValidationHandler: "resource:///modules/FormValidationHandler.jsm",
+  HybridContentTelemetry: "resource://gre/modules/HybridContentTelemetry.jsm",
   Integration: "resource://gre/modules/Integration.jsm",
   L10nRegistry: "resource://gre/modules/L10nRegistry.jsm",
   LanguagePrompt: "resource://gre/modules/LanguagePrompt.jsm",
@@ -437,6 +439,8 @@ BrowserGlue.prototype = {
           if (this._placesBrowserInitComplete) {
             Services.obs.notifyObservers(null, "places-browser-init-complete");
           }
+        } else if (data == "migrateMatchBucketsPrefForUIVersion60") {
+          this._migrateMatchBucketsPrefForUIVersion60(true);
         }
         break;
       case "initial-migration-will-import-default-bookmarks":
@@ -1113,12 +1117,6 @@ BrowserGlue.prototype = {
     // early, so we use a maximum timeout for it.
     Services.tm.idleDispatchToMainThread(() => {
       SafeBrowsing.init();
-
-      // Login reputation depends on the Safe Browsing API.
-      if (Services.prefs.getBoolPref("browser.safebrowsing.passwords.enabled")) {
-        Cc["@mozilla.org/reputationservice/login-reputation-service;1"]
-        .getService(Ci.ILoginReputationService);
-      }
     }, 5000);
 
     if (AppConstants.MOZ_CRASHREPORTER) {
@@ -1776,7 +1774,7 @@ BrowserGlue.prototype = {
 
   // eslint-disable-next-line complexity
   _migrateUI: function BG__migrateUI() {
-    const UI_VERSION = 59;
+    const UI_VERSION = 62;
     const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
 
     let currentUIVersion;
@@ -1841,17 +1839,6 @@ BrowserGlue.prototype = {
       }
     }
 
-    if (currentUIVersion < 18) {
-      // Remove iconsize and mode from all the toolbars
-      let toolbars = ["navigator-toolbox", "nav-bar", "PersonalToolbar",
-                      "TabsToolbar", "toolbar-menubar"];
-      for (let resourceName of ["mode", "iconsize"]) {
-        for (let toolbarId of toolbars) {
-          xulStore.removeValue(BROWSER_DOCURL, toolbarId, resourceName);
-        }
-      }
-    }
-
     if (currentUIVersion < 19) {
       let detector = null;
       try {
@@ -1871,17 +1858,6 @@ BrowserGlue.prototype = {
     if (currentUIVersion < 20) {
       // Remove persisted collapsed state from TabsToolbar.
       xulStore.removeValue(BROWSER_DOCURL, "TabsToolbar", "collapsed");
-    }
-
-    if (currentUIVersion < 23) {
-      const kSelectedEnginePref = "browser.search.selectedEngine";
-      if (Services.prefs.prefHasUserValue(kSelectedEnginePref)) {
-        try {
-          let name = Services.prefs.getComplexValue(kSelectedEnginePref,
-                                                    Ci.nsIPrefLocalizedString).data;
-          Services.search.currentEngine = Services.search.getEngineByName(name);
-        } catch (ex) {}
-      }
     }
 
     if (currentUIVersion < 24) {
@@ -2235,7 +2211,11 @@ BrowserGlue.prototype = {
         let currentEngine = Services.search.currentEngine.wrappedJSObject;
         // Only reset the current engine if it wasn't set by a WebExtension
         // and it is not one of the default engines.
-        if (currentEngine._extensionID || currentEngine._isDefault)
+        // If the original default is not a default, the user has a weird
+        // configuration probably involving langpacks, it's not worth
+        // attempting to reset their settings.
+        if (currentEngine._extensionID || currentEngine._isDefault ||
+            !Services.search.originalDefaultEngine.wrappedJSObject._isDefault)
           return;
 
         if (currentEngine._loadPath.startsWith("[https]")) {
@@ -2265,6 +2245,28 @@ BrowserGlue.prototype = {
         }
         Services.prefs.clearUserPref(SELECTED_LOCALE_PREF);
         Services.prefs.clearUserPref(MATCHOS_LOCALE_PREF);
+      }
+    }
+
+    if (currentUIVersion < 60) {
+      // Set whether search suggestions or history results come first in the
+      // urlbar results.
+      this._migrateMatchBucketsPrefForUIVersion60();
+    }
+
+    if (currentUIVersion < 61) {
+      // Remove persisted toolbarset from navigator toolbox
+      xulStore.removeValue(BROWSER_DOCURL, "navigator-toolbox", "toolbarset");
+    }
+
+    if (currentUIVersion < 62) {
+      // Remove iconsize and mode from all the toolbars
+      let toolbars = ["navigator-toolbox", "nav-bar", "PersonalToolbar",
+                      "TabsToolbar", "toolbar-menubar"];
+      for (let resourceName of ["mode", "iconsize"]) {
+        for (let toolbarId of toolbars) {
+          xulStore.removeValue(BROWSER_DOCURL, toolbarId, resourceName);
+        }
       }
     }
 
@@ -2347,6 +2349,46 @@ BrowserGlue.prototype = {
     if (willPrompt) {
       DefaultBrowserCheck.prompt(RecentWindow.getMostRecentBrowserWindow());
     }
+  },
+
+  _migrateMatchBucketsPrefForUIVersion60(forceCheck = false) {
+    function check() {
+      if (CustomizableUI.getPlacementOfWidget("search-container")) {
+        Services.prefs.setCharPref(prefName,
+                                   "general:5,suggestion:Infinity");
+      }
+    }
+    let prefName = "browser.urlbar.matchBuckets";
+    let pref = Services.prefs.getCharPref(prefName, "");
+    if (!pref) {
+      // Set the pref based on the search bar's current placement.  If it's
+      // placed (the urlbar and search bar are not unified), then set the pref
+      // (so that history results will come before search suggestions).  If it's
+      // not placed (the urlbar and search bar are unified), then leave the pref
+      // cleared so that UnifiedComplete.js uses the default value (so that
+      // search suggestions will come before history results).
+      if (forceCheck) {
+        // This is the case when this is called by the test.
+        check();
+      } else {
+        // This is the normal, non-test case.  At this point the first window
+        // has not been set up yet, so use a CUI listener to get the placement
+        // when the nav-bar is first registered.
+        let listener = {
+          onAreaNodeRegistered(area, container) {
+            if (CustomizableUI.AREA_NAVBAR == area) {
+              check();
+              CustomizableUI.removeListener(listener);
+            }
+          },
+        };
+        CustomizableUI.addListener(listener);
+      }
+    }
+    // Else, the pref has already been set.  Normally this pref does not exist.
+    // Either the user customized it, or they were enrolled in the Shield study
+    // in Firefox 57 that effectively already migrated the pref.  Either way,
+    // leave it at its current value.
   },
 
   // ------------------------------
@@ -2548,11 +2590,16 @@ BrowserGlue.prototype = {
         } else {
           title = bundle.GetStringFromName("tabArrivingNotification.title");
         }
-        // Use the page URL as the body. We strip the fragment and query to
-        // reduce size, and also format it the same way that the url bar would.
-        body = URIs[0].uri.replace(/[?#].*$/, "");
+        // Use the page URL as the body. We strip the fragment and query (after
+        // the `?` and `#` respectively) to reduce size, and also format it the
+        // same way that the url bar would.
+        body = URIs[0].uri.replace(/([?#]).*$/, "$1");
+        let wasTruncated = body.length < URIs[0].uri.length;
         if (win.gURLBar) {
           body = win.gURLBar.trimValue(body);
+        }
+        if (wasTruncated) {
+          body = bundle.formatStringFromName("singleTabArrivingWithTruncatedURL.body", [body], 1);
         }
       } else {
         title = bundle.GetStringFromName("multipleTabsArrivingNotification.title");
@@ -2814,6 +2861,32 @@ ContentPermissionPrompt.prototype = {
       }
 
       permissionPrompt.prompt();
+
+      let schemeHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_ORIGIN_SCHEME");
+      let scheme = 0;
+      // URI is null for system principals.
+      if (request.principal.URI) {
+        switch (request.principal.URI.scheme) {
+          case "http":
+            scheme = 1;
+            break;
+          case "https":
+            scheme = 2;
+            break;
+        }
+      }
+      schemeHistogram.add(type, scheme);
+
+      // request.element should be the browser element in e10s.
+      if (request.element && request.element.contentPrincipal) {
+        let thirdPartyHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_THIRD_PARTY_ORIGIN");
+        let isThirdParty = request.principal.origin != request.element.contentPrincipal.origin;
+        thirdPartyHistogram.add(type, isThirdParty);
+      }
+
+      let userInputHistogram = Services.telemetry.getKeyedHistogramById("PERMISSION_REQUEST_HANDLING_USER_INPUT");
+      userInputHistogram.add(type, request.isHandlingUserInput);
+
     } catch (ex) {
       Cu.reportError(ex);
       request.cancel();
@@ -3079,4 +3152,11 @@ this.NSGetFactory = XPCOMUtils.generateNSGetFactory(components);
 var globalMM = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
 globalMM.addMessageListener("UITour:onPageEvent", function(aMessage) {
   UITour.onPageEvent(aMessage, aMessage.data);
+});
+
+// Listen for HybridContentTelemetry messages.
+// Do it here instead of HybridContentTelemetry.init() so that
+// the module can be lazily loaded on the first message.
+globalMM.addMessageListener("HybridContentTelemetry:onTelemetryMessage", aMessage => {
+  HybridContentTelemetry.onTelemetryMessage(aMessage, aMessage.data);
 });

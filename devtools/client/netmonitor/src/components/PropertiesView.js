@@ -10,18 +10,31 @@ const { Component, createFactory } = require("devtools/client/shared/vendor/reac
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 
-const { REPS, MODE } = require("devtools/client/shared/components/reps/reps");
-const { Rep } = REPS;
-
 const { FILTER_SEARCH_DELAY } = require("../constants");
 
 // Components
-const SearchBox = createFactory(require("devtools/client/shared/components/SearchBox"));
 const TreeViewClass = require("devtools/client/shared/components/tree/TreeView");
 const TreeView = createFactory(TreeViewClass);
-const TreeRow = createFactory(require("devtools/client/shared/components/tree/TreeRow"));
-const SourceEditor = createFactory(require("./SourceEditor"));
-const HTMLPreview = createFactory(require("./HtmlPreview"));
+
+loader.lazyGetter(this, "SearchBox", function () {
+  return createFactory(require("devtools/client/shared/components/SearchBox"));
+});
+loader.lazyGetter(this, "TreeRow", function () {
+  return createFactory(require("devtools/client/shared/components/tree/TreeRow"));
+});
+loader.lazyGetter(this, "SourceEditor", function () {
+  return createFactory(require("./SourceEditor"));
+});
+loader.lazyGetter(this, "HTMLPreview", function () {
+  return createFactory(require("./HtmlPreview"));
+});
+
+loader.lazyGetter(this, "Rep", function () {
+  return require("devtools/client/shared/components/reps/reps").REPS.Rep;
+});
+loader.lazyGetter(this, "MODE", function () {
+  return require("devtools/client/shared/components/reps/reps").MODE;
+});
 
 const { div, tr, td } = dom;
 const AUTO_EXPAND_MAX_LEVEL = 7;
@@ -29,7 +42,7 @@ const AUTO_EXPAND_MAX_NODES = 50;
 const EDITOR_CONFIG_ID = "EDITOR_CONFIG";
 const HTML_PREVIEW_ID = "HTML_PREVIEW";
 
-/*
+/**
  * Properties View component
  * A scrollable tree view component which provides some useful features for
  * representing object properties.
@@ -44,6 +57,7 @@ class PropertiesView extends Component {
   static get propTypes() {
     return {
       object: PropTypes.object,
+      provider: PropTypes.object,
       enableInput: PropTypes.bool,
       expandableStrings: PropTypes.bool,
       filterPlaceHolder: PropTypes.string,
@@ -177,6 +191,7 @@ class PropertiesView extends Component {
       renderValue,
       sectionNames,
       openLink,
+      provider,
     } = this.props;
 
     return (
@@ -193,6 +208,7 @@ class PropertiesView extends Component {
         div({ className: "tree-container" },
           TreeView({
             object,
+            provider,
             columns: [{
               id: "value",
               width: "100%",

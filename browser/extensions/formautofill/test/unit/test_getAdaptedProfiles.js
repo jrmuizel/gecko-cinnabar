@@ -18,6 +18,14 @@ const DEFAULT_ADDRESS_RECORD = {
   "tel-national": "9876543210",
 };
 
+const ADDRESS_RECORD_2 = {
+  "guid": "address2",
+  "given-name": "John",
+  "additional-name": "Middle",
+  "family-name": "Doe",
+  "postal-code": "940012345",
+};
+
 const DEFAULT_CREDITCARD_RECORD = {
   "guid": "123",
   "cc-exp-month": 1,
@@ -112,7 +120,8 @@ const TESTCASES = [
     }],
   },
   {
-    description: "Address form with street-address, address-line[1, 3]",
+    description: "Address form with street-address, address-line[1, 3]" +
+                 ", determined by autocomplete attr",
     document: `<form>
                <input id="street-addr" autocomplete="street-address">
                <input id="line1" autocomplete="address-line1">
@@ -123,8 +132,34 @@ const TESTCASES = [
       "guid": "123",
       "street-address": "2 Harrison St line2 line3",
       "-moz-street-address-one-line": "2 Harrison St line2 line3",
-      "address-line1": "2 Harrison St",
-      "address-line2": "line2 line3",
+      // Since the form is missing address-line2 field, the value of
+      // address-line1 should contain line2 value as well.
+      "address-line1": "2 Harrison St line2",
+      "address-line2": "line2",
+      "address-line3": "line3",
+      "address-level1": "CA",
+      "country": "US",
+      "tel": "+19876543210",
+      "tel-national": "9876543210",
+    }],
+  },
+  {
+    description: "Address form with street-address, address-line[1, 3]" +
+                 ", determined by heuristics",
+    document: `<form>
+               <input id="street-address">
+               <input id="address-line1">
+               <input id="address-line3">
+               </form>`,
+    profileData: [Object.assign({}, DEFAULT_ADDRESS_RECORD)],
+    expectedResult: [{
+      "guid": "123",
+      "street-address": "2 Harrison St line2 line3",
+      "-moz-street-address-one-line": "2 Harrison St line2 line3",
+      // Since the form is missing address-line2 field, the value of
+      // address-line1 should contain line2 value as well.
+      "address-line1": "2 Harrison St line2",
+      "address-line2": "line2",
       "address-line3": "line3",
       "address-level1": "CA",
       "country": "US",
@@ -450,7 +485,7 @@ const TESTCASES = [
     }],
   },
   {
-    description: "Checking maxlength first when a field is with maxlength.",
+    description: "Checking maxlength of tel field first when a field is with maxlength.",
     document: `<form>
                <input id="tel" autocomplete="tel" maxlength="10">
                <input id="line1" autocomplete="address-line1">
@@ -468,6 +503,38 @@ const TESTCASES = [
       "country": "US",
       "tel": "9876543210",
       "tel-national": "9876543210",
+    }],
+  },
+  {
+    description: "Address form with maxlength restriction",
+    document: `<form>
+               <input autocomplete="given-name" maxlength="1">
+               <input autocomplete="additional-name" maxlength="1">
+               <input autocomplete="family-name" maxlength="1">
+               <input autocomplete="postal-code" maxlength="5">
+               </form>`,
+    profileData: [Object.assign({}, ADDRESS_RECORD_2)],
+    expectedResult: [{
+      "guid": "address2",
+      "given-name": "J",
+      "additional-name": "M",
+      "family-name": "D",
+      "postal-code": "94001",
+    }],
+  },
+  {
+    description: "Address form with the special cases of the maxlength restriction",
+    document: `<form>
+               <input autocomplete="given-name" maxlength="-1">
+               <input autocomplete="additional-name" maxlength="0">
+               <input autocomplete="family-name" maxlength="1">
+               </form>`,
+    profileData: [Object.assign({}, ADDRESS_RECORD_2)],
+    expectedResult: [{
+      "guid": "address2",
+      "given-name": "John",
+      "family-name": "D",
+      "postal-code": "940012345",
     }],
   },
   {
@@ -885,7 +952,7 @@ const TESTCASES = [
 
 for (let testcase of TESTCASES) {
   add_task(async function() {
-    do_print("Starting testcase: " + testcase.description);
+    info("Starting testcase: " + testcase.description);
 
     let doc = MockDocument.createTestDocument("http://localhost:8080/test/",
                                               testcase.document);
@@ -894,8 +961,8 @@ for (let testcase of TESTCASES) {
     let handler = new FormAutofillHandler(formLike);
 
     handler.collectFormFields();
-    let focusedInput = form.elements[0];
-    let adaptedRecords = handler.getAdaptedProfiles(testcase.profileData, focusedInput);
+    handler.focusedInput = form.elements[0];
+    let adaptedRecords = handler.activeSection.getAdaptedProfiles(testcase.profileData);
     Assert.deepEqual(adaptedRecords, testcase.expectedResult);
 
     if (testcase.expectedOptionElements) {
@@ -906,8 +973,7 @@ for (let testcase of TESTCASES) {
           Assert.notEqual(expectedOption, null);
 
           let value = testcase.profileData[i][field];
-          let section = handler.getSectionByElement(select);
-          let cache = section._cacheValue.matchingSelectOption.get(select);
+          let cache = handler.activeSection._cacheValue.matchingSelectOption.get(select);
           let targetOption = cache[value] && cache[value].get();
           Assert.notEqual(targetOption, null);
 

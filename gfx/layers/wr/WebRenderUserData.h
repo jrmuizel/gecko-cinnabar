@@ -13,6 +13,7 @@
 #include "mozilla/layers/AnimationInfo.h"
 
 class nsDisplayItemGeometry;
+class nsIFrame;
 
 namespace mozilla {
 namespace wr {
@@ -39,6 +40,8 @@ class WebRenderUserData
 {
 public:
   typedef nsTHashtable<nsRefPtrHashKey<WebRenderUserData> > WebRenderUserDataRefTable;
+
+  static bool SupportsAsyncUpdate(nsIFrame* aFrame);
 
   NS_INLINE_DECL_REFCOUNTING(WebRenderUserData)
 
@@ -110,9 +113,16 @@ public:
 
   void CreateImageClientIfNeeded();
   void ClearCachedResources() override;
+
+  bool IsAsync()
+  {
+    return mPipelineId.isSome();
+  }
+
 protected:
   void ClearImageKey();
   void CreateExternalImageIfNeeded();
+  void DoClearCachedResources();
 
   wr::MaybeExternalImageId mExternalImageId;
   Maybe<wr::ImageKey> mKey;
@@ -131,6 +141,7 @@ public:
   virtual WebRenderFallbackData* AsFallbackData() override { return this; }
   virtual UserDataType GetType() override { return UserDataType::eFallback; }
   static UserDataType Type() { return UserDataType::eFallback; }
+  void ClearCachedResources() override;
   nsDisplayItemGeometry* GetGeometry() override;
   void SetGeometry(nsAutoPtr<nsDisplayItemGeometry> aGeometry);
   nsRect GetBounds() { return mBounds; }
@@ -177,6 +188,8 @@ public:
   WebRenderCanvasRendererAsync* CreateCanvasRenderer();
   void ClearCachedResources() override;
 protected:
+  void DoClearCachedResources();
+
   UniquePtr<WebRenderCanvasRendererAsync> mCanvasRenderer;
 };
 

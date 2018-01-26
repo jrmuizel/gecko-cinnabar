@@ -44,6 +44,7 @@ elif CONFIG['OS_ARCH'] == 'WINNT':
         'chromium/base/cpu.cc',
         'chromium/base/debug/alias.cc',
         'chromium/base/debug/profiler.cc',
+        'chromium/base/environment.cc',
         'chromium/base/hash.cc',
         'chromium/base/lazy_instance.cc',
         'chromium/base/location.cc',
@@ -171,7 +172,7 @@ elif CONFIG['OS_ARCH'] == 'WINNT':
     DisableStlWrapping()
 
     # Suppress warnings in third-party code.
-    if CONFIG['_MSC_VER']:
+    if CONFIG['CC_TYPE'] in ('msvc', 'clang-cl'):
         CXXFLAGS += [
             '-wd4275', # non dll-interface class exception used as base for dll-interface class
             '-wd4717', # recursive on all control paths, function will cause runtime stack overflow

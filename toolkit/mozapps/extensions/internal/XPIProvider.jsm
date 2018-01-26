@@ -155,7 +155,7 @@ const TOOLKIT_ID                      = "toolkit@mozilla.org";
 
 const XPI_SIGNATURE_CHECK_PERIOD      = 24 * 60 * 60;
 
-XPCOMUtils.defineConstant(this, "DB_SCHEMA", 23);
+XPCOMUtils.defineConstant(this, "DB_SCHEMA", 24);
 
 XPCOMUtils.defineLazyPreferenceGetter(this, "ALLOW_NON_MPC", PREF_ALLOW_NON_MPC);
 
@@ -300,7 +300,7 @@ function loadLazyObjects() {
   let uri = "resource://gre/modules/addons/XPIProviderUtils.js";
   let scope = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), {
     sandboxName: uri,
-    wantGlobalProperties: ["TextDecoder"],
+    wantGlobalProperties: ["ChromeUtils", "TextDecoder"],
   });
 
   Object.assign(scope, {
@@ -407,10 +407,7 @@ function getRelativePath(file, dir) {
 }
 
 /**
- * Converts the given opaque descriptor string into an ordinary path
- * string. In practice, the path string is always exactly equal to the
- * descriptor string, but theoretically may not have been on some legacy
- * systems.
+ * Converts the given opaque descriptor string into an ordinary path string.
  *
  * @param {string} descriptor
  *        The opaque descriptor string to convert.
@@ -784,7 +781,16 @@ function canRunInSafeMode(aAddon) {
 function isDisabledLegacy(addon) {
   return (!AddonSettings.ALLOW_LEGACY_EXTENSIONS &&
           LEGACY_TYPES.has(addon.type) &&
+
+          // Legacy add-ons are allowed in the system location.
           !addon._installLocation.isSystem &&
+
+          // Legacy extensions may be installed temporarily in
+          // non-release builds.
+          !(AppConstants.MOZ_ALLOW_LEGACY_EXTENSIONS &&
+            addon._installLocation.name == KEY_APP_TEMPORARY) &&
+
+          // Properly signed legacy extensions are allowed.
           addon.signedState !== AddonManager.SIGNEDSTATE_PRIVILEGED);
 }
 
@@ -1416,7 +1422,7 @@ class XPIStateLocation extends Map {
    * @returns {XPIState}
    */
   addFile(addonId, file) {
-    let xpiState = this._addState(addonId, {enabled: true, file: file.clone()});
+    let xpiState = this._addState(addonId, {enabled: false, file: file.clone()});
     xpiState.getModTime(xpiState.file, addonId);
     return xpiState;
   }
@@ -1566,7 +1572,7 @@ this.XPIStates = {
 
       // The results of scanning this location.
       let loc = this.getLocation(location.name, location.path || null,
-                                 oldState[location.name]);
+                                 oldState[location.name] || undefined);
       changed = changed || loc.changed;
 
       // Don't bother checking scopes where we don't accept side-loads.
@@ -3617,7 +3623,7 @@ this.XPIProvider = {
     // WebExtension themes are installed as disabled, fix that here.
     addon.userDisabled = false;
 
-    addon = XPIDatabase.addAddonMetadata(addon, file.persistentDescriptor);
+    addon = XPIDatabase.addAddonMetadata(addon, file.path);
 
     XPIStates.addAddon(addon);
     XPIDatabase.saveChanges();
@@ -4215,10 +4221,12 @@ this.XPIProvider = {
 
     let principal = Cc["@mozilla.org/systemprincipal;1"].
                     createInstance(Ci.nsIPrincipal);
-    if (!aMultiprocessCompatible && Services.prefs.getBoolPref(PREF_INTERPOSITION_ENABLED, false)) {
-      let interposition = Cc["@mozilla.org/addons/multiprocess-shims;1"].
-        getService(Ci.nsIAddonInterposition);
-      Cu.setAddonInterposition(aId, interposition);
+    if (!aMultiprocessCompatible) {
+      if (Services.prefs.getBoolPref(PREF_INTERPOSITION_ENABLED, false)) {
+        let interposition = Cc["@mozilla.org/addons/multiprocess-shims;1"].
+          getService(Ci.nsIAddonInterposition);
+        Cu.setAddonInterposition(aId, interposition);
+      }
       Cu.allowCPOWsInAddon(aId, true);
     }
 
@@ -4226,6 +4234,7 @@ this.XPIProvider = {
       activeAddon.bootstrapScope =
         new Cu.Sandbox(principal, { sandboxName: aFile.path,
                                     addonId: aId,
+                                    wantGlobalProperties: ["ChromeUtils"],
                                     metadata: { addonID: aId } });
       logger.error("Attempted to load bootstrap scope from missing directory " + aFile.path);
       return;
@@ -4245,6 +4254,7 @@ this.XPIProvider = {
       activeAddon.bootstrapScope =
         new Cu.Sandbox(principal, { sandboxName: uri,
                                     addonId: aId,
+                                    wantGlobalProperties: ["ChromeUtils"],
                                     metadata: { addonID: aId, URI: uri } });
 
       try {
@@ -4372,6 +4382,7 @@ this.XPIProvider = {
         installPath: aFile.clone(),
         resourceURI: getURIForResourceInFile(aFile, ""),
         signedState: aAddon.signedState,
+        temporarilyInstalled: aAddon._installLocation == TemporaryInstallLocation,
       };
 
       if (aMethod == "startup" && aAddon.startupData) {
@@ -6372,7 +6383,7 @@ class BuiltInInstallLocation extends DirectoryInstallLocation {
     let manifest;
     try {
       let url = Services.io.newURI(BUILT_IN_ADDONS_URI);
-      let data = Cu.readURI(url);
+      let data = Cu.readUTF8URI(url);
       manifest = JSON.parse(data);
     } catch (e) {
       logger.warn("List of valid built-in add-ons could not be parsed.", e);

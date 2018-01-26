@@ -8,7 +8,7 @@ use app_units::Au;
 use construct::ConstructionResult;
 use context::LayoutContext;
 use euclid::{Point2D, Vector2D, Rect, Size2D};
-use flow::{self, Flow};
+use flow::{Flow, GetBaseFlow};
 use fragment::{Fragment, FragmentBorderBoxIterator, SpecificFragmentInfo};
 use gfx::display_list::{DisplayList, OpaqueNode, ScrollOffsetMap};
 use inline::InlineFragmentNodeFlags;
@@ -774,7 +774,7 @@ where
         let position = maybe_data.map_or(Point2D::zero(), |data| {
             match (*data).flow_construction_result {
                 ConstructionResult::Flow(ref flow_ref, _) =>
-                    flow::base(flow_ref.deref()).stacking_relative_position.to_point(),
+                    flow_ref.deref().base().stacking_relative_position.to_point(),
                 // TODO(dzbarsky) search parents until we find node with a flow ref.
                 // https://github.com/servo/servo/issues/8307
                 _ => Point2D::zero()
@@ -868,7 +868,7 @@ pub fn process_node_overflow_request<N: LayoutNode>(requested_node: N) -> NodeOv
     let style = &*layout_node.as_element().unwrap().resolved_style();
     let style_box = style.get_box();
 
-    NodeOverflowResponse(Some((Point2D::new(style_box.overflow_x, style_box.overflow_y))))
+    NodeOverflowResponse(Some(Point2D::new(style_box.overflow_x, style_box.overflow_y)))
 }
 
 pub fn process_margin_style_query<N: LayoutNode>(requested_node: N)

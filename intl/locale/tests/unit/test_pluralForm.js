@@ -623,6 +623,40 @@ function run_test()
     2,2,2,2,2,2,2,2,2,2,
     2,2,2,2,2,2,2,2,2,2,
     2,2,2,2,2,2,2,2,2,2,
+  ], [
+    // 18: Welsh 0-9, 10-19, ..., 90-99
+    1,2,3,4,6,6,5,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    // 100-109, 110-119, ..., 190-199
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    // 200-209, 210-219, ..., 290-299
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
+    6,6,6,6,6,6,6,6,6,6,
   ]];
 
   for (let [rule, expect] of allExpect.entries()) {
@@ -632,7 +666,7 @@ function run_test()
 
     // Make sure the largest value expected matches the number of plural forms
     let maxExpect = Math.max.apply(this, expect);
-    do_check_eq(maxExpect, numForms());
+    Assert.equal(maxExpect, numForms());
 
     // Make a string of numbers, e.g., 1;2;3;4;5
     let words = [];
@@ -643,7 +677,7 @@ function run_test()
     // Make sure we get the expected number
     for (let [index, number] of expect.entries()) {
       print(["Plural form of ", index, " should be ", number, " (", words, ")"].join(""));
-      do_check_eq(get(index, words), number);
+      Assert.equal(get(index, words), number);
     }
   }
 }

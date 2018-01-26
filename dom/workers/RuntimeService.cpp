@@ -44,6 +44,7 @@
 #include "mozilla/dom/FetchUtil.h"
 #include "mozilla/dom/MessageChannel.h"
 #include "mozilla/dom/MessageEventBinding.h"
+#include "mozilla/dom/PerformanceService.h"
 #include "mozilla/dom/WorkerBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/IndexedDatabaseManager.h"
@@ -552,15 +553,6 @@ LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */)
       continue;
     }
 
-    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "gc_refresh_frame_slices_enabled");
-    if (memPrefName == matchName ||
-        (gRuntimeServiceDuringInit && index == 15)) {
-      bool prefValue = GetWorkerPref(matchName, false);
-      UpdateOtherJSGCMemoryOption(rts, JSGC_REFRESH_FRAME_SLICES_ENABLED,
-                                 prefValue ? 0 : 1);
-      continue;
-    }
-
 #ifdef DEBUG
     nsAutoCString message("Workers don't support the 'mem.");
     message.Append(memPrefName);
@@ -992,6 +984,8 @@ public:
     // The CC is shut down, and the superclass destructor will GC, so make sure
     // we don't try to CC again.
     mWorkerPrivate = nullptr;
+
+    CycleCollectedJSRuntime::Shutdown(cx);
   }
 
   ~WorkerJSRuntime()
@@ -1442,7 +1436,6 @@ struct RuntimeService::IdleThreadInfo
 
 // This is only touched on the main thread. Initialized in Init() below.
 JSSettings RuntimeService::sDefaultJSSettings;
-bool RuntimeService::sDefaultPreferences[WORKERPREF_COUNT] = { false };
 
 RuntimeService::RuntimeService()
 : mMutex("RuntimeService::mMutex"), mObserved(false),
@@ -1966,17 +1959,17 @@ RuntimeService::Init()
                                              PREF_JS_OPTIONS_PREFIX PREF_GCZEAL)) ||
 #endif
 
-#define WORKER_SIMPLE_PREF(name, getter, NAME)                                \
-      NS_FAILED(Preferences::RegisterCallbackAndCall(                         \
-                  WorkerPrefChanged,                                          \
-                  name,                                                       \
-                  reinterpret_cast<void*>(WORKERPREF_##NAME))) ||
 #define WORKER_PREF(name, callback)                                           \
       NS_FAILED(Preferences::RegisterCallbackAndCall(                         \
                   callback,                                                   \
                   name)) ||
-#include "WorkerPrefs.h"
-#undef WORKER_SIMPLE_PREF
+      WORKER_PREF("intl.accept_languages", PrefLanguagesChanged)
+      WORKER_PREF("general.appname.override", AppNameOverrideChanged)
+      WORKER_PREF("general.appversion.override", AppVersionOverrideChanged)
+      WORKER_PREF("general.platform.override", PlatformOverrideChanged)
+#ifdef JS_GC_ZEAL
+      WORKER_PREF("dom.workers.options.gcZeal", LoadGCZealOptions)
+#endif
 #undef WORKER_PREF
 
       NS_FAILED(Preferences::RegisterPrefixCallbackAndCall(
@@ -2021,6 +2014,9 @@ RuntimeService::Init()
   if (NS_WARN_IF(!IndexedDatabaseManager::GetOrCreate())) {
     return NS_ERROR_UNEXPECTED;
   }
+
+  // PerformanceService must be initialized on the main-thread.
+  PerformanceService::GetOrCreate();
 
   return NS_OK;
 }
@@ -2262,17 +2258,17 @@ RuntimeService::Cleanup()
         NS_FAILED(Preferences::UnregisterPrefixCallback(LoadContextOptions,
                                                         PREF_WORKERS_OPTIONS_PREFIX)) ||
 
-#define WORKER_SIMPLE_PREF(name, getter, NAME)                                \
-      NS_FAILED(Preferences::UnregisterCallback(                              \
-                  WorkerPrefChanged,                                          \
-                  name,                                                       \
-                  reinterpret_cast<void*>(WORKERPREF_##NAME))) ||
 #define WORKER_PREF(name, callback)                                           \
       NS_FAILED(Preferences::UnregisterCallback(                              \
                   callback,                                                   \
                   name)) ||
-#include "WorkerPrefs.h"
-#undef WORKER_SIMPLE_PREF
+      WORKER_PREF("intl.accept_languages", PrefLanguagesChanged)
+      WORKER_PREF("general.appname.override", AppNameOverrideChanged)
+      WORKER_PREF("general.appversion.override", AppVersionOverrideChanged)
+      WORKER_PREF("general.platform.override", PlatformOverrideChanged)
+#ifdef JS_GC_ZEAL
+      WORKER_PREF("dom.workers.options.gcZeal", LoadGCZealOptions)
+#endif
 #undef WORKER_PREF
 
 #ifdef JS_GC_ZEAL
@@ -2450,6 +2446,31 @@ RuntimeService::CreateSharedWorker(const GlobalObject& aGlobal,
 
   nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal.GetAsSupports());
   MOZ_ASSERT(window);
+
+  // If the window is blocked from accessing storage, do not allow it
+  // to connect to a SharedWorker.  This would potentially allow it
+  // to communicate with other windows that do have storage access.
+  // Allow private browsing, however, as we handle that isolation
+  // via the principal.
+  auto storageAllowed = nsContentUtils::StorageAllowedForWindow(window);
+  if (storageAllowed != nsContentUtils::StorageAccess::eAllow &&
+      storageAllowed != nsContentUtils::StorageAccess::ePrivateBrowsing) {
+    return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
+  // Assert that the principal private browsing state matches the
+  // StorageAccess value.
+#ifdef  MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  if (storageAllowed == nsContentUtils::StorageAccess::ePrivateBrowsing) {
+    nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
+    nsCOMPtr<nsIPrincipal> principal = doc ? doc->NodePrincipal() : nullptr;
+    uint32_t privateBrowsingId = 0;
+    if (principal) {
+      MOZ_ALWAYS_SUCCEEDS(principal->GetPrivateBrowsingId(&privateBrowsingId));
+    }
+    MOZ_DIAGNOSTIC_ASSERT(privateBrowsingId != 0);
+  }
+#endif // MOZ_DIAGNOSTIC_ASSERT_ENABLED
 
   JSContext* cx = aGlobal.Context();
 
@@ -2673,12 +2694,6 @@ RuntimeService::UpdatePlatformOverridePreference(const nsAString& aValue)
 }
 
 void
-RuntimeService::UpdateAllWorkerPreference(WorkerPreference aPref, bool aValue)
-{
-  BROADCAST_ALL_WORKERS(UpdatePreference, aPref, aValue);
-}
-
-void
 RuntimeService::UpdateAllWorkerLanguages(const nsTArray<nsString>& aLanguages)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -2795,34 +2810,6 @@ RuntimeService::Observe(nsISupports* aSubject, const char* aTopic,
 
   NS_NOTREACHED("Unknown observer topic!");
   return NS_OK;
-}
-
-/* static */ void
-RuntimeService::WorkerPrefChanged(const char* aPrefName, void* aClosure)
-{
-  AssertIsOnMainThread();
-
-  const WorkerPreference key =
-    static_cast<WorkerPreference>(reinterpret_cast<uintptr_t>(aClosure));
-
-  switch (key) {
-#define WORKER_SIMPLE_PREF(name, getter, NAME) case WORKERPREF_##NAME:
-#define WORKER_PREF(name, callback)
-#include "WorkerPrefs.h"
-#undef WORKER_SIMPLE_PREF
-#undef WORKER_PREF
-      sDefaultPreferences[key] = Preferences::GetBool(aPrefName, false);
-      break;
-
-    default:
-      MOZ_ASSERT_UNREACHABLE("Invalid pref key");
-      break;
-  }
-
-  RuntimeService* rts = RuntimeService::GetService();
-  if (rts) {
-    rts->UpdateAllWorkerPreference(key, sDefaultPreferences[key]);
-  }
 }
 
 bool

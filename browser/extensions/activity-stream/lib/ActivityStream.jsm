@@ -58,9 +58,9 @@ const PREFS_CONFIG = new Map([
       provider_name: "Pocket",
       read_more_endpoint: "https://getpocket.com/explore/trending?src=fx_new_tab",
       stories_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/global-recs?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
-      stories_referrer: "https://getpocket.com/recommendations",
+      stories_referrer: "http://getpocket.com/recommendations",
       info_link: "https://www.mozilla.org/privacy/firefox/#pocketstories",
-      disclaimer_link: "https://getpocket.cdn.mozilla.net/firefox/new_tab_learn_more",
+      disclaimer_link: "https://getpocket.com/firefox/new_tab_learn_more.php",
       topics_endpoint: `https://getpocket.cdn.mozilla.net/v3/firefox/trending-topics?version=2&consumer_key=$apiKey&locale_lang=${args.locale}`,
       show_spocs: false,
       personalized: true
@@ -108,7 +108,7 @@ const PREFS_CONFIG = new Map([
   }],
   ["topSitesCount", {
     title: "Number of Top Sites to display",
-    value: 6
+    value: 12
   }],
   ["telemetry", {
     title: "Enable system error and usage data collection",
@@ -292,7 +292,7 @@ this.ActivityStream = class ActivityStream {
       this.geo = "";
     }
 
-    this.locale = Services.locale.getRequestedLocale();
+    this.locale = Services.locale.getAppLocaleAsLangTag();
 
     // Update the pref config of those with dynamic values
     for (const pref of PREFS_CONFIG.keys()) {

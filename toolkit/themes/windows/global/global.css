@@ -8,7 +8,6 @@
 
 /* all localizable skin settings shall live here */
 @import url("chrome://global/locale/intl.css");
-@import url("chrome://global/skin/menu.css");
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 
@@ -26,13 +25,18 @@ menulist > menupopup {
   --arrowpanel-border-color: ThreeDShadow;
 }
 
+@media (-moz-windows-default-theme) {
+  :root {
+    --arrowpanel-border-color: hsla(210,4%,10%,.2);
+  }
+}
+
 /* ::::: root elements ::::: */
 
 window,
 page,
 dialog,
-wizard,
-prefwindow {
+wizard {
   -moz-appearance: window;
   background-color: -moz-Dialog;
   color: -moz-DialogText;
@@ -93,6 +97,14 @@ iframe {
   height: 100px;
   min-width: 10px;
   min-height: 10px;
+}
+
+@supports -moz-bool-pref("layout.css.emulate-moz-box-with-flex") {
+  /* In emulation, <iframe> is block instead of inline, so reset the width/height */
+  iframe {
+    width: auto;
+    height: auto;
+  }
 }
 
 /* XXXBlake yeah, shoot me -- these don't belong here.  I'll move them later. */
@@ -225,10 +237,6 @@ label[disabled="true"] {
 
 .spaced {
   margin: 3px 5px 4px;
-}
-
-.wizard-box {
-  padding: 20px 44px 10px;
 }
 
 .text-link {

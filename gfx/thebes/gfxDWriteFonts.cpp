@@ -77,19 +77,10 @@ gfxDWriteFont::gfxDWriteFont(const RefPtr<UnscaledFontDWrite>& aUnscaledFont,
     , mCairoFontFace(nullptr)
     , mMetrics(nullptr)
     , mSpaceGlyph(0)
-    , mNeedsOblique(false)
     , mNeedsBold(aNeedsBold)
     , mUseSubpixelPositions(false)
     , mAllowManualShowGlyphs(true)
 {
-    if ((GetStyle()->style != NS_FONT_STYLE_NORMAL) &&
-        aFontEntry->IsUpright() &&
-        GetStyle()->allowSyntheticStyle) {
-            // For this we always use the font_matrix for uniformity. Not the
-            // DWrite simulation.
-            mNeedsOblique = true;
-    }
-
     mFontFace = aUnscaledFont->GetFontFace();
 
     // If the IDWriteFontFace1 interface is available, we can use that for
@@ -561,9 +552,9 @@ gfxDWriteFont::Measure(const gfxTextRun* aTextRun,
     if (aBoundingBoxType == LOOSE_INK_EXTENTS &&
         mAntialiasOption != kAntialiasNone &&
         GetMeasuringMode() == DWRITE_MEASURING_MODE_GDI_CLASSIC &&
-        metrics.mBoundingBox.width > 0) {
-        metrics.mBoundingBox.x -= aTextRun->GetAppUnitsPerDevUnit();
-        metrics.mBoundingBox.width += aTextRun->GetAppUnitsPerDevUnit() * 3;
+        metrics.mBoundingBox.Width() > 0) {
+        metrics.mBoundingBox.MoveByX(-aTextRun->GetAppUnitsPerDevUnit());
+        metrics.mBoundingBox.SetWidth(metrics.mBoundingBox.Width() + aTextRun->GetAppUnitsPerDevUnit() * 3);
     }
 
     return metrics;
@@ -573,7 +564,9 @@ bool
 gfxDWriteFont::ProvidesGlyphWidths() const
 {
     return !mUseSubpixelPositions ||
-           (mFontFace->GetSimulations() & DWRITE_FONT_SIMULATIONS_BOLD);
+           (mFontFace->GetSimulations() & DWRITE_FONT_SIMULATIONS_BOLD) ||
+           (((gfxDWriteFontEntry*)(GetFontEntry()))->HasVariations() &&
+            !mStyle.variationSettings.IsEmpty());
 }
 
 int32_t

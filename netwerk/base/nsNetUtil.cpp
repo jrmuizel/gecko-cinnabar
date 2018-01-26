@@ -75,15 +75,22 @@
 #include "nsHttpHandler.h"
 #include "nsNSSComponent.h"
 #include "nsIRedirectHistoryEntry.h"
+#include "nsICertBlocklist.h"
+#include "nsICertOverrideService.h"
 
 #include <limits>
 
 using namespace mozilla;
 using namespace mozilla::net;
+using mozilla::dom::ClientInfo;
+using mozilla::dom::PerformanceStorage;
+using mozilla::dom::ServiceWorkerDescriptor;
 
-#define DEFAULT_USER_CONTROL_RP 3
+#define DEFAULT_RP 3
+#define DEFAULT_PRIVATE_RP 2
 
-static uint32_t sUserControlRp = DEFAULT_USER_CONTROL_RP;
+static uint32_t sDefaultRp = DEFAULT_RP;
+static uint32_t defaultPrivateRp = DEFAULT_PRIVATE_RP;
 
 already_AddRefed<nsIIOService>
 do_GetIOService(nsresult *error /* = 0 */)
@@ -158,6 +165,7 @@ nsresult
 NS_NewChannelInternal(nsIChannel           **outChannel,
                       nsIURI                *aUri,
                       nsILoadInfo           *aLoadInfo,
+                      PerformanceStorage    *aPerformanceStorage /* = nullptr */,
                       nsILoadGroup          *aLoadGroup /* = nullptr */,
                       nsIInterfaceRequestor *aCallbacks /* = nullptr */,
                       nsLoadFlags            aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
@@ -203,8 +211,66 @@ NS_NewChannelInternal(nsIChannel           **outChannel,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
+  if (aPerformanceStorage) {
+    nsCOMPtr<nsILoadInfo> loadInfo;
+    rv = channel->GetLoadInfo(getter_AddRefs(loadInfo));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    loadInfo->SetPerformanceStorage(aPerformanceStorage);
+  }
+
   channel.forget(outChannel);
   return NS_OK;
+}
+
+namespace {
+
+void
+AssertLoadingPrincipalAndClientInfoMatch(nsIPrincipal* aLoadingPrincipal,
+                                         const ClientInfo& aLoadingClientInfo,
+                                         nsContentPolicyType aType)
+{
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  // Verify that the provided loading ClientInfo matches the loading
+  // principal.  Unfortunately we can't just use nsIPrincipal::Equals() here
+  // because of some corner cases:
+  //
+  //  1. Worker debugger scripts want to use a system loading principal for
+  //     worker scripts with a content principal.  We exempt these from this
+  //     check.
+  //  2. Null principals currently require exact object identity for
+  //     nsIPrincipal::Equals() to return true.  This doesn't work here because
+  //     ClientInfo::GetPrincipal() uses PrincipalInfoToPrincipal() to allocate
+  //     a new object.  To work around this we compare the principal origin
+  //     string itself.  If bug 1431771 is fixed then we could switch to
+  //     Equals().
+
+  // Allow worker debugger to load with a system principal.
+  if (aLoadingPrincipal->GetIsSystemPrincipal() &&
+      (aType == nsIContentPolicy::TYPE_INTERNAL_WORKER ||
+       aType == nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER ||
+       aType == nsIContentPolicy::TYPE_INTERNAL_SERVICE_WORKER ||
+       aType == nsIContentPolicy::TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS)) {
+    return;
+  }
+
+  // Perform a fast comparison for most principal checks.
+  nsCOMPtr<nsIPrincipal> clientPrincipal(aLoadingClientInfo.GetPrincipal());
+  if (aLoadingPrincipal->Equals(clientPrincipal)) {
+    return;
+  }
+
+  // Fall back to a slower origin equality test to support null principals.
+  nsAutoCString loadingOrigin;
+  MOZ_ALWAYS_SUCCEEDS(aLoadingPrincipal->GetOrigin(loadingOrigin));
+
+  nsAutoCString clientOrigin;
+  MOZ_ALWAYS_SUCCEEDS(clientPrincipal->GetOrigin(clientOrigin));
+
+  MOZ_DIAGNOSTIC_ASSERT(loadingOrigin == clientOrigin);
+#endif
+}
+
 }
 
 nsresult
@@ -213,6 +279,7 @@ NS_NewChannel(nsIChannel           **outChannel,
               nsIPrincipal          *aLoadingPrincipal,
               nsSecurityFlags        aSecurityFlags,
               nsContentPolicyType    aContentPolicyType,
+              PerformanceStorage    *aPerformanceStorage /* nullptr */,
               nsILoadGroup          *aLoadGroup /* = nullptr */,
               nsIInterfaceRequestor *aCallbacks /* = nullptr */,
               nsLoadFlags            aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
@@ -223,8 +290,48 @@ NS_NewChannel(nsIChannel           **outChannel,
                                nullptr, // aLoadingNode,
                                aLoadingPrincipal,
                                nullptr, // aTriggeringPrincipal
+                               Maybe<ClientInfo>(),
+                               Maybe<ServiceWorkerDescriptor>(),
                                aSecurityFlags,
                                aContentPolicyType,
+                               aPerformanceStorage,
+                               aLoadGroup,
+                               aCallbacks,
+                               aLoadFlags,
+                               aIoService);
+}
+
+nsresult
+NS_NewChannel(nsIChannel           **outChannel,
+              nsIURI                *aUri,
+              nsIPrincipal          *aLoadingPrincipal,
+              const ClientInfo      &aLoadingClientInfo,
+              const Maybe<ServiceWorkerDescriptor>& aController,
+              nsSecurityFlags        aSecurityFlags,
+              nsContentPolicyType    aContentPolicyType,
+              PerformanceStorage    *aPerformanceStorage /* nullptr */,
+              nsILoadGroup          *aLoadGroup /* = nullptr */,
+              nsIInterfaceRequestor *aCallbacks /* = nullptr */,
+              nsLoadFlags            aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
+              nsIIOService          *aIoService /* = nullptr */)
+{
+  AssertLoadingPrincipalAndClientInfoMatch(aLoadingPrincipal,
+                                           aLoadingClientInfo,
+                                           aContentPolicyType);
+
+  Maybe<ClientInfo> loadingClientInfo;
+  loadingClientInfo.emplace(aLoadingClientInfo);
+
+  return NS_NewChannelInternal(outChannel,
+                               aUri,
+                               nullptr, // aLoadingNode,
+                               aLoadingPrincipal,
+                               nullptr, // aTriggeringPrincipal
+                               loadingClientInfo,
+                               aController,
+                               aSecurityFlags,
+                               aContentPolicyType,
+                               aPerformanceStorage,
                                aLoadGroup,
                                aCallbacks,
                                aLoadFlags,
@@ -237,8 +344,11 @@ NS_NewChannelInternal(nsIChannel           **outChannel,
                       nsINode               *aLoadingNode,
                       nsIPrincipal          *aLoadingPrincipal,
                       nsIPrincipal          *aTriggeringPrincipal,
+                      const Maybe<ClientInfo>& aLoadingClientInfo,
+                      const Maybe<ServiceWorkerDescriptor>& aController,
                       nsSecurityFlags        aSecurityFlags,
                       nsContentPolicyType    aContentPolicyType,
+                      PerformanceStorage    *aPerformanceStorage /* nullptr */,
                       nsILoadGroup          *aLoadGroup /* = nullptr */,
                       nsIInterfaceRequestor *aCallbacks /* = nullptr */,
                       nsLoadFlags            aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
@@ -251,12 +361,14 @@ NS_NewChannelInternal(nsIChannel           **outChannel,
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIChannel> channel;
-  rv = aIoService->NewChannelFromURI2(
+  rv = aIoService->NewChannelFromURIWithClientAndController(
          aUri,
          aLoadingNode ?
            aLoadingNode->AsDOMNode() : nullptr,
          aLoadingPrincipal,
          aTriggeringPrincipal,
+         aLoadingClientInfo,
+         aController,
          aSecurityFlags,
          aContentPolicyType,
          getter_AddRefs(channel));
@@ -288,6 +400,14 @@ NS_NewChannelInternal(nsIChannel           **outChannel,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
+  if (aPerformanceStorage) {
+    nsCOMPtr<nsILoadInfo> loadInfo;
+    rv = channel->GetLoadInfo(getter_AddRefs(loadInfo));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    loadInfo->SetPerformanceStorage(aPerformanceStorage);
+  }
+
   channel.forget(outChannel);
   return NS_OK;
 }
@@ -299,6 +419,7 @@ NS_NewChannelWithTriggeringPrincipal(nsIChannel           **outChannel,
                                      nsIPrincipal          *aTriggeringPrincipal,
                                      nsSecurityFlags        aSecurityFlags,
                                      nsContentPolicyType    aContentPolicyType,
+                                     PerformanceStorage    *aPerformanceStorage /* = nullptr */,
                                      nsILoadGroup          *aLoadGroup /* = nullptr */,
                                      nsIInterfaceRequestor *aCallbacks /* = nullptr */,
                                      nsLoadFlags            aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
@@ -311,8 +432,11 @@ NS_NewChannelWithTriggeringPrincipal(nsIChannel           **outChannel,
                                aLoadingNode,
                                aLoadingNode->NodePrincipal(),
                                aTriggeringPrincipal,
+                               Maybe<ClientInfo>(),
+                               Maybe<ServiceWorkerDescriptor>(),
                                aSecurityFlags,
                                aContentPolicyType,
+                               aPerformanceStorage,
                                aLoadGroup,
                                aCallbacks,
                                aLoadFlags,
@@ -320,13 +444,14 @@ NS_NewChannelWithTriggeringPrincipal(nsIChannel           **outChannel,
 }
 
 // See NS_NewChannelInternal for usage and argument description
-nsresult /*NS_NewChannelWithPrincipalAndTriggeringPrincipal */
+nsresult
 NS_NewChannelWithTriggeringPrincipal(nsIChannel           **outChannel,
                                      nsIURI                *aUri,
                                      nsIPrincipal          *aLoadingPrincipal,
                                      nsIPrincipal          *aTriggeringPrincipal,
                                      nsSecurityFlags        aSecurityFlags,
                                      nsContentPolicyType    aContentPolicyType,
+                                     PerformanceStorage    *aPerformanceStorage /* = nullptr */,
                                      nsILoadGroup          *aLoadGroup /* = nullptr */,
                                      nsIInterfaceRequestor *aCallbacks /* = nullptr */,
                                      nsLoadFlags            aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
@@ -338,20 +463,63 @@ NS_NewChannelWithTriggeringPrincipal(nsIChannel           **outChannel,
                                nullptr, // aLoadingNode
                                aLoadingPrincipal,
                                aTriggeringPrincipal,
+                               Maybe<ClientInfo>(),
+                               Maybe<ServiceWorkerDescriptor>(),
                                aSecurityFlags,
                                aContentPolicyType,
+                               aPerformanceStorage,
                                aLoadGroup,
                                aCallbacks,
                                aLoadFlags,
                                aIoService);
 }
 
-nsresult /* NS_NewChannelNode */
+// See NS_NewChannelInternal for usage and argument description
+nsresult
+NS_NewChannelWithTriggeringPrincipal(nsIChannel           **outChannel,
+                                     nsIURI                *aUri,
+                                     nsIPrincipal          *aLoadingPrincipal,
+                                     nsIPrincipal          *aTriggeringPrincipal,
+                                     const ClientInfo      &aLoadingClientInfo,
+                                     const Maybe<ServiceWorkerDescriptor>& aController,
+                                     nsSecurityFlags        aSecurityFlags,
+                                     nsContentPolicyType    aContentPolicyType,
+                                     PerformanceStorage    *aPerformanceStorage /* = nullptr */,
+                                     nsILoadGroup          *aLoadGroup /* = nullptr */,
+                                     nsIInterfaceRequestor *aCallbacks /* = nullptr */,
+                                     nsLoadFlags            aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
+                                     nsIIOService          *aIoService /* = nullptr */)
+{
+  AssertLoadingPrincipalAndClientInfoMatch(aLoadingPrincipal,
+                                           aLoadingClientInfo,
+                                           aContentPolicyType);
+
+  Maybe<ClientInfo> loadingClientInfo;
+  loadingClientInfo.emplace(aLoadingClientInfo);
+
+  return NS_NewChannelInternal(outChannel,
+                               aUri,
+                               nullptr, // aLoadingNode
+                               aLoadingPrincipal,
+                               aTriggeringPrincipal,
+                               loadingClientInfo,
+                               aController,
+                               aSecurityFlags,
+                               aContentPolicyType,
+                               aPerformanceStorage,
+                               aLoadGroup,
+                               aCallbacks,
+                               aLoadFlags,
+                               aIoService);
+}
+
+nsresult
 NS_NewChannel(nsIChannel           **outChannel,
               nsIURI                *aUri,
               nsINode               *aLoadingNode,
               nsSecurityFlags        aSecurityFlags,
               nsContentPolicyType    aContentPolicyType,
+              PerformanceStorage    *aPerformanceStorage /* = nullptr */,
               nsILoadGroup          *aLoadGroup /* = nullptr */,
               nsIInterfaceRequestor *aCallbacks /* = nullptr */,
               nsLoadFlags            aLoadFlags /* = nsIRequest::LOAD_NORMAL */,
@@ -363,8 +531,11 @@ NS_NewChannel(nsIChannel           **outChannel,
                                aLoadingNode,
                                aLoadingNode->NodePrincipal(),
                                nullptr, // aTriggeringPrincipal
+                               Maybe<ClientInfo>(),
+                               Maybe<ServiceWorkerDescriptor>(),
                                aSecurityFlags,
                                aContentPolicyType,
+                               aPerformanceStorage,
                                aLoadGroup,
                                aCallbacks,
                                aLoadFlags,
@@ -892,8 +1063,11 @@ NS_NewStreamLoaderInternal(nsIStreamLoader        **outStream,
                                        aLoadingNode,
                                        aLoadingPrincipal,
                                        nullptr, // aTriggeringPrincipal
+                                       Maybe<ClientInfo>(),
+                                       Maybe<ServiceWorkerDescriptor>(),
                                        aSecurityFlags,
                                        aContentPolicyType,
+                                       nullptr, // PerformanceStorage
                                        aLoadGroup,
                                        aCallbacks,
                                        aLoadFlags);
@@ -910,7 +1084,7 @@ NS_NewStreamLoaderInternal(nsIStreamLoader        **outStream,
 }
 
 
-nsresult /* NS_NewStreamLoaderNode */
+nsresult
 NS_NewStreamLoader(nsIStreamLoader        **outStream,
                    nsIURI                  *aUri,
                    nsIStreamLoaderObserver *aObserver,
@@ -936,7 +1110,7 @@ NS_NewStreamLoader(nsIStreamLoader        **outStream,
                                     aReferrer);
 }
 
-nsresult /* NS_NewStreamLoaderPrincipal */
+nsresult
 NS_NewStreamLoader(nsIStreamLoader        **outStream,
                    nsIURI                  *aUri,
                    nsIStreamLoaderObserver *aObserver,
@@ -1357,43 +1531,6 @@ NS_NewBufferedInputStream(nsIInputStream** aResult,
         }
     }
     return rv;
-}
-
-nsresult
-NS_NewPostDataStream(nsIInputStream  **result,
-                     bool              isFile,
-                     const nsACString &data)
-{
-    nsresult rv;
-
-    if (isFile) {
-        nsCOMPtr<nsIFile> file;
-        nsCOMPtr<nsIInputStream> fileStream;
-
-        rv = NS_NewNativeLocalFile(data, false, getter_AddRefs(file));
-        if (NS_SUCCEEDED(rv)) {
-            rv = NS_NewLocalFileInputStream(getter_AddRefs(fileStream), file);
-            if (NS_SUCCEEDED(rv)) {
-                // wrap the file stream with a buffered input stream
-                rv = NS_NewBufferedInputStream(result, fileStream.forget(),
-                                               8192);
-            }
-        }
-        return rv;
-    }
-
-    // otherwise, create a string stream for the data (copies)
-    nsCOMPtr<nsIStringInputStream> stream
-        (do_CreateInstance("@mozilla.org/io/string-input-stream;1", &rv));
-    if (NS_FAILED(rv))
-        return rv;
-
-    rv = stream->SetData(data.BeginReading(), data.Length());
-    if (NS_FAILED(rv))
-        return rv;
-
-    stream.forget(result);
-    return NS_OK;
 }
 
 namespace {
@@ -2696,6 +2833,10 @@ void net_EnsurePSMInit()
     nsresult rv;
     nsCOMPtr<nsISupports> psm = do_GetService(PSM_COMPONENT_CONTRACTID, &rv);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+    nsCOMPtr<nsISupports> sss = do_GetService(NS_SSSERVICE_CONTRACTID);
+    nsCOMPtr<nsISupports> cbl = do_GetService(NS_CERTBLOCKLIST_CONTRACTID);
+    nsCOMPtr<nsISupports> cos = do_GetService(NS_CERTOVERRIDE_CONTRACTID);
 }
 
 bool NS_IsAboutBlank(nsIURI *uri)
@@ -2838,14 +2979,6 @@ NS_ShouldSecureUpgrade(nsIURI* aURI,
         aShouldUpgrade = true;
         return NS_OK;
       }
-
-      if (aLoadInfo->GetForceHSTSPriming()) {
-        // don't log requests which might be upgraded due to HSTS Priming
-        // they get logged in nsHttpChannel::OnHSTSPrimingSucceeded or
-        // nsHttpChannel::OnHSTSPrimingFailed if the load is allowed to proceed.
-        aShouldUpgrade = false;
-        return NS_OK;
-      }
     }
 
     // enforce Strict-Transport-Security
@@ -2875,9 +3008,6 @@ NS_ShouldSecureUpgrade(nsIURI* aURI,
           case nsISiteSecurityService::SOURCE_ORGANIC_REQUEST:
               Telemetry::Accumulate(Telemetry::HSTS_UPGRADE_SOURCE, 1);
               break;
-          case nsISiteSecurityService::SOURCE_HSTS_PRIMING:
-              Telemetry::Accumulate(Telemetry::HSTS_UPGRADE_SOURCE, 2);
-              break;
           case nsISiteSecurityService::SOURCE_UNKNOWN:
           default:
               // record this as an organic request
@@ -2892,21 +3022,6 @@ NS_ShouldSecureUpgrade(nsIURI* aURI,
       Telemetry::Accumulate(Telemetry::HTTP_SCHEME_UPGRADE, 1);
     }
   } else {
-    if (aLoadInfo) {
-      if (aLoadInfo->GetIsHSTSPriming()) {
-        // don't log HSTS priming requests
-        aShouldUpgrade = false;
-        return NS_OK;
-      }
-
-      if (aLoadInfo->GetIsHSTSPrimingUpgrade()) {
-        // if the upgrade occured due to HSTS priming, it was logged in
-        // nsHttpChannel::OnHSTSPrimingSucceeded before redirect
-        aShouldUpgrade = false;
-        return NS_OK;
-      }
-    }
-
     Telemetry::Accumulate(Telemetry::HTTP_SCHEME_UPGRADE, 0);
   }
   aShouldUpgrade = false;
@@ -2916,24 +3031,20 @@ NS_ShouldSecureUpgrade(nsIURI* aURI,
 nsresult
 NS_GetSecureUpgradedURI(nsIURI* aURI, nsIURI** aUpgradedURI)
 {
-  nsCOMPtr<nsIURI> upgradedURI;
-
-  nsresult rv = aURI->Clone(getter_AddRefs(upgradedURI));
-  NS_ENSURE_SUCCESS(rv,rv);
-
-  // Change the scheme to HTTPS:
-  upgradedURI->SetScheme(NS_LITERAL_CSTRING("https"));
+  NS_MutateURI mutator(aURI);
+  mutator.SetScheme(NS_LITERAL_CSTRING("https")); // Change the scheme to HTTPS:
 
   // Change the default port to 443:
-  nsCOMPtr<nsIStandardURL> upgradedStandardURL = do_QueryInterface(upgradedURI);
-  if (upgradedStandardURL) {
-    upgradedStandardURL->SetDefaultPort(443);
+  nsCOMPtr<nsIStandardURL> stdURL = do_QueryInterface(aURI);
+  if (stdURL) {
+    mutator.Apply<nsIStandardURLMutator>(&nsIStandardURLMutator::SetDefaultPort, 443, nullptr);
   } else {
     // If we don't have a nsStandardURL, fall back to using GetPort/SetPort.
     // XXXdholbert Is this function even called with a non-nsStandardURL arg,
     // in practice?
+    NS_WARNING("Calling NS_GetSecureUpgradedURI for non nsStandardURL");
     int32_t oldPort = -1;
-    rv = aURI->GetPort(&oldPort);
+    nsresult rv = aURI->GetPort(&oldPort);
     if (NS_FAILED(rv)) return rv;
 
     // Keep any nonstandard ports so only the scheme is changed.
@@ -2942,14 +3053,13 @@ NS_GetSecureUpgradedURI(nsIURI* aURI, nsIURI** aUpgradedURI)
     //  http://foo.com:81 -> https://foo.com:81
 
     if (oldPort == 80 || oldPort == -1) {
-        upgradedURI->SetPort(-1);
+        mutator.SetPort(-1);
     } else {
-        upgradedURI->SetPort(oldPort);
+        mutator.SetPort(oldPort);
     }
   }
 
-  upgradedURI.forget(aUpgradedURI);
-  return NS_OK;
+  return mutator.Finalize(aUpgradedURI);
 }
 
 nsresult
@@ -3030,18 +3140,28 @@ NS_CompareLoadInfoAndLoadContext(nsIChannel *aChannel)
 }
 
 uint32_t
-NS_GetDefaultReferrerPolicy()
+NS_GetDefaultReferrerPolicy(bool privateBrowsing)
 {
   static bool preferencesInitialized = false;
 
   if (!preferencesInitialized) {
-    mozilla::Preferences::AddUintVarCache(&sUserControlRp,
-                                          "network.http.referer.userControlPolicy",
-                                          DEFAULT_USER_CONTROL_RP);
+    mozilla::Preferences::AddUintVarCache(&sDefaultRp,
+                                          "network.http.referer.defaultPolicy",
+                                          DEFAULT_RP);
+    mozilla::Preferences::AddUintVarCache(&defaultPrivateRp,
+                                          "network.http.referer.defaultPolicy.pbmode",
+                                          DEFAULT_PRIVATE_RP);
     preferencesInitialized = true;
   }
 
-  switch (sUserControlRp) {
+  uint32_t defaultToUse;
+  if (privateBrowsing) {
+      defaultToUse = defaultPrivateRp;
+  } else {
+      defaultToUse = sDefaultRp;
+  }
+
+  switch (defaultToUse) {
     case 0:
       return nsIHttpChannel::REFERRER_POLICY_NO_REFERRER;
     case 1:

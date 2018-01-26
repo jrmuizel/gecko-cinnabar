@@ -555,6 +555,14 @@ CreateHeaderBar(WidgetNodeType aWidgetType)
   // Emulate what create_titlebar() at gtkwindow.c does.
   GtkStyleContext* style = gtk_widget_get_style_context(headerbar);
   gtk_style_context_add_class(style, "titlebar");
+
+  // TODO: Define default-decoration titlebar style as workaround
+  // to ensure the titlebar buttons does not overflow outside.
+  // Recently the titlebar size is calculated as
+  // tab size + titlebar border/padding (default-decoration has 6px padding
+  // at default Adwaita theme).
+  // We need to fix titlebar size calculation to also include
+  // titlebar button sizes. (Bug 1419442)
   gtk_style_context_add_class(style, "default-decoration");
 
   return headerbar;
@@ -638,7 +646,7 @@ CreateWidget(WidgetNodeType aWidgetType)
       return CreateButtonArrowWidget();
     case MOZ_GTK_ENTRY:
       return CreateEntryWidget();
-    case MOZ_GTK_SCROLLED_WINDOW: 
+    case MOZ_GTK_SCROLLED_WINDOW:
       return CreateScrolledWindowWidget();
     case MOZ_GTK_TREEVIEW:
       return CreateTreeViewWidget();
@@ -1074,11 +1082,11 @@ GetCssNodeStyleInternal(WidgetNodeType aNodeType)
     case MOZ_GTK_SCALE_CONTENTS_VERTICAL:
       style = CreateChildCSSNode("contents",
                                  MOZ_GTK_SCALE_VERTICAL);
-      break; 
+      break;
     case MOZ_GTK_SCALE_TROUGH_HORIZONTAL:
       style = CreateChildCSSNode(GTK_STYLE_CLASS_TROUGH,
                                  MOZ_GTK_SCALE_CONTENTS_HORIZONTAL);
-      break; 
+      break;
     case MOZ_GTK_SCALE_TROUGH_VERTICAL:
       style = CreateChildCSSNode(GTK_STYLE_CLASS_TROUGH,
                                  MOZ_GTK_SCALE_CONTENTS_VERTICAL);
@@ -1113,7 +1121,7 @@ GetCssNodeStyleInternal(WidgetNodeType aNodeType)
     case MOZ_GTK_NOTEBOOK_HEADER:
     case MOZ_GTK_TABPANELS:
     case MOZ_GTK_TAB_SCROLLARROW:
-    { 
+    {
       // TODO - create from CSS node
       GtkWidget* widget = GetWidget(MOZ_GTK_NOTEBOOK);
       return gtk_widget_get_style_context(widget);
@@ -1258,7 +1266,7 @@ GetWidgetStyleInternal(WidgetNodeType aNodeType)
     case MOZ_GTK_NOTEBOOK_HEADER:
     case MOZ_GTK_TABPANELS:
     case MOZ_GTK_TAB_SCROLLARROW:
-    { 
+    {
       GtkWidget* widget = GetWidget(MOZ_GTK_NOTEBOOK);
       return gtk_widget_get_style_context(widget);
     }

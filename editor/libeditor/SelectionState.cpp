@@ -213,27 +213,31 @@ RangeUpdater::DropSelectionState(SelectionState& aSelState)
 // gravity methods:
 
 nsresult
-RangeUpdater::SelAdjCreateNode(nsINode* aParent,
-                               int32_t aPosition)
+RangeUpdater::SelAdjCreateNode(const EditorRawDOMPoint& aPoint)
 {
   if (mLock) {
     // lock set by Will/DidReplaceParent, etc...
     return NS_OK;
   }
-  NS_ENSURE_TRUE(aParent, NS_ERROR_NULL_POINTER);
   size_t count = mArray.Length();
   if (!count) {
     return NS_OK;
+  }
+
+  if (NS_WARN_IF(!aPoint.IsSetAndValid())) {
+    return NS_ERROR_FAILURE;
   }
 
   for (size_t i = 0; i < count; i++) {
     RangeItem* item = mArray[i];
     NS_ENSURE_TRUE(item, NS_ERROR_NULL_POINTER);
 
-    if (item->mStartContainer == aParent && item->mStartOffset > aPosition) {
+    if (item->mStartContainer == aPoint.GetContainer() &&
+        item->mStartOffset > static_cast<int32_t>(aPoint.Offset())) {
       item->mStartOffset++;
     }
-    if (item->mEndContainer == aParent && item->mEndOffset > aPosition) {
+    if (item->mEndContainer == aPoint.GetContainer() &&
+        item->mEndOffset > static_cast<int32_t>(aPoint.Offset())) {
       item->mEndOffset++;
     }
   }
@@ -241,10 +245,9 @@ RangeUpdater::SelAdjCreateNode(nsINode* aParent,
 }
 
 nsresult
-RangeUpdater::SelAdjInsertNode(nsINode* aParent,
-                               int32_t aPosition)
+RangeUpdater::SelAdjInsertNode(const EditorRawDOMPoint& aPoint)
 {
-  return SelAdjCreateNode(aParent, aPosition);
+  return SelAdjCreateNode(aPoint);
 }
 
 void
@@ -261,7 +264,7 @@ RangeUpdater::SelAdjDeleteNode(nsINode* aNode)
   }
 
   nsCOMPtr<nsINode> parent = aNode->GetParentNode();
-  int32_t offset = parent ? parent->IndexOf(aNode) : -1;
+  int32_t offset = parent ? parent->ComputeIndexOf(aNode) : -1;
 
   // check for range endpoints that are after aNode and in the same parent
   for (size_t i = 0; i < count; i++) {
@@ -320,7 +323,7 @@ RangeUpdater::SelAdjSplitNode(nsIContent& aRightNode,
   }
 
   EditorRawDOMPoint atLeftNode(aNewLeftNode);
-  nsresult rv = SelAdjInsertNode(atLeftNode.Container(), atLeftNode.Offset());
+  nsresult rv = SelAdjInsertNode(atLeftNode);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }

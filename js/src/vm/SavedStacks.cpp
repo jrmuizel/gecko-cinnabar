@@ -22,6 +22,7 @@
 #include "jsnum.h"
 #include "jsscript.h"
 
+#include "gc/FreeOp.h"
 #include "gc/Marking.h"
 #include "gc/Policy.h"
 #include "gc/Rooting.h"
@@ -221,7 +222,7 @@ class MOZ_STACK_CLASS SavedFrame::AutoLookupVector : public JS::CustomAutoRooter
   private:
     LookupVector lookups;
 
-    virtual void trace(JSTracer* trc) {
+    virtual void trace(JSTracer* trc) override {
         for (size_t i = 0; i < lookups.length(); i++)
             lookups[i].trace(trc);
     }

@@ -2341,9 +2341,13 @@ IonBuilder::inspectOpcode(JSOp op)
             pushConstant(UndefinedValue());
             return Ok();
         }
-
-        // Just fall through to the unsupported bytecode case.
-        break;
+        // Fallthrough to IMPLICITTHIS in non-syntactic scope case
+        MOZ_FALLTHROUGH;
+      case JSOP_IMPLICITTHIS:
+      {
+        PropertyName* name = info().getAtom(pc)->asPropertyName();
+        return jsop_implicitthis(name);
+      }
 
       case JSOP_NEWTARGET:
         return jsop_newtarget();
@@ -2443,7 +2447,6 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_FINALLY:
       case JSOP_GETRVAL:
       case JSOP_GOSUB:
-      case JSOP_IMPLICITTHIS:
       case JSOP_RETSUB:
       case JSOP_SETINTRINSIC:
       case JSOP_THROWMSG:
@@ -3429,7 +3432,7 @@ IonBuilder::powTrySpecialized(bool* emitted, MDefinition* base, MDefinition* pow
 
     // Cast to the right type
     if (outputType == MIRType::Int32 && output->type() != MIRType::Int32) {
-        MToInt32* toInt = MToInt32::New(alloc(), output);
+        auto* toInt = MToNumberInt32::New(alloc(), output);
         current->add(toInt);
         output = toInt;
     }
@@ -3750,7 +3753,7 @@ IonBuilder::inlineScriptedCall(CallInfo& callInfo, JSFunction* target)
     }
 
     // Capture formals in the outer resume point.
-    MOZ_TRY(callInfo.pushFormals(this, current));
+    MOZ_TRY(callInfo.pushCallStack(this, current));
 
     MResumePoint* outerResumePoint =
         MResumePoint::New(alloc(), current, pc, MResumePoint::Outer);
@@ -3759,7 +3762,7 @@ IonBuilder::inlineScriptedCall(CallInfo& callInfo, JSFunction* target)
     current->setOuterResumePoint(outerResumePoint);
 
     // Pop formals again, except leave |fun| on stack for duration of call.
-    callInfo.popFormals(current);
+    callInfo.popCallStack(current);
     current->push(callInfo.fun());
 
     JSScript* calleeScript = target->nonLazyScript();
@@ -4416,7 +4419,7 @@ IonBuilder::inlineGenericFallback(JSFunction* target, CallInfo& callInfo, MBasic
     CallInfo fallbackInfo(alloc(), pc, callInfo.constructing(), callInfo.ignoresReturnValue());
     if (!fallbackInfo.init(callInfo))
         return abort(AbortReason::Alloc);
-    fallbackInfo.popFormals(fallbackBlock);
+    fallbackInfo.popCallStack(fallbackBlock);
 
     // Generate an MCall, which uses stateful |current|.
     MOZ_TRY(setCurrentAndSpecializePhis(fallbackBlock));
@@ -4473,7 +4476,7 @@ IonBuilder::inlineObjectGroupFallback(CallInfo& callInfo, MBasicBlock* dispatchB
     MBasicBlock* prepBlock;
     MOZ_TRY_VAR(prepBlock, newBlock(dispatchBlock, pc));
     graph().addBlock(prepBlock);
-    fallbackInfo.popFormals(prepBlock);
+    fallbackInfo.popCallStack(prepBlock);
 
     // Construct a block into which the MGetPropertyCache can be moved.
     // This is subtle: the pc and resume point are those of the MGetPropertyCache!
@@ -4536,7 +4539,7 @@ IonBuilder::inlineCalls(CallInfo& callInfo, const InliningTargets& targets, Bool
 
     MBasicBlock* dispatchBlock = current;
     callInfo.setImplicitlyUsedUnchecked();
-    MOZ_TRY(callInfo.pushFormals(this, dispatchBlock));
+    MOZ_TRY(callInfo.pushCallStack(this, dispatchBlock));
 
     // Patch any InlinePropertyTable to only contain functions that are
     // inlineable. The InlinePropertyTable will also be patched at the end to
@@ -4569,7 +4572,7 @@ IonBuilder::inlineCalls(CallInfo& callInfo, const InliningTargets& targets, Bool
 
     // Set up stack, used to manually create a post-call resume point.
     returnBlock->inheritSlots(dispatchBlock);
-    callInfo.popFormals(returnBlock);
+    callInfo.popCallStack(returnBlock);
 
     MPhi* retPhi = MPhi::New(alloc());
     returnBlock->addPhi(retPhi);
@@ -4632,7 +4635,7 @@ IonBuilder::inlineCalls(CallInfo& callInfo, const InliningTargets& targets, Bool
         CallInfo inlineInfo(alloc(), pc, callInfo.constructing(), callInfo.ignoresReturnValue());
         if (!inlineInfo.init(callInfo))
             return abort(AbortReason::Alloc);
-        inlineInfo.popFormals(inlineBlock);
+        inlineInfo.popCallStack(inlineBlock);
         inlineInfo.setFun(funcDef);
 
         if (maybeCache) {
@@ -5265,6 +5268,20 @@ IonBuilder::jsop_funapplyarray(uint32_t argc)
 }
 
 AbortReasonOr<Ok>
+CallInfo::savePriorCallStack(MIRGenerator* mir, MBasicBlock* current, size_t peekDepth)
+{
+    MOZ_ASSERT(priorArgs_.empty());
+    if (!priorArgs_.reserve(peekDepth))
+        return mir->abort(AbortReason::Alloc);
+    while (peekDepth) {
+        priorArgs_.infallibleAppend(current->peek(0 - int32_t(peekDepth)));
+        peekDepth--;
+    }
+    return Ok();
+}
+
+
+AbortReasonOr<Ok>
 IonBuilder::jsop_funapplyarguments(uint32_t argc)
 {
     // Stack for JSOP_FUNAPPLY:
@@ -5319,6 +5336,7 @@ IonBuilder::jsop_funapplyarguments(uint32_t argc)
 
     CallInfo callInfo(alloc(), pc, /* constructing = */ false,
                       /* ignoresReturnValue = */ BytecodeIsPopped(pc));
+    MOZ_TRY(callInfo.savePriorCallStack(this, current, 4));
 
     // Vp
     MDefinition* vp = current->pop();
@@ -5420,7 +5438,7 @@ IonBuilder::jsop_call(uint32_t argc, bool constructing, bool ignoresReturnValue)
 AbortReasonOr<bool>
 IonBuilder::testShouldDOMCall(TypeSet* inTypes, JSFunction* func, JSJitInfo::OpType opType)
 {
-    if (!func->isNative() || !func->jitInfo())
+    if (!func->isNative() || !func->hasJitInfo())
         return false;
 
     // If all the DOM objects flowing through are legal with this
@@ -5511,6 +5529,7 @@ IonBuilder::makeCallHelper(JSFunction* target, CallInfo& callInfo)
         targetArgs = Max<uint32_t>(target->nargs(), callInfo.argc());
 
     bool isDOMCall = false;
+    DOMObjectKind objKind = DOMObjectKind::Unknown;
     if (target && !callInfo.constructing()) {
         // We know we have a single call target.  Check whether the "this" types
         // are DOM types and our function a DOM function, and if so flag the
@@ -5518,7 +5537,7 @@ IonBuilder::makeCallHelper(JSFunction* target, CallInfo& callInfo)
         TemporaryTypeSet* thisTypes = callInfo.thisArg()->resultTypeSet();
         if (thisTypes &&
             thisTypes->getKnownMIRType() == MIRType::Object &&
-            thisTypes->isDOMClass(constraints()))
+            thisTypes->isDOMClass(constraints(), &objKind))
         {
             MOZ_TRY_VAR(isDOMCall, testShouldDOMCall(thisTypes, target, JSJitInfo::Method));
         }
@@ -5526,7 +5545,7 @@ IonBuilder::makeCallHelper(JSFunction* target, CallInfo& callInfo)
 
     MCall* call = MCall::New(alloc(), target, targetArgs + 1 + callInfo.constructing(),
                              callInfo.argc(), callInfo.constructing(),
-                             callInfo.ignoresReturnValue(), isDOMCall);
+                             callInfo.ignoresReturnValue(), isDOMCall, objKind);
     if (!call)
         return abort(AbortReason::Alloc);
 
@@ -7074,8 +7093,7 @@ IonBuilder::testSingletonPropertyTypes(MDefinition* obj, jsid id)
         return nullptr;
     }
 
-    JSObject* proto = GetBuiltinPrototypePure(&script()->global(), key);
-    if (proto)
+    if (JSObject* proto = script()->global().maybeGetPrototype(key))
         return testSingletonProperty(proto, id);
 
     return nullptr;
@@ -7191,7 +7209,7 @@ IonBuilder::addTypeBarrier(MDefinition* def, TemporaryTypeSet* observed, Barrier
 AbortReasonOr<Ok>
 IonBuilder::pushDOMTypeBarrier(MInstruction* ins, TemporaryTypeSet* observed, JSFunction* func)
 {
-    MOZ_ASSERT(func && func->isNative() && func->jitInfo());
+    MOZ_ASSERT(func && func->isNative() && func->hasJitInfo());
 
     const JSJitInfo* jitinfo = func->jitInfo();
     bool barrier = DOMCallNeedsBarrier(jitinfo, observed);
@@ -7816,10 +7834,11 @@ IonBuilder::checkTypedObjectIndexInBounds(uint32_t elemSize,
                                           MDefinition* obj,
                                           MDefinition* index,
                                           TypedObjectPrediction objPrediction,
-                                          LinearSum* indexAsByteOffset)
+                                          LinearSum* indexAsByteOffset,
+                                          BoundsCheckKind kind)
 {
     // Ensure index is an integer.
-    MInstruction* idInt32 = MToInt32::New(alloc(), index);
+    MInstruction* idInt32 = MToNumberInt32::New(alloc(), index);
     current->add(idInt32);
 
     // If we know the length statically from the type, just embed it.
@@ -7843,7 +7862,7 @@ IonBuilder::checkTypedObjectIndexInBounds(uint32_t elemSize,
         return false;
     }
 
-    index = addBoundsCheck(idInt32, length);
+    index = addBoundsCheck(idInt32, length, kind);
 
     return indexAsByteOffset->add(index, AssertedCast<int32_t>(elemSize));
 }
@@ -7863,8 +7882,11 @@ IonBuilder::getElemTryScalarElemOfTypedObject(bool* emitted,
     MOZ_ASSERT(elemSize == ScalarTypeDescr::alignment(elemType));
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset))
+    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset,
+                                       BoundsCheckKind::IsLoad))
+    {
         return Ok();
+    }
 
     trackOptimizationSuccess();
     *emitted = true;
@@ -7885,8 +7907,11 @@ IonBuilder::getElemTryReferenceElemOfTypedObject(bool* emitted,
     uint32_t elemSize = ReferenceTypeDescr::size(elemType);
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset))
+    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset,
+                                       BoundsCheckKind::IsLoad))
+    {
         return Ok();
+    }
 
     trackOptimizationSuccess();
     *emitted = true;
@@ -8006,8 +8031,11 @@ IonBuilder::getElemTryComplexElemOfTypedObject(bool* emitted,
     MDefinition* elemTypeObj = typeObjectForElementFromArrayStructType(type);
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset))
+    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset,
+                                       BoundsCheckKind::IsLoad))
+    {
         return Ok();
+    }
 
     return pushDerivedTypedObject(emitted, obj, indexAsByteOffset,
                                   elemPrediction, elemTypeObj);
@@ -8291,14 +8319,14 @@ IonBuilder::getElemTryString(bool* emitted, MDefinition* obj, MDefinition* index
     }
 
     // Emit fast path for string[index].
-    MInstruction* idInt32 = MToInt32::New(alloc(), index);
+    MInstruction* idInt32 = MToNumberInt32::New(alloc(), index);
     current->add(idInt32);
     index = idInt32;
 
     MStringLength* length = MStringLength::New(alloc(), obj);
     current->add(length);
 
-    index = addBoundsCheck(index, length);
+    index = addBoundsCheck(index, length, BoundsCheckKind::IsLoad);
 
     MCharCodeAt* charCode = MCharCodeAt::New(alloc(), obj, index);
     current->add(charCode);
@@ -8335,12 +8363,12 @@ IonBuilder::getElemTryArguments(bool* emitted, MDefinition* obj, MDefinition* in
     current->add(length);
 
     // Ensure index is an integer.
-    MInstruction* idInt32 = MToInt32::New(alloc(), index);
+    MInstruction* idInt32 = MToNumberInt32::New(alloc(), index);
     current->add(idInt32);
     index = idInt32;
 
     // Bailouts if we read more than the number of actual arguments.
-    index = addBoundsCheck(index, length);
+    index = addBoundsCheck(index, length, BoundsCheckKind::IsLoad);
 
     // Load the argument from the actual arguments.
     bool modifiesArgs = script()->baselineScript()->modifiesArguments();
@@ -8420,7 +8448,7 @@ IonBuilder::getElemTryArgumentsInlinedIndex(bool* emitted, MDefinition* obj, MDe
     MOZ_ASSERT(!info().argsObjAliasesFormals());
 
     // Ensure index is an integer.
-    MInstruction* idInt32 = MToInt32::New(alloc(), index);
+    MInstruction* idInt32 = MToNumberInt32::New(alloc(), index);
     current->add(idInt32);
     index = idInt32;
 
@@ -8428,7 +8456,8 @@ IonBuilder::getElemTryArgumentsInlinedIndex(bool* emitted, MDefinition* obj, MDe
     // cannot re-enter because reading out of bounds arguments will disable the
     // lazy arguments optimization for this script, when this code would be
     // executed in Baseline. (see GetElemOptimizedArguments)
-    index = addBoundsCheck(index, constantInt(inlineCallInfo_->argc()));
+    index = addBoundsCheck(index, constantInt(inlineCallInfo_->argc()),
+                           BoundsCheckKind::IsLoad);
 
     // Get an instruction to represent the state of the argument vector.
     MInstruction* args = MArgumentState::New(alloc().fallible(), inlineCallInfo_->argv());
@@ -8584,7 +8613,7 @@ IonBuilder::jsop_getelem_dense(MDefinition* obj, MDefinition* index)
         knownType = GetElemKnownType(needsHoleCheck, types);
 
     // Ensure index is an integer.
-    MInstruction* idInt32 = MToInt32::New(alloc(), index);
+    MInstruction* idInt32 = MToNumberInt32::New(alloc(), index);
     current->add(idInt32);
     index = idInt32;
 
@@ -8627,7 +8656,7 @@ IonBuilder::jsop_getelem_dense(MDefinition* obj, MDefinition* index)
         // in-bounds elements, and the array is packed or its holes are not
         // read. This is the best case: we can separate the bounds check for
         // hoisting.
-        index = addBoundsCheck(index, initLength);
+        index = addBoundsCheck(index, initLength, BoundsCheckKind::IsLoad);
 
         load = MLoadElement::New(alloc(), elements, index, needsHoleCheck, loadDouble);
         current->add(load);
@@ -8666,7 +8695,8 @@ void
 IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
                                        BoundsChecking checking,
                                        MDefinition** index,
-                                       MInstruction** length, MInstruction** elements)
+                                       MInstruction** length, MInstruction** elements,
+                                       BoundsCheckKind boundsCheckKind)
 {
     MOZ_ASSERT((index != nullptr) == (elements != nullptr));
 
@@ -8700,7 +8730,7 @@ IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
 
                 if (index) {
                     if (checking == DoBoundsCheck)
-                        *index = addBoundsCheck(*index, *length);
+                        *index = addBoundsCheck(*index, *length, boundsCheckKind);
 
                     *elements = MConstantElements::New(alloc(), data);
                     current->add(*elements);
@@ -8715,7 +8745,7 @@ IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
 
     if (index) {
         if (checking == DoBoundsCheck)
-            *index = addBoundsCheck(*index, *length);
+            *index = addBoundsCheck(*index, *length, boundsCheckKind);
 
         *elements = MTypedArrayElements::New(alloc(), obj);
         current->add(*elements);
@@ -8780,7 +8810,7 @@ IonBuilder::jsop_getelem_typed(MDefinition* obj, MDefinition* index,
     bool allowDouble = types->hasType(TypeSet::DoubleType());
 
     // Ensure id is an integer.
-    MInstruction* idInt32 = MToInt32::New(alloc(), index);
+    MInstruction* idInt32 = MToNumberInt32::New(alloc(), index);
     current->add(idInt32);
     index = idInt32;
 
@@ -8797,7 +8827,8 @@ IonBuilder::jsop_getelem_typed(MDefinition* obj, MDefinition* index,
         // Get length, bounds-check, then get elements, and add all instructions.
         MInstruction* length;
         MInstruction* elements;
-        addTypedArrayLengthAndData(obj, DoBoundsCheck, &index, &length, &elements);
+        addTypedArrayLengthAndData(obj, DoBoundsCheck, &index, &length, &elements,
+                                   BoundsCheckKind::IsLoad);
 
         // Load the element.
         MLoadUnboxedScalar* load = MLoadUnboxedScalar::New(alloc(), elements, index, arrayType);
@@ -8982,8 +9013,11 @@ IonBuilder::setElemTryReferenceElemOfTypedObject(bool* emitted,
     uint32_t elemSize = ReferenceTypeDescr::size(elemType);
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset))
+    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset,
+                                       BoundsCheckKind::IsStore))
+    {
         return Ok();
+    }
 
     return setPropTryReferenceTypedObjectValue(emitted, obj, indexAsByteOffset,
                                                elemType, value, nullptr);
@@ -9003,8 +9037,11 @@ IonBuilder::setElemTryScalarElemOfTypedObject(bool* emitted,
     MOZ_ASSERT(elemSize == ScalarTypeDescr::alignment(elemType));
 
     LinearSum indexAsByteOffset(alloc());
-    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset))
+    if (!checkTypedObjectIndexInBounds(elemSize, obj, index, objPrediction, &indexAsByteOffset,
+                                       BoundsCheckKind::IsStore))
+    {
         return Ok();
+    }
 
     return setPropTryScalarTypedObjectValue(emitted, obj, indexAsByteOffset, elemType, value);
 }
@@ -9233,7 +9270,7 @@ IonBuilder::initOrSetElemDense(TemporaryTypeSet::DoubleConversion conversion,
     *emitted = true;
 
     // Ensure id is an integer.
-    MInstruction* idInt32 = MToInt32::New(alloc(), id);
+    MInstruction* idInt32 = MToNumberInt32::New(alloc(), id);
     current->add(idInt32);
     id = idInt32;
 
@@ -9300,7 +9337,7 @@ IonBuilder::initOrSetElemDense(TemporaryTypeSet::DoubleConversion conversion,
     } else {
         MInstruction* initLength = initializedLength(obj, elements);
 
-        id = addBoundsCheck(id, initLength);
+        id = addBoundsCheck(id, initLength, BoundsCheckKind::IsStore);
         bool needsHoleCheck = !packed && hasExtraIndexedProperty;
 
         MStoreElement* ins = MStoreElement::New(alloc(), elements, id, newValue, needsHoleCheck);
@@ -9340,7 +9377,7 @@ IonBuilder::jsop_setelem_typed(Scalar::Type arrayType,
         spew("Emitting OOB TypedArray SetElem");
 
     // Ensure id is an integer.
-    MInstruction* idInt32 = MToInt32::New(alloc(), id);
+    MInstruction* idInt32 = MToNumberInt32::New(alloc(), id);
     current->add(idInt32);
     id = idInt32;
 
@@ -9348,7 +9385,8 @@ IonBuilder::jsop_setelem_typed(Scalar::Type arrayType,
     MInstruction* length;
     MInstruction* elements;
     BoundsChecking checking = expectOOB ? SkipBoundsCheck : DoBoundsCheck;
-    addTypedArrayLengthAndData(obj, checking, &id, &length, &elements);
+    addTypedArrayLengthAndData(obj, checking, &id, &length, &elements,
+                               BoundsCheckKind::IsStore);
 
     // Clamp value to [0, 255] for Uint8ClampedArray.
     MDefinition* toWrite = value;
@@ -9803,6 +9841,11 @@ IonBuilder::jsop_getelem_super()
     MDefinition* obj = current->pop();
     MDefinition* receiver = current->pop();
     MDefinition* id = current->pop();
+
+#if defined(JS_CODEGEN_X86)
+    if (instrumentedProfiling())
+        return abort(AbortReason::Disable, "profiling functions with GETELEM_SUPER is disabled on x86");
+#endif
 
     auto* ins = MGetPropSuperCache::New(alloc(), obj, receiver, id);
     current->add(ins);
@@ -10827,7 +10870,12 @@ IonBuilder::getPropTryModuleNamespace(bool* emitted, MDefinition* obj, PropertyN
     MConstant* envConst = constant(ObjectValue(*env));
     uint32_t slot = shape->slot();
     uint32_t nfixed = env->numFixedSlots();
-    MOZ_TRY(loadSlot(envConst, slot, nfixed, types->getKnownMIRType(), barrier, types));
+
+    MIRType rvalType = types->getKnownMIRType();
+    if (barrier != BarrierKind::NoBarrier || IsNullOrUndefined(rvalType))
+        rvalType = MIRType::Value;
+
+    MOZ_TRY(loadSlot(envConst, slot, nfixed, rvalType, barrier, types));
 
     trackOptimizationSuccess();
     *emitted = true;
@@ -11004,7 +11052,8 @@ IonBuilder::getPropTryCommonGetter(bool* emitted, MDefinition* obj, PropertyName
         }
     }
 
-    bool isDOM = objTypes && objTypes->isDOMClass(constraints());
+    DOMObjectKind objKind = DOMObjectKind::Unknown;
+    bool isDOM = objTypes && objTypes->isDOMClass(constraints(), &objKind);
     if (isDOM)
         MOZ_TRY_VAR(isDOM, testShouldDOMCall(objTypes, commonGetter, JSJitInfo::Getter));
 
@@ -11014,8 +11063,9 @@ IonBuilder::getPropTryCommonGetter(bool* emitted, MDefinition* obj, PropertyName
         // be proxies when the value might be in a slot, because the
         // CodeGenerator code for LGetDOMProperty/LGetDOMMember doesn't handle
         // that case correctly.
-        if ((!jitinfo->isAlwaysInSlot && !jitinfo->isLazilyCachedInSlot) ||
-            !objTypes->maybeProxy(constraints())) {
+        if (objKind == DOMObjectKind::Native ||
+            (!jitinfo->isAlwaysInSlot && !jitinfo->isLazilyCachedInSlot))
+        {
             MInstruction* get;
             if (jitinfo->isAlwaysInSlot) {
                 // If our object is a singleton and we know the property is
@@ -11035,7 +11085,7 @@ IonBuilder::getPropTryCommonGetter(bool* emitted, MDefinition* obj, PropertyName
                 // needed.
                 get = MGetDOMMember::New(alloc(), jitinfo, obj, guard, globalGuard);
             } else {
-                get = MGetDOMProperty::New(alloc(), jitinfo, obj, guard, globalGuard);
+                get = MGetDOMProperty::New(alloc(), jitinfo, objKind, obj, guard, globalGuard);
             }
             if (!get)
                 return abort(AbortReason::Alloc);
@@ -11707,7 +11757,8 @@ IonBuilder::setPropTryCommonDOMSetter(bool* emitted, MDefinition* obj,
 {
     MOZ_ASSERT(*emitted == false);
 
-    if (!objTypes || !objTypes->isDOMClass(constraints()))
+    DOMObjectKind objKind = DOMObjectKind::Unknown;
+    if (!objTypes || !objTypes->isDOMClass(constraints(), &objKind))
         return Ok();
 
     bool isDOM = false;
@@ -11717,7 +11768,8 @@ IonBuilder::setPropTryCommonDOMSetter(bool* emitted, MDefinition* obj,
 
     // Emit SetDOMProperty.
     MOZ_ASSERT(setter->jitInfo()->type() == JSJitInfo::Setter);
-    MSetDOMProperty* set = MSetDOMProperty::New(alloc(), setter->jitInfo()->setter, obj, value);
+    MSetDOMProperty* set = MSetDOMProperty::New(alloc(), setter->jitInfo()->setter, objKind,
+                                                obj, value);
 
     current->add(set);
     current->push(value);
@@ -12856,7 +12908,7 @@ IonBuilder::inTryDense(bool* emitted, MDefinition* obj, MDefinition* id)
     bool needsHoleCheck = !ElementAccessIsPacked(constraints(), obj);
 
     // Ensure id is an integer.
-    MInstruction* idInt32 = MToInt32::New(alloc(), id);
+    MInstruction* idInt32 = MToNumberInt32::New(alloc(), id);
     current->add(idInt32);
     id = idInt32;
 
@@ -12868,7 +12920,7 @@ IonBuilder::inTryDense(bool* emitted, MDefinition* obj, MDefinition* id)
 
     // If there are no holes, speculate the InArray check will not fail.
     if (!needsHoleCheck && !failedBoundsCheck_) {
-        addBoundsCheck(idInt32, initLength);
+        addBoundsCheck(idInt32, initLength, BoundsCheckKind::UnusedIndex);
         pushConstant(BooleanValue(true));
         return Ok();
     }
@@ -13182,6 +13234,18 @@ IonBuilder::jsop_debugger()
     return resumeAt(debugger, pc);
 }
 
+AbortReasonOr<Ok>
+IonBuilder::jsop_implicitthis(PropertyName* name)
+{
+    MOZ_ASSERT(usesEnvironmentChain());
+
+    MImplicitThis* implicitThis = MImplicitThis::New(alloc(), current->environmentChain(), name);
+    current->add(implicitThis);
+    current->push(implicitThis);
+
+    return resumeAfter(implicitThis);
+}
+
 MInstruction*
 IonBuilder::addConvertElementsToDoubles(MDefinition* elements)
 {
@@ -13201,7 +13265,7 @@ IonBuilder::addMaybeCopyElementsForWrite(MDefinition* object, bool checkNative)
 }
 
 MInstruction*
-IonBuilder::addBoundsCheck(MDefinition* index, MDefinition* length)
+IonBuilder::addBoundsCheck(MDefinition* index, MDefinition* length, BoundsCheckKind kind)
 {
     MInstruction* check = MBoundsCheck::New(alloc(), index, length);
     current->add(check);
@@ -13209,6 +13273,11 @@ IonBuilder::addBoundsCheck(MDefinition* index, MDefinition* length)
     // If a bounds check failed in the past, don't optimize bounds checks.
     if (failedBoundsCheck_)
         check->setNotMovable();
+
+    if (kind == BoundsCheckKind::IsLoad && JitOptions.spectreIndexMasking) {
+        check = MSpectreMaskIndex::New(alloc(), check, length);
+        current->add(check);
+    }
 
     return check;
 }

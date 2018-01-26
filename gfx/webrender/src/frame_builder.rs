@@ -2,16 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{BorderDetails, BorderDisplayItem, BuiltDisplayList};
-use api::{ClipAndScrollInfo, ClipId, ColorF, PropertyBinding};
-use api::{DeviceUintPoint, DeviceUintRect, DeviceUintSize};
-use api::{DocumentLayer, ExtendMode, FontRenderMode, LayoutTransform};
-use api::{GlyphInstance, GlyphOptions, GradientStop, HitTestFlags, HitTestItem, HitTestResult};
-use api::{ImageKey, ImageRendering, ItemRange, ItemTag, LayerPoint, LayerPrimitiveInfo, LayerRect};
-use api::{LayerSize, LayerToScrollTransform, LayerVector2D, LayoutVector2D, LineOrientation};
-use api::{LineStyle, LocalClip, PipelineId, RepeatMode};
-use api::{ScrollSensitivity, Shadow, TileOffset, TransformStyle};
-use api::{PremultipliedColorF, WorldPoint, YuvColorSpace, YuvData};
+use api::{AlphaType, BorderDetails, BorderDisplayItem, BuiltDisplayList, ClipAndScrollInfo, ClipId};
+use api::{ColorF, ColorU, DeviceIntPoint, DevicePixelScale, DeviceUintPoint, DeviceUintRect};
+use api::{DeviceUintSize, DocumentLayer, ExtendMode, FontRenderMode, GlyphInstance, GlyphOptions};
+use api::{GradientStop, HitTestFlags, HitTestItem, HitTestResult, ImageKey, ImageRendering};
+use api::{Epoch, ItemRange, ItemTag, LayerPoint, LayerPrimitiveInfo, LayerRect, LayerSize};
+use api::{LayerTransform, LayerVector2D, LayoutTransform, LayoutVector2D, LineOrientation};
+use api::{LineStyle, LocalClip, PipelineId, PremultipliedColorF, PropertyBinding, RepeatMode};
+use api::{ScrollSensitivity, Shadow, TexelRect, TileOffset, TransformStyle, WorldPoint};
+use api::{DeviceIntRect, DeviceIntSize, YuvColorSpace, YuvData};
 use app_units::Au;
 use border::ImageBorderSegment;
 use clip::{ClipRegion, ClipSource, ClipSources, ClipStore, Contains};
@@ -21,22 +20,21 @@ use euclid::{SideOffsets2D, vec2};
 use frame::FrameId;
 use glyph_rasterizer::FontInstance;
 use gpu_cache::GpuCache;
-use gpu_types::ClipScrollNodeData;
-use internal_types::{FastHashMap, FastHashSet};
-use picture::{PictureCompositeMode, PictureKind, PicturePrimitive, RasterizationSpace};
-use prim_store::{BrushAntiAliasMode, BrushKind, BrushPrimitive, TexelRect, YuvImagePrimitiveCpu};
-use prim_store::{GradientPrimitiveCpu, ImagePrimitiveCpu, LinePrimitive, PrimitiveKind};
+use gpu_types::{ClipScrollNodeData, PictureType};
+use internal_types::{FastHashMap, FastHashSet, RenderPassIndex};
+use picture::{ContentOrigin, PictureCompositeMode, PictureKind, PicturePrimitive, PictureSurface};
+use prim_store::{BrushKind, BrushPrimitive, ImageCacheKey, YuvImagePrimitiveCpu};
+use prim_store::{GradientPrimitiveCpu, ImagePrimitiveCpu, ImageSource, PrimitiveKind};
 use prim_store::{PrimitiveContainer, PrimitiveIndex, SpecificPrimitiveIndex};
 use prim_store::{PrimitiveStore, RadialGradientPrimitiveCpu};
 use prim_store::{BrushSegmentDescriptor, TextRunPrimitiveCpu};
 use profiler::{FrameProfileCounters, GpuCacheProfileCounters, TextureCacheProfileCounters};
-use render_task::{ClearMode, RenderTask, RenderTaskId, RenderTaskTree};
+use render_task::{ClearMode, ClipChain, RenderTask, RenderTaskId, RenderTaskTree};
 use resource_cache::ResourceCache;
 use scene::{ScenePipeline, SceneProperties};
 use std::{mem, usize, f32};
-use tiling::{CompositeOps, Frame};
-use tiling::{RenderPass, RenderPassKind, RenderTargetKind};
-use tiling::{RenderTargetContext, ScrollbarPrimitive};
+use tiling::{CompositeOps, Frame, RenderPass, RenderTargetKind};
+use tiling::{RenderPassKind, RenderTargetContext, ScrollbarPrimitive};
 use util::{self, MaxRect, pack_as_float, RectHelpers, recycle_vec};
 
 #[derive(Debug)]
@@ -69,10 +67,13 @@ struct StackingContext {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(feature = "capture", derive(Serialize, Deserialize))]
 pub struct FrameBuilderConfig {
     pub enable_scrollbars: bool,
     pub default_font_render_mode: FontRenderMode,
     pub debug: bool,
+    pub dual_source_blending_is_supported: bool,
+    pub dual_source_blending_is_enabled: bool,
 }
 
 #[derive(Debug)]
@@ -125,23 +126,23 @@ pub struct FrameBuilder {
 }
 
 pub struct PrimitiveContext<'a> {
-    pub device_pixel_ratio: f32,
+    pub device_pixel_scale: DevicePixelScale,
     pub display_list: &'a BuiltDisplayList,
-    pub clip_node: &'a ClipScrollNode,
+    pub clip_chain: Option<&'a ClipChain>,
     pub scroll_node: &'a ClipScrollNode,
 }
 
 impl<'a> PrimitiveContext<'a> {
     pub fn new(
-        device_pixel_ratio: f32,
+        device_pixel_scale: DevicePixelScale,
         display_list: &'a BuiltDisplayList,
-        clip_node: &'a ClipScrollNode,
+        clip_chain: Option<&'a ClipChain>,
         scroll_node: &'a ClipScrollNode,
     ) -> Self {
         PrimitiveContext {
-            device_pixel_ratio,
+            device_pixel_scale,
             display_list,
-            clip_node,
+            clip_chain,
             scroll_node,
         }
     }
@@ -165,6 +166,8 @@ impl FrameBuilder {
                 enable_scrollbars: false,
                 default_font_render_mode: FontRenderMode::Mono,
                 debug: false,
+                dual_source_blending_is_enabled: true,
+                dual_source_blending_is_supported: false,
             },
         }
     }
@@ -202,7 +205,8 @@ impl FrameBuilder {
     ) -> PrimitiveIndex {
         if let &LocalClip::RoundedRect(main, region) = &info.local_clip {
             clip_sources.push(ClipSource::Rectangle(main));
-            clip_sources.push(ClipSource::RoundedRectangle(
+
+            clip_sources.push(ClipSource::new_rounded_rect(
                 region.rect,
                 region.radii,
                 region.mode,
@@ -586,46 +590,20 @@ impl FrameBuilder {
 
     pub fn setup_viewport_offset(
         &mut self,
-        window_size: DeviceUintSize,
         inner_rect: DeviceUintRect,
-        device_pixel_ratio: f32,
+        device_pixel_scale: DevicePixelScale,
         clip_scroll_tree: &mut ClipScrollTree,
     ) {
-        let inner_origin = inner_rect.origin.to_f32();
-        let viewport_offset = LayerPoint::new(
-            (inner_origin.x / device_pixel_ratio).round(),
-            (inner_origin.y / device_pixel_ratio).round(),
-        );
-        let outer_size = window_size.to_f32();
-        let outer_size = LayerSize::new(
-            (outer_size.width / device_pixel_ratio).round(),
-            (outer_size.height / device_pixel_ratio).round(),
-        );
-        let clip_size = LayerSize::new(
-            outer_size.width + 2.0 * viewport_offset.x,
-            outer_size.height + 2.0 * viewport_offset.y,
-        );
-
-        let viewport_clip = LayerRect::new(
-            LayerPoint::new(-viewport_offset.x, -viewport_offset.y),
-            LayerSize::new(clip_size.width, clip_size.height),
-        );
-
+        let viewport_offset = (inner_rect.origin.to_vector().to_f32() / device_pixel_scale).round();
         let root_id = clip_scroll_tree.root_reference_frame_id();
         if let Some(root_node) = clip_scroll_tree.nodes.get_mut(&root_id) {
             if let NodeType::ReferenceFrame(ref mut info) = root_node.node_type {
-                info.resolved_transform = LayerToScrollTransform::create_translation(
+                info.resolved_transform = LayerTransform::create_translation(
                     viewport_offset.x,
                     viewport_offset.y,
                     0.0,
                 );
             }
-            root_node.local_clip_rect = viewport_clip;
-        }
-
-        let clip_id = clip_scroll_tree.topmost_scrolling_node_id();
-        if let Some(root_node) = clip_scroll_tree.nodes.get_mut(&clip_id) {
-            root_node.local_clip_rect = viewport_clip;
         }
     }
 
@@ -757,8 +735,7 @@ impl FrameBuilder {
         clip_and_scroll: ClipAndScrollInfo,
         info: &LayerPrimitiveInfo,
         color: ColorF,
-        segments: Option<Box<BrushSegmentDescriptor>>,
-        aa_mode: BrushAntiAliasMode,
+        segments: Option<BrushSegmentDescriptor>,
     ) {
         if color.a == 0.0 {
             // Don't add transparent rectangles to the draw list, but do consider them for hit
@@ -772,7 +749,6 @@ impl FrameBuilder {
                 color,
             },
             segments,
-            aa_mode,
         );
 
         self.add_primitive(
@@ -791,7 +767,6 @@ impl FrameBuilder {
         let prim = BrushPrimitive::new(
             BrushKind::Clear,
             None,
-            BrushAntiAliasMode::Primitive,
         );
 
         self.add_primitive(
@@ -818,7 +793,6 @@ impl FrameBuilder {
                 color,
             },
             None,
-            BrushAntiAliasMode::Primitive,
         );
 
         let prim_index = self.add_primitive(
@@ -844,12 +818,15 @@ impl FrameBuilder {
         line_color: &ColorF,
         style: LineStyle,
     ) {
-        let line = LinePrimitive {
-            wavy_line_thickness,
-            color: line_color.premultiplied(),
-            style,
-            orientation,
-        };
+        let line = BrushPrimitive::new(
+            BrushKind::Line {
+                wavy_line_thickness,
+                color: line_color.premultiplied(),
+                style,
+                orientation,
+            },
+            None,
+        );
 
         let mut fast_shadow_prims = Vec::new();
         for (idx, &(shadow_prim_index, _)) in self.shadow_prim_stack.iter().enumerate() {
@@ -864,14 +841,23 @@ impl FrameBuilder {
         }
 
         for (idx, shadow_offset, shadow_color) in fast_shadow_prims {
-            let mut line = line.clone();
-            line.color = shadow_color.premultiplied();
+            let line = BrushPrimitive::new(
+                BrushKind::Line {
+                    wavy_line_thickness,
+                    color: shadow_color.premultiplied(),
+                    style,
+                    orientation,
+                },
+                None,
+            );
             let mut info = info.clone();
             info.rect = info.rect.translate(&shadow_offset);
+            info.local_clip =
+              LocalClip::from(info.local_clip.clip_rect().translate(&shadow_offset));
             let prim_index = self.create_primitive(
                 &info,
                 Vec::new(),
-                PrimitiveContainer::Line(line),
+                PrimitiveContainer::Brush(line),
             );
             self.shadow_prim_stack[idx].1.push((prim_index, clip_and_scroll));
         }
@@ -879,7 +865,7 @@ impl FrameBuilder {
         let prim_index = self.create_primitive(
             &info,
             Vec::new(),
-            PrimitiveContainer::Line(line),
+            PrimitiveContainer::Brush(line),
         );
 
         if line_color.a > 0.0 {
@@ -1108,11 +1094,12 @@ impl FrameBuilder {
                     self.add_image(
                         clip_and_scroll,
                         &info,
-                        &segment.stretch_size,
-                        &segment.tile_spacing,
+                        segment.stretch_size,
+                        segment.tile_spacing,
                         Some(segment.sub_rect),
                         border.image_key,
                         ImageRendering::Auto,
+                        AlphaType::PremultipliedAlpha,
                         None,
                     );
                 }
@@ -1308,8 +1295,10 @@ impl FrameBuilder {
         let mut render_mode = self.config
             .default_font_render_mode
             .limit_by(font.render_mode);
+        let mut flags = font.flags;
         if let Some(options) = glyph_options {
             render_mode = render_mode.limit_by(options.render_mode);
+            flags |= options.flags;
         }
 
         // There are some conditions under which we can't use
@@ -1334,7 +1323,7 @@ impl FrameBuilder {
             font.bg_color,
             render_mode,
             font.subpx_dir,
-            font.flags,
+            flags,
             font.platform_options,
             font.variations.clone(),
         );
@@ -1345,6 +1334,7 @@ impl FrameBuilder {
             glyph_gpu_blocks: Vec::new(),
             glyph_keys: Vec::new(),
             offset: run_offset,
+            shadow_color: ColorU::new(0, 0, 0, 0),
         };
 
         // Text shadows that have a blur radius of 0 need to be rendered as normal
@@ -1362,7 +1352,7 @@ impl FrameBuilder {
             match picture_prim.kind {
                 PictureKind::TextShadow { offset, color, blur_radius, .. } if blur_radius == 0.0 => {
                     let mut text_prim = prim.clone();
-                    text_prim.font.color = color.into();
+                    text_prim.shadow_color = color.into();
                     text_prim.offset += offset;
                     fast_shadow_prims.push((idx, text_prim));
                 }
@@ -1374,6 +1364,8 @@ impl FrameBuilder {
             let rect = info.rect;
             let mut info = info.clone();
             info.rect = rect.translate(&text_prim.offset);
+            info.local_clip =
+              LocalClip::from(info.local_clip.clip_rect().translate(&text_prim.offset));
             let prim_index = self.create_primitive(
                 &info,
                 Vec::new(),
@@ -1430,39 +1422,45 @@ impl FrameBuilder {
         &mut self,
         clip_and_scroll: ClipAndScrollInfo,
         info: &LayerPrimitiveInfo,
-        stretch_size: &LayerSize,
-        tile_spacing: &LayerSize,
+        stretch_size: LayerSize,
+        mut tile_spacing: LayerSize,
         sub_rect: Option<TexelRect>,
         image_key: ImageKey,
         image_rendering: ImageRendering,
-        tile: Option<TileOffset>,
+        alpha_type: AlphaType,
+        tile_offset: Option<TileOffset>,
     ) {
-        let sub_rect_block = sub_rect.unwrap_or(TexelRect::invalid()).into();
-
         // If the tile spacing is the same as the rect size,
         // then it is effectively zero. We use this later on
         // in prim_store to detect if an image can be considered
         // opaque.
-        let tile_spacing = if *tile_spacing == info.rect.size {
-            LayerSize::zero()
-        } else {
-            *tile_spacing
-        };
+        if tile_spacing == info.rect.size {
+            tile_spacing = LayerSize::zero();
+        }
 
         let prim_cpu = ImagePrimitiveCpu {
-            image_key,
-            image_rendering,
-            tile_offset: tile,
             tile_spacing,
-            gpu_blocks: [
-                [
-                    stretch_size.width,
-                    stretch_size.height,
-                    tile_spacing.width,
-                    tile_spacing.height,
-                ].into(),
-                sub_rect_block,
-            ],
+            alpha_type,
+            stretch_size,
+            current_epoch: Epoch::invalid(),
+            source: ImageSource::Default,
+            key: ImageCacheKey {
+                image_key,
+                image_rendering,
+                tile_offset,
+                texel_rect: sub_rect.map(|texel_rect| {
+                    DeviceIntRect::new(
+                        DeviceIntPoint::new(
+                            texel_rect.uv0.x as i32,
+                            texel_rect.uv0.y as i32,
+                        ),
+                        DeviceIntSize::new(
+                            (texel_rect.uv1.x - texel_rect.uv0.x) as i32,
+                            (texel_rect.uv1.y - texel_rect.uv0.y) as i32,
+                        ),
+                    )
+                }),
+            },
         };
 
         self.add_primitive(
@@ -1483,9 +1481,9 @@ impl FrameBuilder {
     ) {
         let format = yuv_data.get_format();
         let yuv_key = match yuv_data {
-            YuvData::NV12(plane_0, plane_1) => [plane_0, plane_1, ImageKey::dummy()],
+            YuvData::NV12(plane_0, plane_1) => [plane_0, plane_1, ImageKey::DUMMY],
             YuvData::PlanarYCbCr(plane_0, plane_1, plane_2) => [plane_0, plane_1, plane_2],
-            YuvData::InterleavedYCbCr(plane_0) => [plane_0, ImageKey::dummy(), ImageKey::dummy()],
+            YuvData::InterleavedYCbCr(plane_0) => [plane_0, ImageKey::DUMMY, ImageKey::DUMMY],
         };
 
         let prim_cpu = YuvImagePrimitiveCpu {
@@ -1583,9 +1581,10 @@ impl FrameBuilder {
         gpu_cache: &mut GpuCache,
         render_tasks: &mut RenderTaskTree,
         profile_counters: &mut FrameProfileCounters,
-        device_pixel_ratio: f32,
+        device_pixel_scale: DevicePixelScale,
         scene_properties: &SceneProperties,
         node_data: &[ClipScrollNodeData],
+        local_rects: &mut Vec<LayerRect>,
     ) -> Option<RenderTaskId> {
         profile_scope!("cull");
 
@@ -1603,9 +1602,9 @@ impl FrameBuilder {
             .display_list;
 
         let root_prim_context = PrimitiveContext::new(
-            device_pixel_ratio,
+            device_pixel_scale,
             display_list,
-            root_clip_scroll_node,
+            root_clip_scroll_node.clip_chain.as_ref(),
             root_clip_scroll_node,
         );
 
@@ -1629,6 +1628,7 @@ impl FrameBuilder {
             SpecificPrimitiveIndex(0),
             &self.screen_rect.to_i32(),
             node_data,
+            local_rects,
         );
 
         let pic = &mut self.prim_store.cpu_pictures[0];
@@ -1638,17 +1638,16 @@ impl FrameBuilder {
             None,
             PrimitiveIndex(0),
             RenderTargetKind::Color,
-            0.0,
-            0.0,
+            ContentOrigin::Screen(DeviceIntPoint::zero()),
             PremultipliedColorF::TRANSPARENT,
             ClearMode::Transparent,
-            RasterizationSpace::Screen,
             child_tasks,
-            None,
+            PictureType::Image,
         );
 
-        pic.render_task_id = Some(render_tasks.add(root_render_task));
-        pic.render_task_id
+        let render_task_id = render_tasks.add(root_render_task);
+        pic.surface = Some(PictureSurface::RenderTask(render_task_id));
+        Some(render_task_id)
     }
 
     fn update_scroll_bars(&mut self, clip_scroll_tree: &ClipScrollTree, gpu_cache: &mut GpuCache) {
@@ -1688,9 +1687,9 @@ impl FrameBuilder {
         clip_scroll_tree: &mut ClipScrollTree,
         pipelines: &FastHashMap<PipelineId, ScenePipeline>,
         window_size: DeviceUintSize,
-        device_pixel_ratio: f32,
+        device_pixel_scale: DevicePixelScale,
         layer: DocumentLayer,
-        pan: LayerPoint,
+        pan: WorldPoint,
         texture_cache_profile: &mut TextureCacheProfileCounters,
         gpu_cache_profile: &mut GpuCacheProfileCounters,
         scene_properties: &SceneProperties,
@@ -1710,9 +1709,14 @@ impl FrameBuilder {
         gpu_cache.begin_frame();
 
         let mut node_data = Vec::with_capacity(clip_scroll_tree.nodes.len());
+        let total_prim_runs =
+            self.prim_store.cpu_pictures.iter().fold(1, |count, ref pic| count + pic.runs.len());
+        let mut clip_chain_local_clip_rects = Vec::with_capacity(total_prim_runs);
+        clip_chain_local_clip_rects.push(LayerRect::max_rect());
+
         clip_scroll_tree.update_tree(
             &self.screen_rect.to_i32(),
-            device_pixel_ratio,
+            device_pixel_scale,
             &mut self.clip_store,
             resource_cache,
             gpu_cache,
@@ -1732,9 +1736,10 @@ impl FrameBuilder {
             gpu_cache,
             &mut render_tasks,
             &mut profile_counters,
-            device_pixel_ratio,
+            device_pixel_scale,
             scene_properties,
             &node_data,
+            &mut clip_chain_local_clip_rects,
         );
 
         let mut passes = Vec::new();
@@ -1760,14 +1765,18 @@ impl FrameBuilder {
         }
 
         let mut deferred_resolves = vec![];
+        let mut has_texture_cache_tasks = false;
+        let use_dual_source_blending = self.config.dual_source_blending_is_enabled &&
+                                       self.config.dual_source_blending_is_supported;
 
-        for pass in &mut passes {
+        for (pass_index, pass) in passes.iter_mut().enumerate() {
             let ctx = RenderTargetContext {
-                device_pixel_ratio,
+                device_pixel_scale,
                 prim_store: &self.prim_store,
                 resource_cache,
                 node_data: &node_data,
                 clip_scroll_tree,
+                use_dual_source_blending,
             };
 
             pass.build(
@@ -1776,22 +1785,11 @@ impl FrameBuilder {
                 &mut render_tasks,
                 &mut deferred_resolves,
                 &self.clip_store,
+                RenderPassIndex(pass_index),
             );
 
-            profile_counters.passes.inc();
-
-            match pass.kind {
-                RenderPassKind::MainFramebuffer(_) => {
-                    profile_counters.color_targets.add(1);
-                }
-                RenderPassKind::OffScreen { ref color, ref alpha } => {
-                    profile_counters
-                        .color_targets
-                        .add(color.targets.len());
-                    profile_counters
-                        .alpha_targets
-                        .add(alpha.targets.len());
-                }
+            if let RenderPassKind::OffScreen { ref texture_cache, .. } = pass.kind {
+                has_texture_cache_tasks |= !texture_cache.is_empty();
             }
         }
 
@@ -1804,15 +1802,18 @@ impl FrameBuilder {
         Frame {
             window_size,
             inner_rect: self.screen_rect,
-            device_pixel_ratio,
+            device_pixel_ratio: device_pixel_scale.0,
             background_color: self.background_color,
             layer,
             profile_counters,
             passes,
             node_data,
+            clip_chain_local_clip_rects,
             render_tasks,
             deferred_resolves,
             gpu_cache_updates: Some(gpu_cache_updates),
+            has_been_rendered: false,
+            has_texture_cache_tasks,
         }
     }
 }

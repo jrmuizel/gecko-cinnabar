@@ -670,7 +670,8 @@ HttpObserverManager = {
       Services.tm.dispatchToMainThread(() => {
         channel.errorCheck();
         if (!channel.errorString) {
-          this.runChannelListener(channel, "onError",
+          this.runChannelListener(
+            channel, "onError",
             {error: this.activityErrorsMap.get(lastActivity) ||
                     `NS_ERROR_NET_UNKNOWN_${lastActivity}`});
         }
@@ -802,7 +803,15 @@ HttpObserverManager = {
           try {
             result = await result;
           } catch (e) {
-            Cu.reportError(e);
+            let error;
+
+            if (e instanceof Error) {
+              error = e;
+            } else if (typeof e === "object" && e.message) {
+              error = new Error(e.message, e.fileName, e.lineNumber);
+            }
+
+            Cu.reportError(error);
             continue;
           }
           if (!result || typeof result !== "object") {
@@ -831,6 +840,14 @@ HttpObserverManager = {
             channel.suspended = false;
             channel.redirectTo(Services.io.newURI(result.redirectUrl));
             return;
+          } catch (e) {
+            Cu.reportError(e);
+          }
+        }
+
+        if (result.upgradeToSecure && kind === "opening") {
+          try {
+            channel.upgradeToSecure();
           } catch (e) {
             Cu.reportError(e);
           }

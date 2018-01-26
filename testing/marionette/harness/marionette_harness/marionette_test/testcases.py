@@ -2,6 +2,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+from __future__ import absolute_import
+
 import imp
 import os
 import re
@@ -20,6 +22,7 @@ from unittest.case import (
 
 from marionette_driver.errors import (
     TimeoutException,
+    UnresponsiveInstanceException
 )
 from mozlog import get_default_logger
 
@@ -137,7 +140,7 @@ class CommonTestCase(unittest.TestCase):
                     self.setUp()
             except SkipTest as e:
                 self._addSkip(result, str(e))
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, UnresponsiveInstanceException) as e:
                 raise
             except _ExpectedFailure as e:
                 expected_failure(result, e.exc_info)
@@ -157,7 +160,7 @@ class CommonTestCase(unittest.TestCase):
                 except self.failureException:
                     self._enter_pm()
                     result.addFailure(self, sys.exc_info())
-                except KeyboardInterrupt:
+                except (KeyboardInterrupt, UnresponsiveInstanceException) as e:
                     raise
                 except _ExpectedFailure as e:
                     expected_failure(result, e.exc_info)
@@ -185,7 +188,7 @@ class CommonTestCase(unittest.TestCase):
                             raise _ExpectedFailure(sys.exc_info())
                     else:
                         self.tearDown()
-                except KeyboardInterrupt:
+                except (KeyboardInterrupt, UnresponsiveInstanceException) as e:
                     raise
                 except _ExpectedFailure as e:
                     expected_failure(result, e.exc_info)

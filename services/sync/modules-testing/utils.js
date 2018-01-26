@@ -18,6 +18,7 @@ this.EXPORTED_SYMBOLS = [
   "AccountState", // from a module import
   "sumHistogram",
   "getLoginTelemetryScalar",
+  "syncTestLogging",
 ];
 
 var {utils: Cu} = Components;
@@ -116,9 +117,11 @@ this.makeIdentityConfig = function(overrides) {
     fxaccount: {
       user: {
         assertion: "assertion",
-        email: "email",
-        kA: "kA",
-        kB: "kB",
+        email: "foo",
+        kSync: "a".repeat(128),
+        kXCS: "a".repeat(32),
+        kExtSync: "a".repeat(128),
+        kExtKbHash: "a".repeat(32),
         sessionToken: "sessionToken",
         uid: "a".repeat(32),
         verified: true,
@@ -230,6 +233,13 @@ this.configureIdentity = async function(identityOverrides, server) {
   }
 };
 
+function syncTestLogging(level = "Trace") {
+  let logStats = initTestLogging(level);
+  Services.prefs.setStringPref("services.sync.log.logger", level);
+  Services.prefs.setStringPref("services.sync.log.logger.engine", "");
+  return logStats;
+}
+
 this.SyncTestingInfrastructure = async function(server, username) {
   let ns = {};
   Cu.import("resource://services-sync/service.js", ns);
@@ -237,7 +247,7 @@ this.SyncTestingInfrastructure = async function(server, username) {
   let config = makeIdentityConfig({ username });
   await configureIdentity(config, server);
   return {
-    logStats: initTestLogging(),
+    logStats: syncTestLogging(),
     fakeFilesystem: new FakeFilesystemService({}),
     fakeGUIDService: new FakeGUIDService(),
     fakeCryptoService: new FakeCryptoService(),

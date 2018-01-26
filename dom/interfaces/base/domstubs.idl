@@ -13,9 +13,9 @@ class nsWrapperCache;
 
 typedef unsigned long long DOMTimeStamp;
 typedef double DOMHighResTimeStamp;
+typedef unsigned long long nsViewID;
 
 // Core
-interface nsIDOMAttr;
 interface nsIDOMCDATASection;
 interface nsIDOMCharacterData;
 interface nsIDOMComment;
@@ -40,15 +40,9 @@ class DOMException;
 }
 %}
 
-// Style Sheets
-interface nsIDOMStyleSheetList;
-interface nsIDOMStyleSheet;
-interface nsIDOMMediaList;
-
 // Base
 interface nsIDOMWindow;
 interface nsIDOMWindowCollection;
-interface nsIDOMNavigator;
 interface nsIDOMScreen;
 
 // Events
@@ -61,26 +55,8 @@ interface nsIDOMHTMLElement;
 interface nsIDOMHTMLFormElement;
 interface nsIDOMHTMLHeadElement;
 
-// CSS
-interface nsIDOMCSSValue;
-interface nsIDOMCSSPrimitiveValue;
-interface nsIDOMCSSRule;
-interface nsIDOMCSSRuleList;
-interface nsIDOMCSSKeyframeRule;
-interface nsIDOMCSSFontFeatureValuesRule;
-interface nsIDOMCSSStyleSheet;
-interface nsIDOMCSSStyleDeclaration;
-interface nsIDOMCounter;
-interface nsIDOMRect;
-interface nsIDOMCSSStyleRule;
-interface nsIDOMCSSStyleRuleCollection;
-
 // Range
 interface nsIDOMRange;
 
 // Crypto
 interface nsIDOMCrypto;
-
-// Used font face (for inspector)
-interface nsIDOMFontFace;
-interface nsIDOMFontFaceList;

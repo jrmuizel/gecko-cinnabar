@@ -371,7 +371,7 @@ public:
                       nsIDocument* aLoaderDocument);
 
     TX_DECL_ACOMPILEOBSERVER
-    NS_INLINE_DECL_REFCOUNTING(txCompileObserver)
+    NS_INLINE_DECL_REFCOUNTING(txCompileObserver, override)
 
     nsresult startLoad(nsIURI* aUri, txStylesheetCompiler* aCompiler,
                        nsIPrincipal* aSourcePrincipal,
@@ -455,6 +455,7 @@ txCompileObserver::startLoad(nsIURI* aUri, txStylesheetCompiler* aCompiler,
                     aReferrerPrincipal, // triggeringPrincipal
                     nsILoadInfo::SEC_REQUIRE_CORS_DATA_INHERITS,
                     nsIContentPolicy::TYPE_XSLT,
+                    nullptr, // aPerformanceStorage
                     loadGroup);
 
     NS_ENSURE_SUCCESS(rv, rv);
@@ -588,7 +589,7 @@ public:
     explicit txSyncCompileObserver(txMozillaXSLTProcessor* aProcessor);
 
     TX_DECL_ACOMPILEOBSERVER
-    NS_INLINE_DECL_REFCOUNTING(txSyncCompileObserver)
+    NS_INLINE_DECL_REFCOUNTING(txSyncCompileObserver, override)
 
 private:
     // Private destructor, to discourage deletion outside of Release():

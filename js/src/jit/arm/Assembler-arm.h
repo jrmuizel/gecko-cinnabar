@@ -12,14 +12,21 @@
 #include "mozilla/MathAlgorithms.h"
 
 #include "jit/arm/Architecture-arm.h"
+#include "jit/arm/disasm/Disasm-arm.h"
 #include "jit/CompactBuffer.h"
 #include "jit/IonCode.h"
 #include "jit/JitCompartment.h"
 #include "jit/shared/Assembler-shared.h"
+#include "jit/shared/Disassembler-shared.h"
 #include "jit/shared/IonAssemblerBufferWithConstantPools.h"
+
+union PoolHintPun;
 
 namespace js {
 namespace jit {
+
+using LiteralDoc = DisassemblerSpew::LiteralDoc;
+using LabelDoc = DisassemblerSpew::LabelDoc;
 
 // NOTE: there are duplicates in this list! Sometimes we want to specifically
 // refer to the link register as a link register (bl lr is much clearer than bl
@@ -148,7 +155,7 @@ static constexpr Register64 ReturnReg64(r1, r0);
 static constexpr FloatRegister ReturnFloat32Reg = { FloatRegisters::d0, VFPRegister::Single };
 static constexpr FloatRegister ReturnDoubleReg = { FloatRegisters::d0, VFPRegister::Double};
 static constexpr FloatRegister ReturnSimd128Reg = InvalidFloatReg;
-static constexpr FloatRegister ScratchFloat32Reg = { FloatRegisters::d30, VFPRegister::Single };
+static constexpr FloatRegister ScratchFloat32Reg = { FloatRegisters::s30, VFPRegister::Single };
 static constexpr FloatRegister ScratchDoubleReg = { FloatRegisters::d15, VFPRegister::Double };
 static constexpr FloatRegister ScratchSimd128Reg = InvalidFloatReg;
 static constexpr FloatRegister ScratchUIntReg = { FloatRegisters::d15, VFPRegister::UInt };
@@ -1137,7 +1144,6 @@ PatchBackedge(CodeLocationJump& jump_, CodeLocationLabel label, JitZoneGroup::Ba
     PatchJump(jump_, label);
 }
 
-class InstructionIterator;
 class Assembler;
 typedef js::jit::AssemblerBufferWithConstantPools<1024, 4, Instruction, Assembler> ARMBuffer;
 
@@ -1244,22 +1250,27 @@ class Assembler : public AssemblerShared
 
   protected:
     // Shim around AssemblerBufferWithConstantPools::allocEntry.
-    BufferOffset allocEntry(size_t numInst, unsigned numPoolEntries,
-                            uint8_t* inst, uint8_t* data, ARMBuffer::PoolEntry* pe = nullptr,
-                            bool loadToPC = false);
+    BufferOffset allocLiteralLoadEntry(size_t numInst, unsigned numPoolEntries,
+                                       PoolHintPun& php, uint8_t* data,
+                                       const LiteralDoc& doc = LiteralDoc(),
+                                       ARMBuffer::PoolEntry* pe = nullptr,
+                                       bool loadToPC = false);
 
     Instruction* editSrc(BufferOffset bo) {
         return m_buffer.getInst(bo);
     }
 
 #ifdef JS_DISASM_ARM
-    static void spewInst(Instruction* i);
+    typedef disasm::EmbeddedVector<char, disasm::ReasonableBufferSize> DisasmBuffer;
+
+    static void disassembleInstruction(const Instruction* i, DisasmBuffer& buffer);
+
+    void initDisassembler();
+    void finishDisassembler();
     void spew(Instruction* i);
-    void spewBranch(Instruction* i, Label* target);
-    void spewData(BufferOffset addr, size_t numInstr, bool loadToPC);
-    void spewLabel(Label* label);
-    void spewRetarget(Label* label, Label* target);
-    void spewTarget(Label* l);
+    void spewBranch(Instruction* i, const LabelDoc& target);
+    void spewLiteralLoad(PoolHintPun& php, bool loadToPC, const Instruction* offs,
+                         const LiteralDoc& doc);
 #endif
 
   public:
@@ -1297,35 +1308,7 @@ class Assembler : public AssemblerShared
     ARMBuffer m_buffer;
 
 #ifdef JS_DISASM_ARM
-  private:
-    class SpewNodes {
-        struct Node {
-            uint32_t key;
-            uint32_t value;
-            Node* next;
-        };
-
-        Node* nodes;
-
-    public:
-        SpewNodes() : nodes(nullptr) {}
-        ~SpewNodes();
-
-        bool lookup(uint32_t key, uint32_t* value);
-        bool add(uint32_t key, uint32_t value);
-        bool remove(uint32_t key);
-    };
-
-    SpewNodes spewNodes_;
-    uint32_t spewNext_;
-    Sprinter* printer_;
-
-    bool spewDisabled();
-    uint32_t spewResolve(Label* l);
-    uint32_t spewProbe(Label* l);
-    uint32_t spewDefine(Label* l);
-    void spew(const char* fmt, ...) MOZ_FORMAT_PRINTF(2, 3);
-    void spew(const char* fmt, va_list args) MOZ_FORMAT_PRINTF(2, 0);
+    DisassemblerSpew spew_;
 #endif
 
   public:
@@ -1333,14 +1316,20 @@ class Assembler : public AssemblerShared
     // For the nopFill use a branch to the next instruction: 0xeaffffff.
     Assembler()
       : m_buffer(1, 1, 8, GetPoolMaxOffset(), 8, 0xe320f000, 0xeaffffff, GetNopFill()),
-#ifdef JS_DISASM_ARM
-        spewNext_(1000),
-        printer_(nullptr),
-#endif
         isFinished(false),
         dtmActive(false),
         dtmCond(Always)
-    { }
+    {
+#ifdef JS_DISASM_ARM
+        initDisassembler();
+#endif
+    }
+
+    ~Assembler() {
+#ifdef JS_DISASM_ARM
+        finishDisassembler();
+#endif
+    }
 
     // We need to wait until an AutoJitContextAlloc is created by the
     // MacroAssembler, before allocating any space.
@@ -1398,7 +1387,7 @@ class Assembler : public AssemblerShared
 
     void setPrinter(Sprinter* sp) {
 #ifdef JS_DISASM_ARM
-        printer_ = sp;
+        spew_.setPrinter(sp);
 #endif
     }
 
@@ -1408,6 +1397,16 @@ class Assembler : public AssemblerShared
 
   private:
     bool isFinished;
+
+  protected:
+    LabelDoc refLabel(const Label* label) {
+#ifdef JS_DISASM_ARM
+        return spew_.refLabel(label);
+#else
+        return LabelDoc();
+#endif
+    }
+
   public:
     void finish();
     bool appendRawCode(const uint8_t* code, size_t numBytes);
@@ -1437,7 +1436,8 @@ class Assembler : public AssemblerShared
 
     // As above, but also mark the instruction as a branch.  Very hot, inlined
     // for performance
-    MOZ_ALWAYS_INLINE BufferOffset writeBranchInst(uint32_t x, Label* documentation = nullptr) {
+    MOZ_ALWAYS_INLINE BufferOffset
+    writeBranchInst(uint32_t x, const LabelDoc& documentation) {
         BufferOffset offs = m_buffer.putInt(x);
 #ifdef JS_DISASM_ARM
         spewBranch(m_buffer.getInstOrNull(offs), documentation);
@@ -1560,8 +1560,8 @@ class Assembler : public AssemblerShared
     BufferOffset as_Imm32Pool(Register dest, uint32_t value, Condition c = Always);
     // Make a patchable jump that can target the entire 32 bit address space.
     BufferOffset as_BranchPool(uint32_t value, RepatchLabel* label,
-                               ARMBuffer::PoolEntry* pe = nullptr, Condition c = Always,
-                               Label* documentation = nullptr);
+                               const LabelDoc& documentation,
+                               ARMBuffer::PoolEntry* pe = nullptr, Condition c = Always);
 
     // Load a 64 bit floating point immediate from a pool into a register.
     BufferOffset as_FImm64Pool(VFPRegister dest, double value, Condition c = Always);
@@ -1615,7 +1615,7 @@ class Assembler : public AssemblerShared
     BufferOffset as_b(BOffImm off, Condition c, Label* documentation = nullptr);
 
     BufferOffset as_b(Label* l, Condition c = Always);
-    BufferOffset as_b(wasm::TrapDesc target, Condition c = Always);
+    BufferOffset as_b(wasm::OldTrapDesc target, Condition c = Always);
     BufferOffset as_b(BOffImm off, Condition c, BufferOffset inst);
 
     // blx can go to either an immediate or a register. When blx'ing to a
@@ -1723,7 +1723,7 @@ class Assembler : public AssemblerShared
     bool nextLink(BufferOffset b, BufferOffset* next);
     void bind(Label* label, BufferOffset boff = BufferOffset());
     void bind(RepatchLabel* label);
-    void bindLater(Label* label, wasm::TrapDesc target);
+    void bindLater(Label* label, wasm::OldTrapDesc target);
     uint32_t currentOffset() {
         return nextOffset().getOffset();
     }
@@ -1734,6 +1734,7 @@ class Assembler : public AssemblerShared
     static void Bind(uint8_t* rawCode, CodeOffset label, CodeOffset target);
 
     void as_bkpt();
+    BufferOffset as_illegal_trap();
 
   public:
     static void TraceJumpRelocations(JSTracer* trc, JitCode* code, CompactBufferReader& reader);
@@ -1769,7 +1770,7 @@ class Assembler : public AssemblerShared
 
     void comment(const char* msg) {
 #ifdef JS_DISASM_ARM
-        spew("; %s", msg);
+        spew_.spew("; %s", msg);
 #endif
     }
 
@@ -2002,16 +2003,10 @@ class Instruction
     }
     // Since almost all instructions have condition codes, the condition code
     // extractor resides in the base class.
-    Assembler::Condition extractCond() {
+    Assembler::Condition extractCond() const {
         MOZ_ASSERT(data >> 28 != 0xf, "The instruction does not have condition code");
         return (Assembler::Condition)(data & 0xf0000000);
     }
-    // Get the next instruction in the instruction stream.
-    // This does neat things like ignoreconstant pools and their guards.
-    Instruction* next();
-
-    // Skipping pools with artificial guards.
-    Instruction* skipPool();
 
     // Sometimes, an api wants a uint32_t (or a pointer to it) rather than an
     // instruction. raw() just coerces this into a pointer to a uint32_t.
@@ -2266,29 +2261,55 @@ class InstructionIterator
 {
   private:
     Instruction* inst_;
+
   public:
-    explicit InstructionIterator(Instruction* inst) : inst_(inst) {
-        skipPool();
+    explicit InstructionIterator(Instruction* inst)
+      : inst_(inst)
+    {
+        maybeSkipAutomaticInstructions();
     }
-    void skipPool() {
-        inst_ = inst_->skipPool();
-    }
-    Instruction* next() {
-        inst_ = inst_->next();
-        return cur();
-    }
+
+    // Advances to the next intentionally-inserted instruction.
+    Instruction* next();
+
+    // Advances past any automatically-inserted instructions.
+    Instruction* maybeSkipAutomaticInstructions();
+
     Instruction* cur() const {
         return inst_;
     }
+
+  protected:
+    // Advances past the given number of instruction-length bytes.
+    void advanceRaw(ptrdiff_t instructions = 1) {
+        inst_ = inst_ + instructions;
+    }
+
+    // Look ahead, including automatically-inserted instructions
+    // and PoolHeaders.
+    Instruction* peekRaw(ptrdiff_t instructions = 1) const {
+        return inst_ + instructions;
+    }
 };
 
+// Compile-time iterator over instructions, with a safe interface that
+// references not-necessarily-linear Instructions by linear BufferOffset.
 class BufferInstructionIterator : public ARMBuffer::AssemblerBufferInstIterator
 {
   public:
     BufferInstructionIterator(BufferOffset bo, ARMBuffer* buffer)
       : ARMBuffer::AssemblerBufferInstIterator(bo, buffer)
     {}
-    void skipPool();
+
+    // Advances the buffer to the next intentionally-inserted instruction.
+    Instruction* next() {
+        advance(cur()->size());
+        maybeSkipAutomaticInstructions();
+        return cur();
+    }
+
+    // Advances the BufferOffset past any automatically-inserted instructions.
+    Instruction* maybeSkipAutomaticInstructions();
 };
 
 static const uint32_t NumIntArgRegs = 4;

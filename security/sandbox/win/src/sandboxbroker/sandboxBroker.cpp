@@ -7,7 +7,9 @@
 #include "sandboxBroker.h"
 
 #include <string>
+#if defined(NIGHTLY_BUILD)
 #include <vector>
+#endif
 
 #include "base/win/windows_version.h"
 #include "mozilla/Assertions.h"
@@ -28,6 +30,8 @@
 #include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/security_level.h"
 #include "WinUtils.h"
+
+#if defined(NIGHTLY_BUILD)
 
 // This list of DLLs have been found to cause instability in sandboxed child
 // processes and so they will be unloaded if they attempt to load.
@@ -50,6 +54,8 @@ const std::vector<std::wstring> kDllsToUnload = {
   // Comodo Internet Security (bug 1400637)
   L"guard32.dll",
 };
+
+#endif
 
 namespace mozilla
 {
@@ -179,6 +185,7 @@ SandboxBroker::SandboxBroker()
 bool
 SandboxBroker::LaunchApp(const wchar_t *aPath,
                          const wchar_t *aArguments,
+                         base::EnvironmentMap& aEnvironment,
                          GeckoProcessType aProcessType,
                          const bool aEnableLogging,
                          void **aProcessHandle)
@@ -212,7 +219,11 @@ SandboxBroker::LaunchApp(const wchar_t *aPath,
 #endif
 
   // Enable the child process to write log files when setup
-  wchar_t const* logFileName = _wgetenv(L"MOZ_LOG_FILE");
+  wchar_t const* logFileName = nullptr;
+  auto it = aEnvironment.find(ENVIRONMENT_LITERAL("MOZ_LOG_FILE"));
+  if (it != aEnvironment.end()) {
+    logFileName = (it->second).c_str();
+  }
   char const* logFileModules = getenv("MOZ_LOG");
   if (logFileName && logFileModules) {
     bool rotate = false;
@@ -237,15 +248,21 @@ SandboxBroker::LaunchApp(const wchar_t *aPath,
     }
   }
 
-  logFileName = _wgetenv(L"NSPR_LOG_FILE");
+  logFileName = nullptr;
+  it = aEnvironment.find(ENVIRONMENT_LITERAL("NSPR_LOG_FILE"));
+  if (it != aEnvironment.end()) {
+    logFileName = (it->second).c_str();
+  }
   if (logFileName) {
     mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                      sandbox::TargetPolicy::FILES_ALLOW_ANY, logFileName);
   }
 
+  sandbox::ResultCode result;
+#if defined(NIGHTLY_BUILD)
+
   // Add DLLs to the policy that have been found to cause instability with the
   // sandbox, so that they will be unloaded when they attempt to load.
-  sandbox::ResultCode result;
   for (std::wstring dllToUnload : kDllsToUnload) {
     // Similar to Chromium, we only add a DLL if it is loaded in this process.
     if (::GetModuleHandleW(dllToUnload.c_str())) {
@@ -261,11 +278,13 @@ SandboxBroker::LaunchApp(const wchar_t *aPath,
   MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
                      "AddDllToUnload should never fail, what happened?");
 
+#endif
+
   // Ceate the sandboxed process
   PROCESS_INFORMATION targetInfo = {0};
   sandbox::ResultCode last_warning = sandbox::SBOX_ALL_OK;
   DWORD last_error = ERROR_SUCCESS;
-  result = sBrokerService->SpawnTarget(aPath, aArguments, mPolicy,
+  result = sBrokerService->SpawnTarget(aPath, aArguments, aEnvironment, mPolicy,
                                        &last_warning, &last_error, &targetInfo);
   if (sandbox::SBOX_ALL_OK != result) {
     nsAutoCString key;
@@ -487,11 +506,12 @@ SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
   }
 
   if (aSandboxLevel > 3) {
-    mitigations |= sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL;
     // If we're running from a network drive then we can't block loading from
-    // remote locations.
+    // remote locations. Strangely using MITIGATION_IMAGE_LOAD_NO_LOW_LABEL in
+    // this situation also means the process fails to start (bug 1423296).
     if (!sRunningFromNetworkDrive) {
-      mitigations |= sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE;
+      mitigations |= sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE |
+                     sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL;
     }
   }
 
@@ -846,6 +866,85 @@ SandboxBroker::SetSecurityLevelForPluginProcess(int32_t aSandboxLevel)
 
   return true;
 }
+
+#ifdef MOZ_ENABLE_SKIA_PDF
+bool
+SandboxBroker::SetSecurityLevelForPDFiumProcess()
+{
+  if (!mPolicy) {
+    return false;
+  }
+
+  auto result = SetJobLevel(mPolicy, sandbox::JOB_LOCKDOWN,
+                            0 /* ui_exceptions */);
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "SetJobLevel should never fail with these arguments, what happened?");
+  result = mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
+                                  sandbox::USER_LOCKDOWN);
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "SetTokenLevel should never fail with these arguments, what happened?");
+
+  result = mPolicy->SetAlternateDesktop(true);
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "Failed to create alternate desktop for sandbox.");
+
+  result = mPolicy->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
+  MOZ_ASSERT(sandbox::SBOX_ALL_OK == result,
+             "SetIntegrityLevel should never fail with these arguments, what happened?");
+
+  result =
+    mPolicy->SetDelayedIntegrityLevel(sandbox::INTEGRITY_LEVEL_UNTRUSTED);
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "SetIntegrityLevel should never fail with these arguments, what happened?");
+
+  // XXX bug 1412933
+  // We should also disables win32k for the PDFium process by adding
+  // MITIGATION_WIN32K_DISABLE flag here after fixing bug 1412933.
+  sandbox::MitigationFlags mitigations =
+    sandbox::MITIGATION_BOTTOM_UP_ASLR |
+    sandbox::MITIGATION_HEAP_TERMINATE |
+    sandbox::MITIGATION_SEHOP |
+    sandbox::MITIGATION_DEP_NO_ATL_THUNK |
+    sandbox::MITIGATION_DEP |
+    sandbox::MITIGATION_EXTENSION_POINT_DISABLE |
+    sandbox::MITIGATION_IMAGE_LOAD_NO_LOW_LABEL;
+
+  if (!sRunningFromNetworkDrive) {
+    mitigations |= sandbox::MITIGATION_IMAGE_LOAD_NO_REMOTE;
+  }
+
+  result = mPolicy->SetProcessMitigations(mitigations);
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "Invalid flags for SetProcessMitigations.");
+
+  mitigations =
+    sandbox::MITIGATION_STRICT_HANDLE_CHECKS |
+    sandbox::MITIGATION_DLL_SEARCH_ORDER;
+
+  result = mPolicy->SetDelayedProcessMitigations(mitigations);
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "Invalid flags for SetDelayedProcessMitigations.");
+
+  // Add the policy for the client side of a pipe. It is just a file
+  // in the \pipe\ namespace. We restrict it to pipes that start with
+  // "chrome." so the sandboxed process cannot connect to system services.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                            sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                            L"\\??\\pipe\\chrome.*");
+  SANDBOX_ENSURE_SUCCESS(result,
+                         "With these static arguments AddRule should never fail, what happened?");
+
+  // The PDFium process needs to be able to duplicate shared memory handles,
+  // which are Section handles, to the broker process.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                            sandbox::TargetPolicy::HANDLES_DUP_BROKER,
+                            L"Section");
+  MOZ_RELEASE_ASSERT(sandbox::SBOX_ALL_OK == result,
+                     "With these static arguments AddRule should never fail, hat happened?");
+
+  return true;
+}
+#endif
 
 bool
 SandboxBroker::SetSecurityLevelForGMPlugin(SandboxLevel aLevel)

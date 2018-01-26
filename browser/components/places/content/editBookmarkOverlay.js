@@ -307,13 +307,9 @@ var gEditItemOverlay = {
       // Note: since all controls are collapsed by default, we don't get the
       // default XUL dialog behavior, that selects the first control, so we set
       // the focus explicitly.
-      // Note: If focusedElement === "preferred", this file expects gPrefService
-      // to be defined in the global scope.
       let elt;
       if (focusedElement === "preferred") {
-        /* eslint-disable no-undef */
-        elt = this._element(gPrefService.getCharPref("browser.bookmarks.editDialog.firstEditField"));
-        /* eslint-enable no-undef */
+        elt = this._element(Services.prefs.getCharPref("browser.bookmarks.editDialog.firstEditField"));
       } else if (focusedElement === "first") {
         elt = document.querySelector("textbox:not([collapsed=true])");
       }
@@ -546,20 +542,6 @@ var gEditItemOverlay = {
     if (removedTags.length + newTags.length == 0)
       return false;
 
-    if (!PlacesUIUtils.useAsyncTransactions) {
-      let txns = [];
-      for (let uri of aURIs) {
-        if (removedTags.length > 0)
-          txns.push(new PlacesUntagURITransaction(uri, removedTags));
-        if (newTags.length > 0)
-          txns.push(new PlacesTagURITransaction(uri, newTags));
-      }
-
-      PlacesUtils.transactionManager.doTransaction(
-        new PlacesAggregatedTransaction("Update tags", txns));
-      return true;
-    }
-
     let setTags = async function() {
       if (removedTags.length > 0) {
         await PlacesTransactions.Untag({ urls: aURIs, tags: removedTags })
@@ -629,17 +611,11 @@ var gEditItemOverlay = {
 
     // Here we update either the item title or its cached static title
     let newTitle = this._namePicker.value;
-    if (!newTitle && this._paneInfo.parentGuid == PlacesUtils.bookmarks.tagsGuid) {
+    if (!newTitle && this._paneInfo.isTag) {
       // We don't allow setting an empty title for a tag, restore the old one.
       this._initNamePicker();
     } else {
       this._mayUpdateFirstEditField("namePicker");
-      if (!PlacesUIUtils.useAsyncTransactions) {
-        let txn = new PlacesEditItemTitleTransaction(this._paneInfo.itemId,
-                                                     newTitle);
-        PlacesUtils.transactionManager.doTransaction(txn);
-        return;
-      }
 
       let guid = this._paneInfo.isTag
                   ? (await PlacesUtils.promiseItemGuid(this._paneInfo.itemId))
@@ -652,17 +628,10 @@ var gEditItemOverlay = {
     if (this.readOnly || !this._paneInfo.isItem)
       return;
 
-    let itemId = this._paneInfo.itemId;
     let description = this._element("descriptionField").value;
     if (description != PlacesUIUtils.getItemDescription(this._paneInfo.itemId)) {
       let annotation =
         { name: PlacesUIUtils.DESCRIPTION_ANNO, value: description };
-      if (!PlacesUIUtils.useAsyncTransactions) {
-        let txn = new PlacesSetItemAnnotationTransaction(itemId,
-                                                         annotation);
-        PlacesUtils.transactionManager.doTransaction(txn);
-        return;
-      }
       let guid = this._paneInfo.itemGuid;
       PlacesTransactions.Annotate({ guid, annotation })
                         .transact().catch(Components.utils.reportError);
@@ -684,11 +653,6 @@ var gEditItemOverlay = {
     if (this._paneInfo.uri.equals(newURI))
       return;
 
-    if (!PlacesUIUtils.useAsyncTransactions) {
-      let txn = new PlacesEditBookmarkURITransaction(this._paneInfo.itemId, newURI);
-      PlacesUtils.transactionManager.doTransaction(txn);
-      return;
-    }
     let guid = this._paneInfo.itemGuid;
     PlacesTransactions.EditUrl({ guid, url: newURI })
                       .transact().catch(Components.utils.reportError);
@@ -698,18 +662,9 @@ var gEditItemOverlay = {
     if (this.readOnly || !this._paneInfo.isBookmark)
       return;
 
-    let itemId = this._paneInfo.itemId;
     let oldKeyword = this._keyword;
     let keyword = this._keyword = this._keywordField.value;
     let postData = this._paneInfo.postData;
-    if (!PlacesUIUtils.useAsyncTransactions) {
-      let txn = new PlacesEditBookmarkKeywordTransaction(itemId,
-                                                         keyword,
-                                                         postData,
-                                                         oldKeyword);
-      PlacesUtils.transactionManager.doTransaction(txn);
-      return;
-    }
     let guid = this._paneInfo.itemGuid;
     PlacesTransactions.EditKeyword({ guid, keyword, postData, oldKeyword })
                       .transact().catch(Components.utils.reportError);
@@ -723,13 +678,6 @@ var gEditItemOverlay = {
     if (this._loadInSidebarCheckbox.checked)
       annotation.value = true;
 
-    if (!PlacesUIUtils.useAsyncTransactions) {
-      let itemId = this._paneInfo.itemId;
-      let txn = new PlacesSetItemAnnotationTransaction(itemId,
-                                                       annotation);
-      PlacesUtils.transactionManager.doTransaction(txn);
-      return;
-    }
     let guid = this._paneInfo.itemGuid;
     PlacesTransactions.Annotate({ guid, annotation })
                       .transact().catch(Components.utils.reportError);
@@ -817,16 +765,9 @@ var gEditItemOverlay = {
     let containerId = this._folderMenuList.selectedItem.folderId;
     if (this._paneInfo.parentId != containerId &&
         this._paneInfo.itemId != containerId) {
-      if (PlacesUIUtils.useAsyncTransactions) {
-        let newParentGuid = await PlacesUtils.promiseItemGuid(containerId);
-        let guid = this._paneInfo.itemGuid;
-        await PlacesTransactions.Move({ guid, newParentGuid }).transact();
-      } else {
-        let txn = new PlacesMoveItemTransaction(this._paneInfo.itemId,
-                                                containerId,
-                                                PlacesUtils.bookmarks.DEFAULT_INDEX);
-        PlacesUtils.transactionManager.doTransaction(txn);
-      }
+      let newParentGuid = await PlacesUtils.promiseItemGuid(containerId);
+      let guid = this._paneInfo.itemGuid;
+      await PlacesTransactions.Move({ guid, newParentGuid }).transact();
 
       // Mark the containing folder as recently-used if it isn't in the
       // static list
@@ -873,30 +814,6 @@ var gEditItemOverlay = {
   },
 
   async _markFolderAsRecentlyUsed(aFolderId) {
-    if (!PlacesUIUtils.useAsyncTransactions) {
-      let txns = [];
-
-      // Expire old unused recent folders.
-      let annotation = this._getLastUsedAnnotationObject(false);
-      while (this._recentFolders.length > MAX_FOLDER_ITEM_IN_MENU_LIST) {
-        let folderId = this._recentFolders.pop().folderId;
-        let annoTxn = new PlacesSetItemAnnotationTransaction(folderId,
-                                                             annotation);
-        txns.push(annoTxn);
-      }
-
-      // Mark folder as recently used
-      annotation = this._getLastUsedAnnotationObject(true);
-      let annoTxn = new PlacesSetItemAnnotationTransaction(aFolderId,
-                                                           annotation);
-      txns.push(annoTxn);
-
-      let aggregate =
-        new PlacesAggregatedTransaction("Update last used folders", txns);
-      PlacesUtils.transactionManager.doTransaction(aggregate);
-      return;
-    }
-
     // Expire old unused recent folders.
     let guids = [];
     while (this._recentFolders.length > MAX_FOLDER_ITEM_IN_MENU_LIST) {
@@ -1020,14 +937,9 @@ var gEditItemOverlay = {
 
     // XXXmano: add a separate "New Folder" string at some point...
     let title = this._element("newFolderButton").label;
-    if (PlacesUIUtils.useAsyncTransactions) {
-      await PlacesTransactions.NewFolder({ parentGuid: ip.guid, title,
-                                           index: await ip.getIndex() })
-                              .transact().catch(Components.utils.reportError);
-    } else {
-      let txn = new PlacesCreateFolderTransaction(title, ip.itemId, await ip.getIndex());
-      PlacesUtils.transactionManager.doTransaction(txn);
-    }
+    await PlacesTransactions.NewFolder({ parentGuid: ip.guid, title,
+                                         index: await ip.getIndex() })
+                            .transact().catch(Components.utils.reportError);
 
     this._folderTree.focus();
     this._folderTree.selectItems([ip.itemId]);
@@ -1112,8 +1024,6 @@ var gEditItemOverlay = {
   },
 
   _onItemTitleChange(aItemId, aNewTitle) {
-    if (!this._paneInfo.isBookmark)
-      return;
     if (aItemId == this._paneInfo.itemId) {
       this._paneInfo.title = aNewTitle;
       this._initTextField(this._namePicker, aNewTitle);
@@ -1130,10 +1040,12 @@ var gEditItemOverlay = {
       }
     }
     // We need to also update title of recent folders.
-    for (let folder of this._recentFolders) {
-      if (folder.folderId == aItemId) {
-        folder.title = aNewTitle;
-        break;
+    if (this._recentFolders) {
+      for (let folder of this._recentFolders) {
+        if (folder.folderId == aItemId) {
+          folder.title = aNewTitle;
+          break;
+        }
       }
     }
   },
@@ -1145,7 +1057,7 @@ var gEditItemOverlay = {
       this._onTagsChange(aGuid).catch(Components.utils.reportError);
       return;
     }
-    if (aProperty == "title" && this._paneInfo.isItem) {
+    if (aProperty == "title" && (this._paneInfo.isItem || this._paneInfo.isTag)) {
       // This also updates titles of folders in the folder menu list.
       this._onItemTitleChange(aItemId, aValue);
       return;

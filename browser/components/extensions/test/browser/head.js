@@ -20,7 +20,7 @@
  *          promiseContentDimensions alterContent
  *          promisePrefChangeObserved openContextMenuInFrame
  *          promiseAnimationFrame getCustomizableUIPanelID
- *          awaitEvent
+ *          awaitEvent BrowserWindowIterator
  */
 
 // There are shutdown issues for which multiple rejections are left uncaught.
@@ -144,12 +144,15 @@ function promisePossiblyInaccurateContentDimensions(browser) {
     }
 
     return {
-      window: copyProps(content,
+      window: copyProps(
+        content,
         ["innerWidth", "innerHeight", "outerWidth", "outerHeight",
          "scrollX", "scrollY", "scrollMaxX", "scrollMaxY"]),
-      body: copyProps(content.document.body,
+      body: copyProps(
+        content.document.body,
         ["clientWidth", "clientHeight", "scrollWidth", "scrollHeight"]),
-      root: copyProps(content.document.documentElement,
+      root: copyProps(
+        content.document.documentElement,
         ["clientWidth", "clientHeight", "scrollWidth", "scrollHeight"]),
       isStandards: content.document.compatMode !== "BackCompat",
     };
@@ -289,7 +292,7 @@ async function openContextMenuInSidebar(selector = "body") {
 async function openContextMenuInFrame(frameId) {
   let contentAreaContextMenu = document.getElementById("contentAreaContextMenu");
   let popupShownPromise = BrowserTestUtils.waitForEvent(contentAreaContextMenu, "popupshown");
-  let doc = gBrowser.selectedBrowser.contentDocument;
+  let doc = gBrowser.selectedBrowser.contentDocumentAsCPOW;
   let frame = doc.getElementById(frameId);
   EventUtils.synthesizeMouseAtCenter(frame.contentDocument.body, {type: "contextmenu"}, frame.contentWindow);
   await popupShownPromise;
@@ -331,7 +334,11 @@ async function openExtensionContextMenu(selector = "#img1") {
 async function closeExtensionContextMenu(itemToSelect, modifiers = {}) {
   let contentAreaContextMenu = document.getElementById("contentAreaContextMenu");
   let popupHiddenPromise = BrowserTestUtils.waitForEvent(contentAreaContextMenu, "popuphidden");
-  EventUtils.synthesizeMouseAtCenter(itemToSelect, modifiers);
+  if (itemToSelect) {
+    EventUtils.synthesizeMouseAtCenter(itemToSelect, modifiers);
+  } else {
+    contentAreaContextMenu.hidePopup();
+  }
   await popupHiddenPromise;
 
   // Bug 1351638: parent menu fails to close intermittently, make sure it does.
@@ -358,11 +365,15 @@ function closeToolsMenu(itemToSelect, win = window) {
   const hidden = BrowserTestUtils.waitForEvent(menu, "popuphidden");
   if (AppConstants.platform === "macosx") {
     // Mocking on OSX, see above.
-    itemToSelect.doCommand();
+    if (itemToSelect) {
+      itemToSelect.doCommand();
+    }
     menu.dispatchEvent(new MouseEvent("popuphiding"));
     menu.dispatchEvent(new MouseEvent("popuphidden"));
-  } else {
+  } else if (itemToSelect) {
     EventUtils.synthesizeMouseAtCenter(itemToSelect, {}, win);
+  } else {
+    menu.hidePopup();
   }
   return hidden;
 }
@@ -480,4 +491,14 @@ function awaitEvent(eventName, id) {
 
     Management.on(eventName, listener);
   });
+}
+
+function* BrowserWindowIterator() {
+  let windowsEnum = Services.wm.getEnumerator("navigator:browser");
+  while (windowsEnum.hasMoreElements()) {
+    let currentWindow = windowsEnum.getNext();
+    if (!currentWindow.closed) {
+      yield currentWindow;
+    }
+  }
 }

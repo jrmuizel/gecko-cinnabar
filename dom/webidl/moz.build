@@ -97,11 +97,11 @@ with Files("DelayNode.webidl"):
 with Files("DynamicsCompressorNode.webidl"):
     BUG_COMPONENT = ("Core", "Web Audio")
 
-with Files("DesktopNotification.webidl"):
-    BUG_COMPONENT = ("Toolkit", "Notifications and Alerts")
-
 with Files("FakePluginTagInit.webidl"):
     BUG_COMPONENT = ("Core", "Plug-ins")
+
+with Files("Flex.webidl"):
+    BUG_COMPONENT = ("Core", "CSS Parsing and Computation")
 
 with Files("FocusEvent.webidl"):
     BUG_COMPONENT = ("Core", "DOM: Events")
@@ -210,9 +210,6 @@ with Files("Media*Track*"):
 
 with Files("Mouse*"):
     BUG_COMPONENT = ("Core", "DOM: Events")
-
-with Files("MozSelfSupport.webidl"):
-    BUG_COMPONENT = ("Firefox Health Report", "Client: Desktop")
 
 with Files("MozTimeManager.webidl"):
     BUG_COMPONENT = ("Core", "DOM: Device Interfaces")
@@ -366,6 +363,7 @@ GENERATED_WEBIDL_FILES = [
 ]
 
 PREPROCESSED_WEBIDL_FILES = [
+    'ChromeUtils.webidl',
     'Navigator.webidl',
     'Node.webidl',
     'Window.webidl',
@@ -428,7 +426,6 @@ WEBIDL_FILES = [
     'CheckerboardReportService.webidl',
     'ChildNode.webidl',
     'ChromeNodeList.webidl',
-    'ChromeUtils.webidl',
     'Client.webidl',
     'Clients.webidl',
     'ClipboardEvent.webidl',
@@ -478,11 +475,11 @@ WEBIDL_FILES = [
     'DecoderDoctorNotification.webidl',
     'DedicatedWorkerGlobalScope.webidl',
     'DelayNode.webidl',
-    'DesktopNotification.webidl',
     'DeviceMotionEvent.webidl',
     'Directory.webidl',
     'Document.webidl',
     'DocumentFragment.webidl',
+    'DocumentOrShadowRoot.webidl',
     'DocumentTimeline.webidl',
     'DocumentType.webidl',
     'DOMCursor.webidl',
@@ -524,6 +521,7 @@ WEBIDL_FILES = [
     'FileSystemDirectoryReader.webidl',
     'FileSystemEntry.webidl',
     'FileSystemFileEntry.webidl',
+    'Flex.webidl',
     'FocusEvent.webidl',
     'FontFace.webidl',
     'FontFaceSet.webidl',
@@ -689,7 +687,6 @@ WEBIDL_FILES = [
     'MimeTypeArray.webidl',
     'MouseEvent.webidl',
     'MouseScrollEvent.webidl',
-    'MozSelfSupport.webidl',
     'MozStorageAsyncStatementParams.webidl',
     'MozStorageStatementParams.webidl',
     'MozStorageStatementRow.webidl',
@@ -975,7 +972,6 @@ WEBIDL_FILES = [
     'XULCommandEvent.webidl',
     'XULDocument.webidl',
     'XULElement.webidl',
-    'XULTemplateBuilder.webidl',
 ]
 
 if CONFIG['MOZ_WEBRTC']:

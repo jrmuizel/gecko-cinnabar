@@ -55,14 +55,20 @@ input {
     background-image: url("../data/content/assets/glyph-import-16.svg"); }
   .icon.icon-new-window {
     background-image: url("../data/content/assets/glyph-newWindow-16.svg"); }
+    .icon.icon-new-window:dir(rtl) {
+      transform: scaleX(-1); }
   .icon.icon-new-window-private {
     background-image: url("chrome://browser/skin/privateBrowsing.svg"); }
   .icon.icon-settings {
     background-image: url("chrome://browser/skin/settings.svg"); }
   .icon.icon-pin {
     background-image: url("../data/content/assets/glyph-pin-16.svg"); }
+    .icon.icon-pin:dir(rtl) {
+      transform: scaleX(-1); }
   .icon.icon-unpin {
     background-image: url("../data/content/assets/glyph-unpin-16.svg"); }
+    .icon.icon-unpin:dir(rtl) {
+      transform: scaleX(-1); }
   .icon.icon-edit {
     background-image: url("../data/content/assets/glyph-edit-16.svg"); }
   .icon.icon-pocket {
@@ -81,6 +87,8 @@ input {
     background-size: 12px;
     height: 12px;
     width: 12px; }
+    .icon.icon-pin-small:dir(rtl) {
+      transform: scaleX(-1); }
   .icon.icon-check {
     background-image: url("chrome://browser/skin/check.svg"); }
   .icon.icon-webextension {
@@ -242,9 +250,8 @@ main {
 
 .top-sites-list {
   list-style: none;
-  margin: 0;
+  margin: 0 -16px;
   margin-bottom: -18px;
-  margin-inline-end: -32px;
   padding: 0; }
   @media (max-width: 416px) {
     .top-sites-list :nth-child(2n+1) .context-menu {
@@ -290,17 +297,18 @@ main {
       offset-inline-start: auto; } }
   .top-sites-list li {
     display: inline-block;
-    margin: 0 0 8px;
-    margin-inline-end: 32px; }
+    margin: 0 0 8px; }
   .top-sites-list .top-site-outer {
-    position: relative; }
-    .top-sites-list .top-site-outer > a {
-      color: inherit;
-      display: block;
-      outline: none; }
-      .top-sites-list .top-site-outer > a:-moz-any(.active, :focus) .tile {
-        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1), 0 0 0 5px #D7D7DB;
-        transition: box-shadow 150ms; }
+    padding: 0 16px; }
+    .top-sites-list .top-site-outer .top-site-inner {
+      position: relative; }
+      .top-sites-list .top-site-outer .top-site-inner > a {
+        color: inherit;
+        display: block;
+        outline: none; }
+        .top-sites-list .top-site-outer .top-site-inner > a:-moz-any(.active, :focus) .tile {
+          box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1), 0 0 0 5px #D7D7DB;
+          transition: box-shadow 150ms; }
     .top-sites-list .top-site-outer .context-menu-button {
       background-clip: padding-box;
       background-color: #FFF;
@@ -323,15 +331,6 @@ main {
       .top-sites-list .top-site-outer .context-menu-button:-moz-any(:active, :focus) {
         opacity: 1;
         transform: scale(1); }
-    .top-sites-list .top-site-outer:-moz-any(.active, :focus, :hover) .tile {
-      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1), 0 0 0 5px #D7D7DB;
-      transition: box-shadow 150ms; }
-    .top-sites-list .top-site-outer:-moz-any(.active, :focus, :hover) .edit-menu {
-      opacity: 1;
-      transform: scale(1); }
-    .top-sites-list .top-site-outer:-moz-any(.active, :focus, :hover) .context-menu-button {
-      opacity: 1;
-      transform: scale(1); }
     .top-sites-list .top-site-outer .tile {
       border-radius: 6px;
       box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1), 0 1px 4px 0 rgba(12, 12, 13, 0.1);
@@ -347,10 +346,6 @@ main {
       text-transform: uppercase; }
       .top-sites-list .top-site-outer .tile::before {
         content: attr(data-fallback); }
-    .top-sites-list .top-site-outer.placeholder .tile {
-      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1); }
-    .top-sites-list .top-site-outer.placeholder .screenshot {
-      display: none; }
     .top-sites-list .top-site-outer .screenshot {
       background-color: #FFF;
       background-position: top left;
@@ -411,6 +406,8 @@ main {
         white-space: nowrap; }
       .top-sites-list .top-site-outer .title.pinned span {
         padding: 0 13px; }
+    .top-sites-list .top-site-outer .edit-button {
+      background-image: url("../data/content/assets/glyph-edit-16.svg"); }
     .top-sites-list .top-site-outer .edit-menu {
       background: #FFF;
       border: 1px solid #B1B1B3;
@@ -446,6 +443,22 @@ main {
           border-right: 0; }
         .top-sites-list .top-site-outer .edit-menu button:first-child:dir(rtl) {
           border-right: 0; }
+    .top-sites-list .top-site-outer.placeholder .tile {
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1); }
+    .top-sites-list .top-site-outer.placeholder .screenshot {
+      display: none; }
+    .top-sites-list .top-site-outer.placeholder .edit-menu:last-child button {
+      background-size: 13px;
+      width: 23px; }
+  .top-sites-list:not(.dnd-active) .top-site-outer:-moz-any(.active, :focus, :hover) .tile {
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1), 0 0 0 5px #D7D7DB;
+    transition: box-shadow 150ms; }
+  .top-sites-list:not(.dnd-active) .top-site-outer:-moz-any(.active, :focus, :hover) .edit-menu {
+    opacity: 1;
+    transform: scale(1); }
+  .top-sites-list:not(.dnd-active) .top-site-outer:-moz-any(.active, :focus, :hover) .context-menu-button {
+    opacity: 1;
+    transform: scale(1); }
 
 .edit-topsites-wrapper .edit-topsites-button {
   border-right: 1px solid #D7D7DB;
@@ -918,6 +931,9 @@ main {
   padding: 0 16px; }
   .confirmation-dialog .actions button {
     margin-inline-end: 16px;
+    padding-inline-end: 18px;
+    padding-inline-start: 18px;
+    white-space: normal;
     width: 50%; }
     .confirmation-dialog .actions button.done {
       margin-inline-end: 0;
@@ -1175,11 +1191,14 @@ main {
       offset-inline-end: 0;
       position: absolute; }
     .collapsible-section .section-top-bar .section-info-option .info-option::before {
-      background-image: url("chrome://global/skin/arrow/panelarrow-vertical@2x.png");
+      background-image: url("chrome://global/skin/arrow/panelarrow-vertical.svg");
       background-position: right 7px bottom;
       background-repeat: no-repeat;
       background-size: 18px 10px;
+      -moz-context-properties: fill, stroke;
+      fill: #FFF;
       height: 32px;
+      stroke: #D7D7DB;
       top: -32px;
       width: 43px; }
     .collapsible-section .section-top-bar .section-info-option .info-option:dir(rtl)::before {

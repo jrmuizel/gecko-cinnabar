@@ -49,6 +49,7 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ClientSource.h"
+#include "mozilla/dom/ClientState.h"
 #include "mozilla/dom/Console.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/ErrorEvent.h"
@@ -63,6 +64,7 @@
 #include "mozilla/dom/MessagePortBinding.h"
 #include "mozilla/dom/nsCSPUtils.h"
 #include "mozilla/dom/Performance.h"
+#include "mozilla/dom/PerformanceStorageWorker.h"
 #include "mozilla/dom/PMessagePort.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseDebugging.h"
@@ -1377,28 +1379,6 @@ private:
   }
 };
 
-class UpdatePreferenceRunnable final : public WorkerControlRunnable
-{
-  WorkerPreference mPref;
-  bool mValue;
-
-public:
-  UpdatePreferenceRunnable(WorkerPrivate* aWorkerPrivate,
-                           WorkerPreference aPref,
-                           bool aValue)
-    : WorkerControlRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount),
-      mPref(aPref),
-      mValue(aValue)
-  { }
-
-  virtual bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
-  {
-    aWorkerPrivate->UpdatePreferenceInternal(mPref, mValue);
-    return true;
-  }
-};
-
 class UpdateLanguagesRunnable final : public WorkerRunnable
 {
   nsTArray<nsString> mLanguages;
@@ -1512,7 +1492,7 @@ public:
   { }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->CycleCollectInternal(mCollectChildren);
     return true;
@@ -1529,7 +1509,7 @@ public:
   }
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->OfflineStatusChangeEventInternal(mIsOffline);
     return true;
@@ -1547,7 +1527,7 @@ public:
   {}
 
   bool
-  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate)
+  WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->MemoryPressureInternal();
     return true;
@@ -1614,7 +1594,7 @@ public:
     : WorkerHolder("SimpleWorkerHolder")
   {}
 
-  virtual bool Notify(Status aStatus) { return true; }
+  virtual bool Notify(Status aStatus) override { return true; }
 };
 
 } /* anonymous namespace */
@@ -1872,6 +1852,7 @@ WorkerLoadInfo::StealFrom(WorkerLoadInfo& aOther)
   mStorageAllowed = aOther.mStorageAllowed;
   mServiceWorkersTestingInWindow = aOther.mServiceWorkersTestingInWindow;
   mOriginAttributes = aOther.mOriginAttributes;
+  mParentController = aOther.mParentController;
 }
 
 nsresult
@@ -1929,7 +1910,7 @@ WorkerLoadInfo::GetPrincipalAndLoadGroupFromChannel(nsIChannel* aChannel,
   MOZ_DIAGNOSTIC_ASSERT(aLoadGroupOut);
 
   // Initial triggering principal should be set
-  MOZ_DIAGNOSTIC_ASSERT(mLoadingPrincipal);
+  NS_ENSURE_TRUE(mLoadingPrincipal, NS_ERROR_DOM_INVALID_STATE_ERR);
 
   nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
   MOZ_DIAGNOSTIC_ASSERT(ssm);
@@ -1937,6 +1918,19 @@ WorkerLoadInfo::GetPrincipalAndLoadGroupFromChannel(nsIChannel* aChannel,
   nsCOMPtr<nsIPrincipal> channelPrincipal;
   nsresult rv = ssm->GetChannelResultPrincipal(aChannel, getter_AddRefs(channelPrincipal));
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // Every time we call GetChannelResultPrincipal() it will return a different
+  // null principal for a data URL.  We don't want to change the worker's
+  // principal again, though.  Instead just keep the original null principal we
+  // first got from the channel.
+  //
+  // Note, we don't do this by setting principalToInherit on the channel's
+  // load info because we don't yet have the first null principal when we
+  // create the channel.
+  if (mPrincipal && mPrincipal->GetIsNullPrincipal() &&
+                    channelPrincipal->GetIsNullPrincipal()) {
+    channelPrincipal = mPrincipal;
+  }
 
   nsCOMPtr<nsILoadGroup> channelLoadGroup;
   rv = aChannel->GetLoadGroup(getter_AddRefs(channelLoadGroup));
@@ -2000,7 +1994,6 @@ WorkerLoadInfo::SetPrincipalFromChannel(nsIChannel* aChannel)
   return SetPrincipalOnMainThread(principal, loadGroup);
 }
 
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 bool
 WorkerLoadInfo::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
 {
@@ -2030,6 +2023,7 @@ WorkerLoadInfo::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
   return false;
 }
 
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 bool
 WorkerLoadInfo::PrincipalIsValid() const
 {
@@ -3514,20 +3508,6 @@ WorkerPrivateParent<Derived>::UpdateContextOptions(
 
 template <class Derived>
 void
-WorkerPrivateParent<Derived>::UpdatePreference(WorkerPreference aPref, bool aValue)
-{
-  AssertIsOnParentThread();
-  MOZ_ASSERT(aPref >= 0 && aPref < WORKERPREF_COUNT);
-
-  RefPtr<UpdatePreferenceRunnable> runnable =
-    new UpdatePreferenceRunnable(ParentAsWorkerPrivate(), aPref, aValue);
-  if (!runnable->Dispatch()) {
-    NS_WARNING("Failed to update worker preferences!");
-  }
-}
-
-template <class Derived>
-void
 WorkerPrivateParent<Derived>::UpdateLanguages(const nsTArray<nsString>& aLanguages)
 {
   AssertIsOnParentThread();
@@ -4000,7 +3980,6 @@ WorkerPrivateParent<Derived>::SetPrincipalFromChannel(nsIChannel* aChannel)
   return mLoadInfo.SetPrincipalFromChannel(aChannel);
 }
 
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 template <class Derived>
 bool
 WorkerPrivateParent<Derived>::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
@@ -4008,6 +3987,7 @@ WorkerPrivateParent<Derived>::FinalChannelPrincipalIsValid(nsIChannel* aChannel)
   return mLoadInfo.FinalChannelPrincipalIsValid(aChannel);
 }
 
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
 template <class Derived>
 bool
 WorkerPrivateParent<Derived>::PrincipalURIMatchesScriptURL()
@@ -4540,12 +4520,10 @@ WorkerPrivate::WorkerPrivate(WorkerPrivate* aParent,
 {
   if (aParent) {
     aParent->AssertIsOnWorkerThread();
-    aParent->GetAllPreferences(mPreferences);
     mOnLine = aParent->OnLine();
   }
   else {
     AssertIsOnMainThread();
-    RuntimeService::GetDefaultPreferences(mPreferences);
     mOnLine = !NS_IsOffline();
   }
 
@@ -4827,6 +4805,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
     loadInfo.mOriginAttributes = aParent->GetOriginAttributes();
     loadInfo.mServiceWorkersTestingInWindow =
       aParent->ServiceWorkersTestingInWindow();
+    loadInfo.mParentController = aParent->GetController();
   } else {
     AssertIsOnMainThread();
 
@@ -4867,6 +4846,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
     }
 
     nsCOMPtr<nsIDocument> document;
+    Maybe<ClientInfo> clientInfo;
 
     if (globalWindow) {
       // Only use the current inner window, and only use it if the caller can
@@ -4898,6 +4878,8 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       loadInfo.mBaseURI = document->GetDocBaseURI();
       loadInfo.mLoadGroup = document->GetDocumentLoadGroup();
       NS_ENSURE_TRUE(loadInfo.mLoadGroup, NS_ERROR_FAILURE);
+
+      clientInfo = globalWindow->GetClientInfo();
 
       // Use the document's NodePrincipal as loading principal if we're not being
       // called from chrome.
@@ -4954,6 +4936,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
         nsContentUtils::StorageAllowedForWindow(globalWindow);
       loadInfo.mStorageAllowed = access > nsContentUtils::StorageAccess::eDeny;
       loadInfo.mOriginAttributes = nsContentUtils::GetOriginAttributes(document);
+      loadInfo.mParentController = globalWindow->GetController();
     } else {
       // Not a window
       MOZ_ASSERT(isChrome);
@@ -5014,6 +4997,7 @@ WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
                                         loadInfo.mBaseURI,
                                         document, loadInfo.mLoadGroup,
                                         aScriptURL,
+                                        clientInfo,
                                         ContentPolicyType(aWorkerType),
                                         useDefaultEncoding,
                                         getter_AddRefs(loadInfo.mChannel));
@@ -5040,8 +5024,7 @@ WorkerPrivate::OverrideLoadInfoLoadGroup(WorkerLoadInfo& aLoadInfo,
                                          nsIPrincipal* aPrincipal)
 {
   MOZ_ASSERT(!aLoadInfo.mInterfaceRequestor);
-  MOZ_ASSERT(aLoadInfo.mPrincipal == aPrincipal /* service workers */ ||
-             aLoadInfo.mLoadingPrincipal == aPrincipal /* any other worker type */);
+  MOZ_ASSERT(aLoadInfo.mLoadingPrincipal == aPrincipal);
 
   aLoadInfo.mInterfaceRequestor =
     new WorkerLoadInfo::InterfaceRequestor(aPrincipal, aLoadInfo.mLoadGroup);
@@ -5332,9 +5315,7 @@ WorkerPrivate::EnsureClientSource()
 
   mClientSource = ClientManager::CreateSource(type, mWorkerHybridEventTarget,
                                               GetPrincipalInfo());
-  if (!mClientSource) {
-    return false;
-  }
+  MOZ_DIAGNOSTIC_ASSERT(mClientSource);
 
   if (mFrozen) {
     mClientSource->Freeze();
@@ -5372,6 +5353,24 @@ WorkerPrivate::GetClientInfo() const
   AssertIsOnWorkerThread();
   MOZ_DIAGNOSTIC_ASSERT(mClientSource);
   return mClientSource->Info();
+}
+
+const ClientState
+WorkerPrivate::GetClientState() const
+{
+  AssertIsOnWorkerThread();
+  MOZ_DIAGNOSTIC_ASSERT(mClientSource);
+  ClientState state;
+  mClientSource->SnapshotState(&state);
+  return Move(state);
+}
+
+const Maybe<ServiceWorkerDescriptor>
+WorkerPrivate::GetController() const
+{
+  AssertIsOnWorkerThread();
+  MOZ_DIAGNOSTIC_ASSERT(mClientSource);
+  return mClientSource->GetController();
 }
 
 void
@@ -6866,19 +6865,6 @@ WorkerPrivate::UpdateLanguagesInternal(const nsTArray<nsString>& aLanguages)
 }
 
 void
-WorkerPrivate::UpdatePreferenceInternal(WorkerPreference aPref, bool aValue)
-{
-  AssertIsOnWorkerThread();
-  MOZ_ASSERT(aPref >= 0 && aPref < WORKERPREF_COUNT);
-
-  mPreferences[aPref] = aValue;
-
-  for (uint32_t index = 0; index < mChildWorkers.Length(); index++) {
-    mChildWorkers[index]->UpdatePreference(aPref, aValue);
-  }
-}
-
-void
 WorkerPrivate::UpdateJSWorkerMemoryParameterInternal(JSContext* aCx,
                                                      JSGCParamKey aKey,
                                                      uint32_t aValue)
@@ -7225,6 +7211,18 @@ WorkerPrivate::DumpCrashInformation(nsACString& aString)
     aString.Append("|");
     aString.Append(holder->Name());
   }
+}
+
+PerformanceStorage*
+WorkerPrivate::GetPerformanceStorage()
+{
+  AssertIsOnMainThread();
+
+  if (!mPerformanceStorage) {
+    mPerformanceStorage = PerformanceStorageWorker::Create(this);
+  }
+
+  return mPerformanceStorage;
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(ExternalRunnableWrapper, WorkerRunnable)

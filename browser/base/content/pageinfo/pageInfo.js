@@ -128,7 +128,6 @@ pageInfoTreeView.prototype = {
   hasNextSibling(index, after) { return false; },
   getLevel(index) { return 0; },
   getImageSrc(row, column) { },
-  getProgressMode(row, column) { },
   getCellValue(row, column) { },
   toggleOpenState(index) { },
   cycleHeader(col) { },
@@ -261,9 +260,6 @@ function getClipboardHelper() {
     }
 }
 const gClipboardHelper = getClipboardHelper();
-
-// Interface for image loading content
-const nsIImageLoadingContent = Components.interfaces.nsIImageLoadingContent;
 
 // namespaces, don't need all of these yet...
 const XLinkNS  = "http://www.w3.org/1999/xlink";
@@ -1016,7 +1012,7 @@ function formatDate(datestr, unknown) {
   if (!date.valueOf())
     return unknown;
 
-  const dateTimeFormatter = Services.intl.createDateTimeFormat(undefined, {
+  const dateTimeFormatter = new Services.intl.DateTimeFormat(undefined, {
     dateStyle: "long", timeStyle: "long"
   });
   return dateTimeFormatter.format(date);

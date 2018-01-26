@@ -20,7 +20,6 @@
 #include "nsIContentInlines.h"
 #include "nsIDocument.h"
 #include "nsIDOMEvent.h"
-#include "nsIDOMStyleSheet.h"
 #include "nsINode.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsIURL.h"
@@ -234,7 +233,7 @@ HTMLLinkElement::CreateAndDispatchEvent(nsIDocument* aDoc,
   // this should never actually happen and the performance hit is minimal,
   // doing the "right" thing costs virtually nothing here, even if it doesn't
   // make much sense.
-  static nsIContent::AttrValuesArray strings[] =
+  static Element::AttrValuesArray strings[] =
     {&nsGkAtoms::_empty, &nsGkAtoms::stylesheet, nullptr};
 
   if (!nsContentUtils::HasNonEmptyAttr(this, kNameSpaceID_None,

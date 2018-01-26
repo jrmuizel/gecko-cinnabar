@@ -327,7 +327,7 @@ CacheRegisterAllocator::restoreIonLiveRegisters(MacroAssembler& masm, LiveRegist
 static void*
 GetReturnAddressToIonCode(JSContext* cx)
 {
-    JSJitFrameIter frame(cx);
+    JSJitFrameIter frame(cx->activation()->asJit());
     MOZ_ASSERT(frame.type() == JitFrame_Exit,
                "An exit frame is expected as update functions are called with a VMFunction.");
 
@@ -1233,7 +1233,6 @@ IonCacheIRCompiler::emitCallProxyHasPropResult()
     masm.storeCallResultValue(output);
     return true;
 }
-
 
 bool
 IonCacheIRCompiler::emitLoadUnboxedPropertyResult()

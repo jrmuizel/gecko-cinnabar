@@ -133,7 +133,7 @@ static constexpr Register RegExpTesterRegExpReg = CallTempReg0;
 static constexpr Register RegExpTesterStringReg = CallTempReg1;
 static constexpr Register RegExpTesterLastIndexReg = CallTempReg2;
 
-static constexpr uint32_t CodeAlignment = 4;
+static constexpr uint32_t CodeAlignment = 8;
 
 // This boolean indicates whether we support SIMD instructions flavoured for
 // this architecture or not. Rather than a method in the LIRGenerator, it is
@@ -219,15 +219,14 @@ class InstJump;
 
 uint32_t RS(Register r);
 uint32_t RT(Register r);
-uint32_t RT(uint32_t regCode);
 uint32_t RT(FloatRegister r);
 uint32_t RD(Register r);
 uint32_t RD(FloatRegister r);
-uint32_t RD(uint32_t regCode);
 uint32_t RZ(Register r);
 uint32_t RZ(FloatRegister r);
 uint32_t SA(uint32_t value);
 uint32_t SA(FloatRegister r);
+uint32_t FS(uint32_t value);
 
 Register toRS (Instruction& i);
 Register toRT (Instruction& i);
@@ -627,7 +626,7 @@ class GSImm13
       : value(imm & ~0xf)
     { }
     uint32_t encode(uint32_t shift) {
-        return ((value >> 4) & 0x1f) << shift;
+        return ((value >> 4) & 0x1ff) << shift;
     }
     int32_t decodeSigned() {
         return value;
@@ -1232,7 +1231,7 @@ class AssemblerMIPSShared : public AssemblerShared
 
     // label operations
     void bind(Label* label, BufferOffset boff = BufferOffset());
-    void bindLater(Label* label, wasm::TrapDesc target);
+    void bindLater(Label* label, wasm::OldTrapDesc target);
     virtual void bind(InstImm* inst, uintptr_t branch, uintptr_t target) = 0;
     void bind(CodeOffset* label) {
         label->bind(currentOffset());
@@ -1422,6 +1421,9 @@ class InstReg : public Instruction
       : Instruction(op | code | ff)
     { }
     // for float point
+    InstReg(Opcode op, RSField rs, Register rt, uint32_t fs)
+      : Instruction(op | rs | RT(rt) | FS(fs))
+    { }
     InstReg(Opcode op, RSField rs, Register rt, FloatRegister rd)
       : Instruction(op | rs | RT(rt) | RD(rd))
     { }

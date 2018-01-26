@@ -15,8 +15,6 @@
 #include "nsContentUtils.h"
 #include "nsCORSListenerProxy.h"
 #include "nsIStreamListener.h"
-#include "nsIDocument.h"
-#include "nsMixedContentBlocker.h"
 #include "nsCDefaultURIFixup.h"
 #include "nsIURIFixup.h"
 #include "nsIImageLoadingContent.h"
@@ -512,13 +510,6 @@ DoContentSecurityChecks(nsIChannel* aChannel, nsILoadInfo* aLoadInfo)
     return NS_ERROR_CONTENT_BLOCKED;
   }
 
-  if (nsMixedContentBlocker::sSendHSTSPriming) {
-    rv = nsMixedContentBlocker::MarkLoadInfoForPriming(uri,
-                                                       requestingContext,
-                                                       aLoadInfo);
-    return rv;
-  }
-
   return NS_OK;
 }
 
@@ -614,6 +605,36 @@ nsContentSecurityManager::AsyncOnChannelRedirect(nsIChannel* aOldChannel,
   nsCOMPtr<nsIURI> newURI;
   Unused << NS_GetFinalChannelURI(aNewChannel, getter_AddRefs(newURI));
   NS_ENSURE_STATE(oldPrincipal && newURI);
+
+  // Do not allow insecure redirects to data: URIs
+  if (loadInfo && loadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_SCRIPT) {
+    bool isDataURI = (NS_SUCCEEDED(newURI->SchemeIs("data", &isDataURI)) && isDataURI);
+    if (isDataURI) {
+      nsAutoCString dataSpec;
+      newURI->GetSpec(dataSpec);
+      if (dataSpec.Length() > 50) {
+        dataSpec.Truncate(50);
+        dataSpec.AppendLiteral("...");
+      }
+      nsCOMPtr<nsIDocument> doc;
+      nsINode* node = loadInfo->LoadingNode();
+      if (node) {
+        doc = node->OwnerDoc();
+      }
+      NS_ConvertUTF8toUTF16 specUTF16(NS_UnescapeURL(dataSpec));
+      const char16_t* params[] = { specUTF16.get() };
+      nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+                                      NS_LITERAL_CSTRING("DATA_URI_BLOCKED"),
+                                      doc,
+                                      nsContentUtils::eSECURITY_PROPERTIES,
+                                      "BlockSubresourceRedirectToData",
+                                      params, ArrayLength(params));
+
+      // cancel the old channel and return an error
+      aOldChannel->Cancel(NS_ERROR_CONTENT_BLOCKED);
+      return NS_ERROR_CONTENT_BLOCKED;
+    }
+  }
 
   const uint32_t flags =
       nsIScriptSecurityManager::LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT |

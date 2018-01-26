@@ -171,7 +171,7 @@ ToLength(JSContext* cx, HandleValue v, uint64_t* out)
     return true;
 }
 
-static bool
+static MOZ_ALWAYS_INLINE bool
 GetLengthProperty(JSContext* cx, HandleObject obj, uint64_t* lengthp)
 {
     if (obj->is<ArrayObject>()) {
@@ -1525,8 +1525,10 @@ SetArrayElements(JSContext* cx, HandleObject obj, uint64_t start,
 static DenseElementResult
 ArrayReverseDenseKernel(JSContext* cx, HandleNativeObject obj, uint32_t length)
 {
-    /* An empty array or an array with no elements is already reversed. */
-    if (length == 0 || obj->getDenseInitializedLength() == 0)
+    MOZ_ASSERT(length > 1);
+
+    // If there are no elements, we're done.
+    if (obj->getDenseInitializedLength() == 0)
         return DenseElementResult::Success;
 
     if (obj->denseElementsAreFrozen())
@@ -1552,6 +1554,11 @@ ArrayReverseDenseKernel(JSContext* cx, HandleNativeObject obj, uint32_t length)
     } else {
         if (!obj->maybeCopyElementsForWrite(cx))
             return DenseElementResult::Failure;
+    }
+
+    if (!MaybeInIteration(obj, cx) && !cx->zone()->needsIncrementalBarrier()) {
+        obj->reverseDenseElementsNoPreBarrier(length);
+        return DenseElementResult::Success;
     }
 
     RootedValue origlo(cx), orighi(cx);
@@ -1594,6 +1601,12 @@ js::array_reverse(JSContext* cx, unsigned argc, Value* vp)
     uint64_t len;
     if (!GetLengthProperty(cx, obj, &len))
         return false;
+
+    // An empty array or an array with length 1 is already reversed.
+    if (len <= 1) {
+        args.rval().setObject(*obj);
+        return true;
+    }
 
     if (IsPackedArrayOrNoExtraIndexedProperties(obj, len) && len <= UINT32_MAX) {
         DenseElementResult result =
@@ -3536,6 +3549,12 @@ static const JSFunctionSpec array_methods[] = {
 
     /* ES7 additions */
     JS_SELF_HOSTED_FN("includes",    "ArrayIncludes",    2,0),
+
+#ifdef NIGHTLY_BUILD
+    JS_SELF_HOSTED_FN("flatMap",     "ArrayFlatMap",     1,0),
+    JS_SELF_HOSTED_FN("flatten",     "ArrayFlatten",     0,0),
+#endif
+
     JS_FS_END
 };
 
@@ -3774,8 +3793,11 @@ NewArray(JSContext* cx, uint32_t length,
     allocKind = GetBackgroundAllocKind(allocKind);
 
     RootedObject proto(cx, protoArg);
-    if (!proto && !GetBuiltinPrototype(cx, JSProto_Array, &proto))
-        return nullptr;
+    if (!proto) {
+        proto = GlobalObject::getOrCreateArrayPrototype(cx, cx->global());
+        if (!proto)
+            return nullptr;
+    }
 
     Rooted<TaggedProto> taggedProto(cx, TaggedProto(proto));
     bool isCachable = NewObjectWithTaggedProtoIsCachable(cx, taggedProto, newKind, &ArrayObject::class_);

@@ -66,22 +66,40 @@ static const char contentSandboxRules[] = R"(
     (deny default)
     (deny default (with no-log)))
   (debug deny)
+  ; These are not included in (deny default)
+  (deny process-info*)
+  ; This isn't available in some older macOS releases.
+  (if (defined? 'nvram*)
+    (deny nvram*))
+  ; The next two properties both require macOS 10.10+
+  (if (defined? 'iokit-get-properties)
+    (deny iokit-get-properties))
+  (if (defined? 'file-map-executable)
+    (deny file-map-executable))
+
+  (if (defined? 'file-map-executable)
+    (allow file-map-executable file-read*
+      (subpath "/System")
+      (subpath "/usr/lib")
+      (subpath appdir-path))
+    (allow file-read*
+        (subpath "/System")
+        (subpath "/usr/lib")
+        (subpath appdir-path)))
 
   ; Allow read access to standard system paths.
   (allow file-read*
     (require-all (file-mode #o0004)
-      (require-any (subpath "/Library/Filesystems/NetFSPlugins")
-        (subpath "/System")
-        (subpath "/usr/lib")
+      (require-any
+        (subpath "/Library/Filesystems/NetFSPlugins")
+        (subpath "/Library/GPUBundles")
         (subpath "/usr/share"))))
 
+  ; Top-level directory metadata access (bug 1404298)
+  (allow file-read-metadata (regex #"^/[^/]+$"))
+
   (allow file-read-metadata
-    (literal "/etc")
-    (literal "/tmp")
-    (literal "/var")
     (literal "/private/etc/localtime")
-    (literal "/home")
-    (literal "/net")
     (regex #"^/private/tmp/KSInstallAction\."))
 
   ; Allow read access to standard special files.
@@ -99,6 +117,9 @@ static const char contentSandboxRules[] = R"(
     file-write-data
     file-ioctl
     (literal "/dev/dtracehelper"))
+
+  ; Needed for things like getpriority()/setpriority()
+  (allow process-info-pidinfo process-info-setcontrol (target self))
 
   ; macOS 10.9 does not support the |sysctl-name| predicate, so unfortunately
   ; we need to allow all sysctl-reads there.
@@ -129,6 +150,7 @@ static const char contentSandboxRules[] = R"(
       (sysctl-name "hw.cpufrequency_max")
       (sysctl-name "hw.l2cachesize")
       (sysctl-name "hw.l3cachesize")
+      (sysctl-name "hw.cachelinesize")
       (sysctl-name "hw.cachelinesize_compat")
       (sysctl-name "hw.tbfrequency_compat")
       (sysctl-name "hw.vectorunit")
@@ -154,15 +176,6 @@ static const char contentSandboxRules[] = R"(
 
   (define (profile-subpath profile-relative-subpath)
     (subpath (string-append profileDir profile-relative-subpath)))
-
-  (define (allow-shared-preferences-read domain)
-        (begin
-          (if (defined? `user-preference-read)
-            (allow user-preference-read (preference-domain domain)))
-          (allow file-read*
-                 (home-literal (string-append "/Library/Preferences/" domain ".plist"))
-                 (home-regex (string-append "/Library/Preferences/ByHost/" (regex-quote domain) "\..*\.plist$")))
-          ))
 
   (define (allow-shared-list domain)
     (allow file-read*
@@ -195,45 +208,61 @@ static const char contentSandboxRules[] = R"(
      (iokit-user-client-class "IOHIDParamUserClient")
      (iokit-user-client-class "IOAudioEngineUserClient"))
 
+  ; Only supported on macOS 10.10+
+  (if (defined? 'iokit-get-properties)
+    (allow iokit-get-properties
+      (iokit-property "board-id")
+      (iokit-property "IODVDBundleName")
+      (iokit-property "IOGLBundleName")
+      (iokit-property "IOGVACodec")
+      (iokit-property "IOGVAHEVCDecode")
+      (iokit-property "IOGVAHEVCEncode")
+      (iokit-property "IOPCITunnelled")
+      (iokit-property "IOVARendererID")
+      (iokit-property "MetalPluginName")
+      (iokit-property "MetalPluginClassName")))
+
 ; depending on systems, the 1st, 2nd or both rules are necessary
-  (allow-shared-preferences-read "com.apple.HIToolbox")
+  (allow user-preference-read (preference-domain "com.apple.HIToolbox"))
   (allow file-read-data (literal "/Library/Preferences/com.apple.HIToolbox.plist"))
 
-  (allow-shared-preferences-read "com.apple.ATS")
+  (allow user-preference-read (preference-domain "com.apple.ATS"))
   (allow file-read-data (literal "/Library/Preferences/.GlobalPreferences.plist"))
 
   (allow file-read*
-      (subpath "/Library/Fonts")
       (subpath "/Library/Audio/Plug-Ins")
       (subpath "/Library/Spelling")
       (literal "/")
       (literal "/private/tmp")
       (literal "/private/var/tmp")
-
       (home-literal "/.CFUserTextEncoding")
       (home-literal "/Library/Preferences/com.apple.DownloadAssessment.plist")
       (home-subpath "/Library/Colors")
-      (home-subpath "/Library/Fonts")
-      (home-subpath "/Library/FontCollections")
       (home-subpath "/Library/Keyboard Layouts")
       (home-subpath "/Library/Input Methods")
       (home-subpath "/Library/Spelling")
-      (home-subpath "/Library/Application Support/Adobe/CoreSync/plugins/livetype")
-      (home-subpath "/Library/Application Support/FontAgent")
-
-      (subpath appdir-path)
-
       (literal appPath)
       (literal appBinaryPath))
 
-  (when testingReadPath1
-    (allow file-read* (subpath testingReadPath1)))
-  (when testingReadPath2
-    (allow file-read* (subpath testingReadPath2)))
-  (when testingReadPath3
-    (allow file-read* (subpath testingReadPath3)))
-  (when testingReadPath4
-    (allow file-read* (subpath testingReadPath4)))
+  (if (defined? 'file-map-executable)
+    (begin
+      (when testingReadPath1
+        (allow file-read* file-map-executable (subpath testingReadPath1)))
+      (when testingReadPath2
+        (allow file-read* file-map-executable (subpath testingReadPath2)))
+      (when testingReadPath3
+        (allow file-read* file-map-executable (subpath testingReadPath3)))
+      (when testingReadPath4
+        (allow file-read* file-map-executable (subpath testingReadPath4))))
+    (begin
+      (when testingReadPath1
+        (allow file-read* (subpath testingReadPath1)))
+      (when testingReadPath2
+        (allow file-read* (subpath testingReadPath2)))
+      (when testingReadPath3
+        (allow file-read* (subpath testingReadPath3)))
+      (when testingReadPath4
+        (allow file-read* (subpath testingReadPath4)))))
 
   (allow file-read-metadata (home-subpath "/Library"))
 
@@ -300,8 +329,8 @@ static const char contentSandboxRules[] = R"(
       (profile-subpath "/chrome")))
 
 ; accelerated graphics
-  (allow-shared-preferences-read "com.apple.opengl")
-  (allow-shared-preferences-read "com.nvidia.OpenGL")
+  (allow user-preference-read (preference-domain "com.apple.opengl"))
+  (allow user-preference-read (preference-domain "com.nvidia.OpenGL"))
   (allow mach-lookup
       (global-name "com.apple.cvmsServ"))
   (allow iokit-open
@@ -326,22 +355,17 @@ static const char contentSandboxRules[] = R"(
       (subpath appTempDir)
       (vnode-type REGULAR-FILE)))
 
-  ; bug 1382260
-  ; We may need to load fonts from outside of the standard
-  ; font directories whitelisted above. This is typically caused
-  ; by a font manager. For now, whitelist any file with a
-  ; font extension. Limit this to the common font types:
-  ; files ending in .otf, .ttf, .ttc, .otc, and .dfont.
+  ; Fonts
   (allow file-read*
-    (regex #"\.[oO][tT][fF]$"           ; otf
-           #"\.[tT][tT][fF]$"           ; ttf
-           #"\.[tT][tT][cC]$"           ; ttc
-           #"\.[oO][tT][cC]$"           ; otc
-           #"\.[dD][fF][oO][nN][tT]$")) ; dfont
-
-  ; bug 1404919
-  ; Read access (recursively) within directories ending in .fontvault
-  (allow file-read* (regex #"\.fontvault/"))
+    (subpath "/Library/Fonts")
+    (subpath "/Library/Application Support/Apple/Fonts")
+    (home-subpath "/Library/Fonts")
+    ; Allow read access to paths allowed via sandbox extensions.
+    ; This is needed for fonts in non-standard locations normally
+    ; due to third party font managers. The extensions are
+    ; automatically issued by the font server in response to font
+    ; API calls.
+    (extension "com.apple.app-sandbox.read"))
 )";
 
 static const char fileContentProcessAddend[] = R"(

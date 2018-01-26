@@ -49,8 +49,8 @@ add_task(async function() {
 
   info("Clicking on the Learn More link");
   let learnMoreLink = blockedMixedActiveContentMessage.querySelector(".learn-more-link");
-  let url = await simulateLinkClick(learnMoreLink);
-  is(url, LEARN_MORE_URI, `Clicking the provided link opens ${url}`);
+  let response = await simulateLinkClick(learnMoreLink);
+  is(response.link, LEARN_MORE_URI, `Clicking the provided link opens ${response.link}`);
 
   info("Test disabling mixed content protection");
 
@@ -74,16 +74,14 @@ add_task(async function() {
 
   info("Clicking on the Learn More link");
   learnMoreLink = mixedActiveContentMessage.querySelector(".learn-more-link");
-  url = await simulateLinkClick(learnMoreLink);
-  is(url, LEARN_MORE_URI, `Clicking the provided link opens ${url}`);
+  response = await simulateLinkClick(learnMoreLink);
+  is(response.link, LEARN_MORE_URI, `Clicking the provided link opens ${response.link}`);
 });
 
 function pushPrefEnv() {
   const prefs = [
     ["security.mixed_content.block_active_content", true],
     ["security.mixed_content.block_display_content", true],
-    ["security.mixed_content.use_hsts", false],
-    ["security.mixed_content.send_hsts_priming", false],
   ];
 
   return Promise.all(prefs.map(([pref, value]) => pushPref(pref, value)));

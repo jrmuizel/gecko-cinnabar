@@ -10,8 +10,8 @@ use bloom::StyleBloom;
 use data::{EagerPseudoStyles, ElementData};
 use dom::{TElement, SendElement};
 #[cfg(feature = "servo")] use dom::OpaqueNode;
-use euclid::ScaleFactor;
 use euclid::Size2D;
+use euclid::TypedScale;
 use fnv::FnvHashMap;
 use font_metrics::FontMetricsProvider;
 #[cfg(feature = "gecko")] use gecko_bindings::structs;
@@ -116,6 +116,21 @@ impl Default for StyleSystemOptions {
     }
 }
 
+impl StyleSystemOptions {
+    #[cfg(feature = "servo")]
+    /// On Gecko's nightly build?
+    pub fn is_nightly(&self) -> bool {
+        false
+    }
+
+    #[cfg(feature = "gecko")]
+    /// On Gecko's nightly build?
+    #[inline]
+    pub fn is_nightly(&self) -> bool {
+        structs::GECKO_IS_NIGHTLY
+    }
+}
+
 /// A shared style context.
 ///
 /// There's exactly one of these during a given restyle traversal, and it's
@@ -171,7 +186,7 @@ impl<'a> SharedStyleContext<'a> {
     }
 
     /// The device pixel ratio
-    pub fn device_pixel_ratio(&self) -> ScaleFactor<f32, CSSPixel, DevicePixel> {
+    pub fn device_pixel_ratio(&self) -> TypedScale<f32, CSSPixel, DevicePixel> {
         self.stylist.device().device_pixel_ratio()
     }
 
@@ -188,7 +203,7 @@ impl<'a> SharedStyleContext<'a> {
 /// within the `CurrentElementInfo`. At the end of the cascade, they are folded
 /// down into the main `ComputedValues` to reduce memory usage per element while
 /// still remaining accessible.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CascadeInputs {
     /// The rule node representing the ordered list of rules matched for this
     /// node.
@@ -208,15 +223,6 @@ impl CascadeInputs {
             rules: style.rules.clone(),
             visited_rules: style.visited_style().and_then(|v| v.rules.clone()),
         }
-    }
-}
-
-// We manually implement Debug for CascadeInputs so that we can avoid the
-// verbose stringification of ComputedValues for normal logging.
-impl fmt::Debug for CascadeInputs {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "CascadeInputs {{ rules: {:?}, visited_rules: {:?}, .. }}",
-               self.rules, self.visited_rules)
     }
 }
 
@@ -515,7 +521,7 @@ pub struct SelectorFlagsMap<E: TElement> {
     map: FnvHashMap<SendElement<E>, ElementSelectorFlags>,
     /// An LRU cache to avoid hashmap lookups, which can be slow if the map
     /// gets big.
-    cache: LRUCache<CacheItem<E>, [Entry<CacheItem<E>>; 4 + 1]>,
+    cache: LRUCache<[Entry<CacheItem<E>>; 4 + 1]>,
 }
 
 #[cfg(debug_assertions)]
@@ -538,23 +544,24 @@ impl<E: TElement> SelectorFlagsMap<E> {
     pub fn insert_flags(&mut self, element: E, flags: ElementSelectorFlags) {
         let el = unsafe { SendElement::new(element) };
         // Check the cache. If the flags have already been noted, we're done.
-        if self.cache.iter().find(|&(_, ref x)| x.0 == el)
-               .map_or(ElementSelectorFlags::empty(), |(_, x)| x.1)
-               .contains(flags) {
+        if let Some(item) = self.cache.find(|x| x.0 == el) {
+            if !item.1.contains(flags) {
+                item.1.insert(flags);
+                self.map.get_mut(&el).unwrap().insert(flags);
+            }
             return;
         }
 
         let f = self.map.entry(el).or_insert(ElementSelectorFlags::empty());
         *f |= flags;
 
-        // Insert into the cache. We don't worry about duplicate entries,
-        // which lets us avoid reshuffling.
         self.cache.insert((unsafe { SendElement::new(element) }, *f))
     }
 
     /// Applies the flags. Must be called on the main thread.
-    pub fn apply_flags(&mut self) {
+    fn apply_flags(&mut self) {
         debug_assert!(thread_state::get() == ThreadState::LAYOUT);
+        self.cache.evict_all();
         for (el, flags) in self.map.drain() {
             unsafe { el.set_selector_flags(flags); }
         }

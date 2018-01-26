@@ -199,6 +199,23 @@ public:
     static MOZ_THREAD_LOCAL(uintptr_t) sCurrentContext;
 
     bool mImplicitMakeCurrent;
+    bool mUseTLSIsCurrent;
+
+    class TlsScope final {
+        GLContext* const mGL;
+        const bool mWasTlsOk;
+    public:
+        explicit TlsScope(GLContext* const gl)
+            : mGL(gl)
+            , mWasTlsOk(gl->mUseTLSIsCurrent)
+        {
+            mGL->mUseTLSIsCurrent = true;
+        }
+
+        ~TlsScope() {
+            mGL->mUseTLSIsCurrent = mWasTlsOk;
+        }
+    };
 
 // -----------------------------------------------------------------------------
 // basic getters
@@ -320,7 +337,6 @@ public:
 protected:
     bool mIsOffscreen;
     mutable bool mContextLost;
-    const bool mUseTLSIsCurrent;
 
     /**
      * mVersion store the OpenGL's version, multiplied by 100. For example, if
@@ -1543,7 +1559,6 @@ public:
     }
 
     void raw_fReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid* pixels) {
-        ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(pixels);
         BEFORE_GL_CALL;
         mSymbols.fReadPixels(x, y, width, height, format, type, pixels);
         OnSyncCall();
@@ -3561,12 +3576,6 @@ public:
         return mScreen.get();
     }
 
-    /* Clear to transparent black, with 0 depth and stencil,
-     * while preserving current ClearColor etc. values.
-     * Useful for resizing offscreen buffers.
-     */
-    void ClearSafely();
-
     bool WorkAroundDriverBugs() const { return mWorkAroundDriverBugs; }
 
     bool IsDrawingToDefaultFramebuffer();
@@ -3590,6 +3599,7 @@ protected:
     GLint mViewportRect[4];
     GLint mScissorRect[4];
 
+    uint32_t mMaxTexOrRbSize = 0;
     GLint mMaxTextureSize;
     GLint mMaxCubeMapTextureSize;
     GLint mMaxTextureImageSize;
@@ -3621,11 +3631,11 @@ protected:
         return true;
     }
 
-
 public:
-    GLsizei MaxSamples() const {
-        return mMaxSamples;
-    }
+    auto MaxSamples() const { return uint32_t(mMaxSamples); }
+    auto MaxTextureSize() const { return uint32_t(mMaxTextureSize); }
+    auto MaxRenderbufferSize() const { return uint32_t(mMaxRenderbufferSize); }
+    auto MaxTexOrRbSize() const { return mMaxTexOrRbSize; }
 
 #ifdef MOZ_GL_DEBUG
     void CreatedProgram(GLContext* aOrigin, GLuint aName);
@@ -3693,13 +3703,41 @@ public:
     static bool ShouldDumpExts();
     bool Readback(SharedSurface* src, gfx::DataSourceSurface* dest);
 
-    ////
+    // --
 
     void TexParams_SetClampNoMips(GLenum target = LOCAL_GL_TEXTURE_2D) {
         fTexParameteri(target, LOCAL_GL_TEXTURE_WRAP_S, LOCAL_GL_CLAMP_TO_EDGE);
         fTexParameteri(target, LOCAL_GL_TEXTURE_WRAP_T, LOCAL_GL_CLAMP_TO_EDGE);
         fTexParameteri(target, LOCAL_GL_TEXTURE_MAG_FILTER, LOCAL_GL_NEAREST);
         fTexParameteri(target, LOCAL_GL_TEXTURE_MIN_FILTER, LOCAL_GL_NEAREST);
+    }
+
+    // --
+
+    GLuint CreateFramebuffer() {
+        GLuint x = 0;
+        fGenFramebuffers(1, &x);
+        return x;
+    }
+    GLuint CreateRenderbuffer() {
+        GLuint x = 0;
+        fGenRenderbuffers(1, &x);
+        return x;
+    }
+    GLuint CreateTexture() {
+        GLuint x = 0;
+        fGenTextures(1, &x);
+        return x;
+    }
+
+    void DeleteFramebuffer(const GLuint x) {
+        fDeleteFramebuffers(1, &x);
+    }
+    void DeleteRenderbuffer(const GLuint x) {
+        fDeleteRenderbuffers(1, &x);
+    }
+    void DeleteTexture(const GLuint x) {
+        fDeleteTextures(1, &x);
     }
 };
 

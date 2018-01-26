@@ -34,6 +34,7 @@
 #include "nsIStreamConverterService.h"
 #include "nsCRT.h"
 #include "nsContentUtils.h"
+#include "nsIMutableArray.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIObserverService.h"
 #include "nsProxyRelease.h"
@@ -41,6 +42,7 @@
 #include "nsIDocShell.h"
 #include "nsINetworkInterceptController.h"
 #include "mozilla/dom/Performance.h"
+#include "mozilla/dom/PerformanceStorage.h"
 #include "mozIThirdPartyUtil.h"
 #include "nsStreamUtils.h"
 #include "nsThreadUtils.h"
@@ -65,6 +67,7 @@
 #include "nsIDOMWindowUtils.h"
 #include "nsHttpChannel.h"
 #include "nsRedirectHistoryEntry.h"
+#include "nsServerTiming.h"
 
 #include <algorithm>
 #include "HttpBaseChannel.h"
@@ -161,6 +164,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mClassOfService(0)
   , mPriority(PRIORITY_NORMAL)
   , mRedirectionLimit(gHttpHandler->RedirectionLimit())
+  , mUpgradeToSecure(false)
   , mApplyConversion(true)
   , mIsPending(false)
   , mWasOpened(false)
@@ -202,6 +206,7 @@ HttpBaseChannel::HttpBaseChannel()
   , mFetchCacheMode(nsIHttpChannelInternal::FETCH_CACHE_MODE_DEFAULT)
   , mOnStartRequestCalled(false)
   , mOnStopRequestCalled(false)
+  , mUpgradableToSecure(true)
   , mAfterOnStartRequestBegun(false)
   , mTransferSize(0)
   , mDecodedBodySize(0)
@@ -993,8 +998,10 @@ HttpBaseChannel::EnsureUploadStreamIsCloneableComplete(nsresult aStatus)
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::CloneUploadStream(nsIInputStream** aClonedStream)
+HttpBaseChannel::CloneUploadStream(int64_t* aContentLength,
+                                   nsIInputStream** aClonedStream)
 {
+  NS_ENSURE_ARG_POINTER(aContentLength);
   NS_ENSURE_ARG_POINTER(aClonedStream);
   *aClonedStream = nullptr;
 
@@ -1007,6 +1014,12 @@ HttpBaseChannel::CloneUploadStream(nsIInputStream** aClonedStream)
   NS_ENSURE_SUCCESS(rv, rv);
 
   clonedStream.forget(aClonedStream);
+
+  if (mReqContentLengthDetermined) {
+    *aContentLength = mReqContentLength;
+  } else {
+    *aContentLength = -1;
+  }
 
   return NS_OK;
 }
@@ -1555,7 +1568,8 @@ HttpBaseChannel::GetReferrer(nsIURI **referrer)
 NS_IMETHODIMP
 HttpBaseChannel::SetReferrer(nsIURI *referrer)
 {
-  return SetReferrerWithPolicy(referrer, NS_GetDefaultReferrerPolicy());
+  bool isPrivate = mLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+  return SetReferrerWithPolicy(referrer, NS_GetDefaultReferrerPolicy(isPrivate));
 }
 
 NS_IMETHODIMP
@@ -1612,7 +1626,8 @@ HttpBaseChannel::SetReferrerWithPolicy(nsIURI *referrer,
   }
 
   if (mReferrerPolicy == REFERRER_POLICY_UNSET) {
-    mReferrerPolicy = NS_GetDefaultReferrerPolicy();
+    bool isPrivate = mLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+    mReferrerPolicy = NS_GetDefaultReferrerPolicy(isPrivate);
   }
 
   if (!referrer) {
@@ -2194,6 +2209,20 @@ HttpBaseChannel::RedirectTo(nsIURI *targetURI)
   NS_ENSURE_FALSE(mOnStartRequestCalled, NS_ERROR_NOT_AVAILABLE);
 
   mAPIRedirectToURI = targetURI;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::UpgradeToSecure()
+{
+  // Upgrades are handled internally between http-on-modify-request and
+  // http-on-before-connect, which means upgrades are only possible during
+  // on-modify, or WebRequest.onBeforeRequest in Web Extensions.  Once we are
+  // past the code path where upgrades are handled, attempting an upgrade
+  // will throw an error.
+  NS_ENSURE_TRUE(mUpgradableToSecure, NS_ERROR_NOT_AVAILABLE);
+
+  mUpgradeToSecure = true;
   return NS_OK;
 }
 
@@ -2954,6 +2983,13 @@ HttpBaseChannel::FlushReportsToConsole(uint64_t aInnerWindowID,
 }
 
 void
+HttpBaseChannel::FlushReportsToConsoleForServiceWorkerScope(const nsACString& aScope,
+                                                            ReportAction aAction)
+{
+  mReportCollector->FlushReportsToConsoleForServiceWorkerScope(aScope, aAction);
+}
+
+void
 HttpBaseChannel::FlushConsoleReports(nsIDocument* aDocument,
                                      ReportAction aAction)
 {
@@ -3044,7 +3080,7 @@ HttpBaseChannel::ShouldIntercept(nsIURI* aURI)
 
   if (controller && mLoadInfo && !BypassServiceWorker() && !internalRedirect) {
     nsresult rv = controller->ShouldPrepareForIntercept(aURI ? aURI : mURI.get(),
-                                                        nsContentUtils::IsNonSubresourceRequest(this),
+                                                        this,
                                                         &shouldIntercept);
     if (NS_FAILED(rv)) {
       return false;
@@ -3327,6 +3363,23 @@ HttpBaseChannel::IsReferrerSchemeAllowed(nsIURI *aReferrer)
     return true;
   }
   return false;
+}
+
+/* static */
+void
+HttpBaseChannel::PropagateReferenceIfNeeded(nsIURI* aURI, nsIURI* aRedirectURI)
+{
+  bool hasRef = false;
+  nsresult rv = aRedirectURI->GetHasRef(&hasRef);
+  if (NS_SUCCEEDED(rv) && !hasRef) {
+    nsAutoCString ref;
+    aURI->GetRef(ref);
+    if (!ref.IsEmpty()) {
+      // NOTE: SetRef will fail if mRedirectURI is immutable
+      // (e.g. an about: URI)... Oh well.
+      aRedirectURI->SetRef(ref);
+    }
+  }
 }
 
 bool
@@ -4103,8 +4156,8 @@ IMPL_TIMING_ATTR(RedirectEnd)
 
 #undef IMPL_TIMING_ATTR
 
-mozilla::dom::Performance*
-HttpBaseChannel::GetPerformance()
+mozilla::dom::PerformanceStorage*
+HttpBaseChannel::GetPerformanceStorage()
 {
   // If performance timing is disabled, there is no need for the Performance
   // object anymore.
@@ -4120,6 +4173,12 @@ HttpBaseChannel::GetPerformance()
 
   if (!mLoadInfo) {
     return nullptr;
+  }
+
+  // If a custom performance storage is set, let's use it.
+  mozilla::dom::PerformanceStorage* performanceStorage = mLoadInfo->GetPerformanceStorage();
+  if (performanceStorage) {
+    return performanceStorage;
   }
 
   // We don't need to report the resource timing entry for a TYPE_DOCUMENT load.
@@ -4151,12 +4210,12 @@ HttpBaseChannel::GetPerformance()
     return nullptr;
   }
 
-  mozilla::dom::Performance* docPerformance = innerWindow->GetPerformance();
-  if (!docPerformance) {
+  mozilla::dom::Performance* performance = innerWindow->GetPerformance();
+  if (!performance) {
     return nullptr;
   }
 
-  return docPerformance;
+  return performance->AsPerformanceStorage();
 }
 
 NS_IMETHODIMP
@@ -4407,6 +4466,47 @@ HttpBaseChannel::CallTypeSniffers(void *aClosure, const uint8_t *aData,
   if (!newType.IsEmpty()) {
     chan->SetContentType(newType);
   }
+}
+
+template <class T>
+static void
+ParseServerTimingHeader(const nsAutoPtr<T> &aHeader,
+                        nsIMutableArray* aOutput)
+{
+  if (!aHeader) {
+    return;
+  }
+
+  nsAutoCString serverTimingHeader;
+  Unused << aHeader->GetHeader(nsHttp::Server_Timing, serverTimingHeader);
+  if (serverTimingHeader.IsEmpty()) {
+    return;
+  }
+
+  ServerTimingParser parser(serverTimingHeader);
+  parser.Parse();
+
+  nsTArray<nsCOMPtr<nsIServerTiming>> array = parser.TakeServerTimingHeaders();
+  for (const auto &data : array) {
+    aOutput->AppendElement(data);
+  }
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetServerTiming(nsIArray **aServerTiming)
+{
+  NS_ENSURE_ARG_POINTER(aServerTiming);
+
+  nsTArray<nsCOMPtr<nsIServerTiming>> data;
+  nsresult rv = NS_OK;
+  nsCOMPtr<nsIMutableArray> array = do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  ParseServerTimingHeader(mResponseHead, array);
+  ParseServerTimingHeader(mResponseTrailers, array);
+
+  array.forget(aServerTiming);
+  return NS_OK;
 }
 
 } // namespace net

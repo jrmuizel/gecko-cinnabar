@@ -30,6 +30,7 @@ from mach.decorators import (
 from mach.main import Mach
 
 from mozbuild.base import (
+    BuildEnvironmentNotFoundException,
     MachCommandBase,
     MachCommandConditions as conditions,
     MozbuildObject,
@@ -274,8 +275,10 @@ class CargoProvider(MachCommandBase):
 
     @SubCommand('cargo', 'check',
                 description='Run `cargo check` on a given crate.  Defaults to gkrust.')
+    @CommandArgument('--all-crates', default=None, action='store_true',
+        help='Check all of the crates in the tree.')
     @CommandArgument('crates', default=None, nargs='*', help='The crate name(s) to check.')
-    def check(self, crates=None):
+    def check(self, all_crates=None, crates=None):
         # XXX duplication with `mach vendor rust`
         crates_and_roots = {
             'gkrust': 'toolkit/library/rust',
@@ -285,7 +288,9 @@ class CargoProvider(MachCommandBase):
             'geckodriver': 'testing/geckodriver',
         }
 
-        if crates == None:
+        if all_crates:
+            crates = crates_and_roots.keys()
+        elif crates == None or crates == []:
             crates = ['gkrust']
 
         for crate in crates:
@@ -363,6 +368,13 @@ class Clobber(MachCommandBase):
                 cmd = ['find', '.', '-type', 'f', '-name', '*.py[co]', '-delete']
             ret = subprocess.call(cmd, cwd=self.topsrcdir)
         return ret
+
+    @property
+    def substs(self):
+        try:
+            return super(Clobber, self).substs
+        except BuildEnvironmentNotFoundException:
+            return {}
 
 @CommandProvider
 class Logs(MachCommandBase):
@@ -1281,19 +1293,19 @@ class PackageFrontend(MachCommandBase):
             def __init__(self, task_id, artifact_name):
                 cot = cache._download_manager.session.get(
                     get_artifact_url(task_id, 'public/chainOfTrust.json.asc'))
+                cot.raise_for_status()
                 digest = algorithm = None
-                if cot.status_code == 200:
-                    # The file is GPG-signed, but we don't care about validating
-                    # that. Instead of parsing the PGP signature, we just take
-                    # the one line we're interested in, which starts with a `{`.
-                    data = {}
-                    for l in cot.content.splitlines():
-                        if l.startswith('{'):
-                            try:
-                                data = json.loads(l)
-                                break
-                            except Exception:
-                                pass
+                data = {}
+                # The file is GPG-signed, but we don't care about validating
+                # that. Instead of parsing the PGP signature, we just take
+                # the one line we're interested in, which starts with a `{`.
+                for l in cot.content.splitlines():
+                    if l.startswith('{'):
+                        try:
+                            data = json.loads(l)
+                            break
+                        except Exception:
+                            pass
                 for algorithm, digest in (data.get('artifacts', {})
                                               .get(artifact_name, {}).items()):
                     pass
@@ -1326,18 +1338,10 @@ class PackageFrontend(MachCommandBase):
                          'should be determined in the decision task.')
                 return 1
             from taskgraph.optimize import IndexSearch
-            params = {
-                'message': '',
-                'project': '',
-                'level': os.environ.get('MOZ_SCM_LEVEL', '3'),
-                'base_repository': '',
-                'head_repository': '',
-                'head_rev': '',
-                'moz_build_date': '',
-                'build_date': 0,
-                'pushlog_id': 0,
-                'owner': '',
-            }
+            from taskgraph.parameters import Parameters
+            params = Parameters(
+                level=os.environ.get('MOZ_SCM_LEVEL', '3'),
+                strict=False)
 
             # TODO: move to the taskcluster package
             def tasks(kind_name):

@@ -309,11 +309,11 @@ ContentEventHandler::InitRootContent(Selection* aNormalSelection)
   }
 
   // See bug 537041 comment 5, the range could have removed node.
-  if (NS_WARN_IF(startNode->GetUncomposedDoc() != mPresShell->GetDocument())) {
+  if (NS_WARN_IF(startNode->GetComposedDoc() != mPresShell->GetDocument())) {
     return NS_ERROR_FAILURE;
   }
 
-  NS_ASSERTION(startNode->GetUncomposedDoc() == endNode->GetUncomposedDoc(),
+  NS_ASSERTION(startNode->GetComposedDoc() == endNode->GetComposedDoc(),
                "firstNormalSelectionRange crosses the document boundary");
 
   mRootContent = startNode->GetSelectionRootContent(mPresShell);
@@ -546,14 +546,14 @@ ContentEventHandler::QueryContentRect(nsIContent* aContent,
 static bool IsContentBR(nsIContent* aContent)
 {
   return aContent->IsHTMLElement(nsGkAtoms::br) &&
-         !aContent->AttrValueIs(kNameSpaceID_None,
-                                nsGkAtoms::type,
-                                nsGkAtoms::moz,
-                                eIgnoreCase) &&
-         !aContent->AttrValueIs(kNameSpaceID_None,
-                                nsGkAtoms::mozeditorbogusnode,
-                                nsGkAtoms::_true,
-                                eIgnoreCase);
+         !aContent->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                             nsGkAtoms::type,
+                                             nsGkAtoms::moz,
+                                             eIgnoreCase) &&
+         !aContent->AsElement()->AttrValueIs(kNameSpaceID_None,
+                                             nsGkAtoms::mozeditorbogusnode,
+                                             nsGkAtoms::_true,
+                                             eIgnoreCase);
 }
 
 static bool IsMozBR(nsIContent* aContent)
@@ -1208,7 +1208,7 @@ ContentEventHandler::SetRawRangeFromFlatTextOffset(
         if (NS_WARN_IF(!startNode)) {
           return NS_ERROR_FAILURE;
         }
-        startNodeOffset = startNode->IndexOf(content);
+        startNodeOffset = startNode->ComputeIndexOf(content);
         if (NS_WARN_IF(startNodeOffset == -1)) {
           // The content is being removed from the parent!
           return NS_ERROR_FAILURE;
@@ -1219,7 +1219,7 @@ ContentEventHandler::SetRawRangeFromFlatTextOffset(
         if (NS_WARN_IF(!startNode)) {
           return NS_ERROR_FAILURE;
         }
-        startNodeOffset = startNode->IndexOf(content) + 1;
+        startNodeOffset = startNode->ComputeIndexOf(content) + 1;
         if (NS_WARN_IF(startNodeOffset == 0)) {
           // The content is being removed from the parent!
           return NS_ERROR_FAILURE;
@@ -1312,7 +1312,7 @@ ContentEventHandler::SetRawRangeFromFlatTextOffset(
       if (NS_WARN_IF(!endNode)) {
         return NS_ERROR_FAILURE;
       }
-      int32_t indexInParent = endNode->IndexOf(content);
+      int32_t indexInParent = endNode->ComputeIndexOf(content);
       if (NS_WARN_IF(indexInParent == -1)) {
         // The content is being removed from the parent!
         return NS_ERROR_FAILURE;
@@ -1612,14 +1612,14 @@ ContentEventHandler::GetNodePositionHavingFlatText(nsINode* aNode,
 
   // If there is a node at given position, return the start of it.
   if (aNodeOffset < childCount) {
-    return NodePosition(aNode->GetChildAt(aNodeOffset), 0);
+    return NodePosition(aNode->GetChildAt_Deprecated(aNodeOffset), 0);
   }
 
   // If the offset represents "after" the node, we need to return the last
   // child of it.  For example, if a range is |<p>[<br>]</p>|, then, the
   // end point is {<p>, 1}.  In such case, callers need the <br> node.
   if (aNodeOffset == childCount) {
-    nsINode* node = aNode->GetChildAt(childCount - 1);
+    nsINode* node = aNode->GetChildAt_Deprecated(childCount - 1);
     return NodePosition(node,
       node->IsNodeOfType(nsINode::eTEXT)
         ? static_cast<int32_t>(node->AsContent()->TextLength())
@@ -1719,7 +1719,7 @@ ContentEventHandler::GetLastFrameInRangeForTextRect(const RawRange& aRawRange)
       nextNodeOfRangeEnd = endNode;
     }
   } else if (endOffset < endNode->GetChildCount()) {
-    nextNodeOfRangeEnd = endNode->GetChildAt(endOffset);
+    nextNodeOfRangeEnd = endNode->GetChildAt_Deprecated(endOffset);
   }
 
   for (iter->Last(); !iter->IsDone(); iter->Prev()) {
@@ -2871,7 +2871,7 @@ ContentEventHandler::GetFlatTextLengthInRange(
   // array of children of its parent.  So, be careful to handle this case.
   if (aIsRemovingNode) {
     DebugOnly<nsIContent*> parent = aStartPosition.Container()->GetParent();
-    MOZ_ASSERT(parent && parent->IndexOf(aStartPosition.Container()) == -1,
+    MOZ_ASSERT(parent && parent->ComputeIndexOf(aStartPosition.Container()) == -1,
       "At removing the node, the node shouldn't be in the array of children "
       "of its parent");
     MOZ_ASSERT(aStartPosition.Container() == endPosition.Container(),
@@ -2912,7 +2912,7 @@ ContentEventHandler::GetFlatTextLengthInRange(
         if (NS_WARN_IF(!parentContent)) {
           return NS_ERROR_FAILURE;
         }
-        int32_t indexInParent = parentContent->IndexOf(endPosition.Container());
+        int32_t indexInParent = parentContent->ComputeIndexOf(endPosition.Container());
         if (NS_WARN_IF(indexInParent < 0)) {
           return NS_ERROR_FAILURE;
         }
@@ -3058,7 +3058,7 @@ ContentEventHandler::AdjustCollapsedRangeMaybeIntoTextNode(RawRange& aRawRange)
                container->GetChildCount()) {
     // If the range is next to a child node, adjust the range to the end of
     // the previous child.
-    childNode = container->GetChildAt(offsetInParentNode - 1);
+    childNode = container->GetChildAt_Deprecated(offsetInParentNode - 1);
     offsetInChildNode = childNode->Length();
   }
 
@@ -3158,8 +3158,8 @@ static void AdjustRangeForSelection(nsIContent* aRoot,
   }
 
   *aNode = node->GetParent();
-  MOZ_ASSERT((*aNode)->IndexOf(node) != -1);
-  *aNodeOffset = (*aNode)->IndexOf(node) + 1;
+  MOZ_ASSERT((*aNode)->ComputeIndexOf(node) != -1);
+  *aNodeOffset = (*aNode)->ComputeIndexOf(node) + 1;
 }
 
 nsresult

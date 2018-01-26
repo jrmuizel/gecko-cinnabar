@@ -333,7 +333,6 @@ CustomElementRegistry::RegisterUnresolvedElement(Element* aElement, nsAtom* aTyp
   nsTArray<nsWeakPtr>* unresolved = mCandidatesMap.LookupOrAdd(typeName);
   nsWeakPtr* elem = unresolved->AppendElement();
   *elem = do_GetWeakReference(aElement);
-  aElement->AddStates(NS_EVENT_STATE_UNRESOLVED);
 }
 
 void
@@ -490,6 +489,12 @@ CustomElementRegistry::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenPr
 nsISupports* CustomElementRegistry::GetParentObject() const
 {
   return mWindow;
+}
+
+DocGroup*
+CustomElementRegistry::GetDocGroup() const
+{
+  return mWindow ? mWindow->GetDocGroup() : nullptr;
 }
 
 static const char* kLifeCycleCallbackNames[] = {
@@ -901,8 +906,6 @@ CustomElementRegistry::Upgrade(Element* aElement,
                                CustomElementDefinition* aDefinition,
                                ErrorResult& aRv)
 {
-  aElement->RemoveStates(NS_EVENT_STATE_UNRESOLVED);
-
   RefPtr<CustomElementData> data = aElement->GetCustomElementData();
   MOZ_ASSERT(data, "CustomElementData should exist");
 
@@ -931,7 +934,7 @@ CustomElementRegistry::Upgrade(Element* aElement,
         LifecycleCallbackArgs args = {
           nsDependentAtomString(attrName),
           VoidString(),
-          (attrValue.IsEmpty() ? VoidString() : attrValue),
+          attrValue,
           (namespaceURI.IsEmpty() ? VoidString() : namespaceURI)
         };
         nsContentUtils::EnqueueLifecycleCallback(nsIDocument::eAttributeChanged,
@@ -972,18 +975,24 @@ CustomElementRegistry::Upgrade(Element* aElement,
 void
 CustomElementReactionsStack::CreateAndPushElementQueue()
 {
+  MOZ_ASSERT(mRecursionDepth);
+  MOZ_ASSERT(!mIsElementQueuePushedForCurrentRecursionDepth);
+
   // Push a new element queue onto the custom element reactions stack.
   mReactionsStack.AppendElement(MakeUnique<ElementQueue>());
+  mIsElementQueuePushedForCurrentRecursionDepth = true;
 }
 
 void
 CustomElementReactionsStack::PopAndInvokeElementQueue()
 {
-  // Pop the element queue from the custom element reactions stack,
-  // and invoke custom element reactions in that queue.
+  MOZ_ASSERT(mRecursionDepth);
+  MOZ_ASSERT(mIsElementQueuePushedForCurrentRecursionDepth);
   MOZ_ASSERT(!mReactionsStack.IsEmpty(),
              "Reaction stack shouldn't be empty");
 
+  // Pop the element queue from the custom element reactions stack,
+  // and invoke custom element reactions in that queue.
   const uint32_t lastIndex = mReactionsStack.Length() - 1;
   ElementQueue* elementQueue = mReactionsStack.ElementAt(lastIndex).get();
   // Check element queue size in order to reduce function call overhead.
@@ -1007,6 +1016,7 @@ CustomElementReactionsStack::PopAndInvokeElementQueue()
              "reactions created by InvokeReactions() should be consumed and removed");
 
   mReactionsStack.RemoveElementAt(lastIndex);
+  mIsElementQueuePushedForCurrentRecursionDepth = false;
 }
 
 void
@@ -1030,8 +1040,15 @@ CustomElementReactionsStack::Enqueue(Element* aElement,
   RefPtr<CustomElementData> elementData = aElement->GetCustomElementData();
   MOZ_ASSERT(elementData, "CustomElementData should exist");
 
-  // Add element to the current element queue.
-  if (!mReactionsStack.IsEmpty()) {
+  if (mRecursionDepth) {
+    // If the element queue is not created for current recursion depth, create
+    // and push an element queue to reactions stack first.
+    if (!mIsElementQueuePushedForCurrentRecursionDepth) {
+      CreateAndPushElementQueue();
+    }
+
+    MOZ_ASSERT(!mReactionsStack.IsEmpty());
+    // Add element to the current element queue.
     mReactionsStack.LastElement()->AppendElement(aElement);
     elementData->mReactionQueue.AppendElement(aReaction);
     return;
@@ -1039,6 +1056,8 @@ CustomElementReactionsStack::Enqueue(Element* aElement,
 
   // If the custom element reactions stack is empty, then:
   // Add element to the backup element queue.
+  MOZ_ASSERT(mReactionsStack.IsEmpty(),
+             "custom element reactions stack should be empty");
   MOZ_ASSERT(!aReaction->IsUpgradeReaction(),
              "Upgrade reaction should not be scheduled to backup queue");
   mBackupQueue.AppendElement(aElement);

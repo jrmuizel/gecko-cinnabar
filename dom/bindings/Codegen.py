@@ -1769,6 +1769,23 @@ def JSNativeArguments():
             Argument('JS::Value*', 'vp')]
 
 
+class CGIsInstanceMethod(CGAbstractStaticMethod):
+    """
+    A class for generating the static isInstance method.
+    """
+    def __init__(self, descriptor):
+        assert descriptor.interface.hasInterfacePrototypeObject()
+        CGAbstractStaticMethod.__init__(self, descriptor, "isInstance", "bool",
+                                        JSNativeArguments())
+
+    def definition_body(self):
+        return fill(
+            """
+            return InterfaceIsInstance(cx, argc, vp, prototypes::id::${name},
+                                       PrototypeTraits<prototypes::id::${name}>::Depth);
+            """,
+            name=self.descriptor.name)
+
 class CGClassConstructor(CGAbstractStaticMethod):
     """
     JS-visible constructor for our objects
@@ -2416,6 +2433,18 @@ class MethodDefiner(PropertyDefiner):
             else:
                 self.regular.append(method)
 
+        # Generate the isInstance static method.
+        if (static and
+            (self.descriptor.interface.hasInterfaceObject() and
+             self.descriptor.interface.hasInterfacePrototypeObject())):
+            self.chrome.append({
+                "name": "isInstance",
+                "methodInfo": False,
+                "length": 1,
+                "flags": "JSPROP_ENUMERATE",
+                "condition": MemberCondition(),
+            })
+
         # TODO: Once iterable is implemented, use tiebreak rules instead of
         # failing. Also, may be more tiebreak rules to implement once spec bug
         # is resolved.
@@ -2803,6 +2832,7 @@ class ConstDefiner(PropertyDefiner):
 
 class PropertyArrays():
     def __init__(self, descriptor):
+        self.descriptor = descriptor
         self.staticMethods = MethodDefiner(descriptor, "StaticMethods",
                                            static=True)
         self.staticAttrs = AttrDefiner(descriptor, "StaticAttributes",
@@ -2821,7 +2851,11 @@ class PropertyArrays():
                 "unforgeableMethods", "unforgeableAttrs", "consts"]
 
     def hasChromeOnly(self):
-        return any(getattr(self, a).hasChromeOnly() for a in self.arrayNames())
+        # All interfaces that generate an interface object and interface
+        # prototype object have a chrome only isInstance static method.
+        return ((self.staticMethods.descriptor.interface.hasInterfaceObject() and
+                 self.staticMethods.descriptor.interface.hasInterfacePrototypeObject()) or
+                any(getattr(self, a).hasChromeOnly() for a in self.arrayNames()))
 
     def hasNonChromeOnly(self):
         return any(getattr(self, a).hasNonChromeOnly() for a in self.arrayNames())
@@ -7415,12 +7449,27 @@ class CGCallGenerator(CGThing):
         self.cgRoot.append(call)
 
         if needsSubjectPrincipal:
-            getPrincipal = dedent(
+            needsNonSystemPrincipal = (
+                "needsNonSystemSubjectPrincipal" in extendedAttributes)
+            if needsNonSystemPrincipal:
+                checkPrincipal = dedent(
+                    """
+                    if (nsContentUtils::IsSystemPrincipal(principal)) {
+                      principal = nullptr;
+                    }
+                    """)
+            else:
+                checkPrincipal = ""
+
+            getPrincipal = fill(
                 """
                 JSCompartment* compartment = js::GetContextCompartment(cx);
                 MOZ_ASSERT(compartment);
                 JSPrincipals* principals = JS_GetCompartmentPrincipals(compartment);
-                """)
+                nsIPrincipal* principal = nsJSPrincipals::get(principals);
+                ${checkPrincipal}
+                """,
+                checkPrincipal=checkPrincipal)
 
             if descriptor.interface.isExposedInAnyWorker():
                 self.cgRoot.prepend(CGGeneric(fill(
@@ -7428,18 +7477,25 @@ class CGCallGenerator(CGThing):
                     Maybe<nsIPrincipal*> subjectPrincipal;
                     if (NS_IsMainThread()) {
                       $*{getPrincipal}
-                      subjectPrincipal.emplace(nsJSPrincipals::get(principals));
+                      subjectPrincipal.emplace(principal);
                     }
                     """,
                     getPrincipal=getPrincipal)))
             else:
+                if needsNonSystemPrincipal:
+                    principalType = "nsIPrincipal*";
+                else:
+                    principalType = "NonNull<nsIPrincipal>"
+
                 self.cgRoot.prepend(CGGeneric(fill(
                     """
-                    $*{getPrincipal}
-                    // Initializing a nonnull is pretty darn annoying...
-                    NonNull<nsIPrincipal> subjectPrincipal;
-                    subjectPrincipal = static_cast<nsIPrincipal*>(nsJSPrincipals::get(principals));
+                    ${principalType} subjectPrincipal;
+                    {
+                      $*{getPrincipal}
+                      subjectPrincipal = principal;
+                    }
                     """,
+                    principalType=principalType,
                     getPrincipal=getPrincipal)))
 
         if isFallible or canOOM:
@@ -7669,23 +7725,6 @@ class CGPerSignatureCall(CGThing):
         self.isConstructor = isConstructor
         cgThings = []
 
-        # Here, we check if the current getter, setter, method, interface or
-        # inherited interfaces have the UnsafeInPrerendering extended attribute
-        # and if so, we add a check to make sure it is safe.
-        if (idlNode.getExtendedAttribute("UnsafeInPrerendering") or
-            descriptor.interface.getExtendedAttribute("UnsafeInPrerendering") or
-            any(i.getExtendedAttribute("UnsafeInPrerendering")
-                for i in descriptor.interface.getInheritedInterfaces())):
-                cgThings.append(CGGeneric(dedent(
-                    """
-                    if (!mozilla::dom::EnforceNotInPrerendering(cx, obj)) {
-                        // Return false from the JSNative in order to trigger
-                        // an uncatchable exception.
-                        MOZ_ASSERT(!JS_IsExceptionPending(cx));
-                        return false;
-                    }
-                    """)))
-
         deprecated = (idlNode.getExtendedAttribute("Deprecated") or
                       (idlNode.isStatic() and descriptor.interface.getExtendedAttribute("Deprecated")))
         if deprecated:
@@ -7856,16 +7895,16 @@ class CGPerSignatureCall(CGThing):
 
         if (idlNode.getExtendedAttribute('CEReactions') is not None and
             not getter):
-            cgThings.append(CGGeneric(fill(
+            cgThings.append(CGGeneric(dedent(
                 """
                 Maybe<AutoCEReaction> ceReaction;
                 if (CustomElementRegistry::IsCustomElementEnabled()) {
-                  CustomElementReactionsStack* reactionsStack = GetCustomElementReactionsStack(${obj});
-                  if (reactionsStack) {
-                    ceReaction.emplace(reactionsStack, cx);
+                  DocGroup* docGroup = self->GetDocGroup();
+                  if (docGroup) {
+                    ceReaction.emplace(docGroup->CustomElementReactionsStack(), cx);
                   }
                 }
-                """, obj=objectName)))
+                """)))
 
         # If this is a method that was generated by a maplike/setlike
         # interface, use the maplike/setlike generator to fill in the body.
@@ -11030,19 +11069,6 @@ class ClassMember(ClassItem):
                                    self.name, body)
 
 
-class ClassTypedef(ClassItem):
-    def __init__(self, name, type, visibility="public"):
-        self.type = type
-        ClassItem.__init__(self, name, visibility)
-
-    def declare(self, cgClass):
-        return 'typedef %s %s;\n' % (self.type, self.name)
-
-    def define(self, cgClass):
-        # Only goes in the header
-        return ''
-
-
 class ClassEnum(ClassItem):
     def __init__(self, name, entries, values=None, visibility="public"):
         self.entries = entries
@@ -11081,7 +11107,7 @@ class ClassUnion(ClassItem):
 class CGClass(CGThing):
     def __init__(self, name, bases=[], members=[], constructors=[],
                  destructor=None, methods=[],
-                 typedefs=[], enums=[], unions=[], templateArgs=[],
+                 enums=[], unions=[], templateArgs=[],
                  templateSpecialization=[], isStruct=False,
                  disallowCopyConstruction=False, indent='',
                  decorators='',
@@ -11096,7 +11122,6 @@ class CGClass(CGThing):
         # code wants lists of members.
         self.destructors = [destructor] if destructor else []
         self.methods = methods
-        self.typedefs = typedefs
         self.enums = enums
         self.unions = unions
         self.templateArgs = templateArgs
@@ -11191,7 +11216,7 @@ class CGClass(CGThing):
             disallowedCopyConstructors = []
 
         order = [self.enums, self.unions,
-                 self.typedefs, self.members,
+                 self.members,
                  self.constructors + disallowedCopyConstructors,
                  self.destructors, self.methods]
 
@@ -12737,6 +12762,9 @@ class CGDescriptor(CGThing):
         for n in descriptor.interface.namedConstructors:
             cgThings.append(CGClassConstructor(descriptor, n,
                                                NamedConstructorName(n)))
+        if (descriptor.interface.hasInterfaceObject() and
+            descriptor.interface.hasInterfacePrototypeObject()):
+            cgThings.append(CGIsInstanceMethod(descriptor))
         for m in descriptor.interface.members:
             if m.isMethod() and m.identifier.name == 'queryInterface':
                 continue
@@ -14164,6 +14192,8 @@ class CGForwardDeclarations(CGWrapper):
             builder.add(d.nativeType + "Atoms", isStruct=True)
             for t in getTypesFromDescriptor(d):
                 builder.forwardDeclareForType(t, config)
+            if d.hasCEReactions():
+                builder.addInMozillaDom("DocGroup")
 
         for d in dictionaries:
             if len(d.members) > 0:
@@ -14235,18 +14265,15 @@ class CGBindingRoot(CGThing):
             iface = desc.interface
             return any(m.getExtendedAttribute("Deprecated") for m in iface.members + [iface])
 
-        def descriptorHasCEReactions(desc):
-            iface = desc.interface
-            return any(m.getExtendedAttribute("CEReactions") for m in iface.members + [iface])
-
         bindingHeaders["nsIDocument.h"] = any(
             descriptorDeprecated(d) for d in descriptors)
         bindingHeaders["mozilla/Preferences.h"] = any(
             descriptorRequiresPreferences(d) for d in descriptors)
         bindingHeaders["mozilla/dom/DOMJSProxyHandler.h"] = any(
             d.concrete and d.proxy for d in descriptors)
-        bindingHeaders["mozilla/dom/CustomElementRegistry.h"] = any(
-            descriptorHasCEReactions(d) for d in descriptors)
+        hasCEReactions = any(d.hasCEReactions() for d in descriptors)
+        bindingHeaders["mozilla/dom/CustomElementRegistry.h"] = hasCEReactions
+        bindingHeaders["mozilla/dom/DocGroup.h"] = hasCEReactions
 
         def descriptorHasChromeOnly(desc):
             ctor = desc.interface.ctor()
@@ -14258,9 +14285,13 @@ class CGBindingRoot(CGThing):
                     # JS-implemented interfaces with an interface object get a
                     # chromeonly _create method.  And interfaces with an
                     # interface object might have a ChromeOnly constructor.
+                    # Also interfaces whose interface prototype object is
+                    # generated (which is most of them) for the isInstance
+                    # method.
                     (desc.interface.hasInterfaceObject() and
                      (desc.interface.isJSImplemented() or
-                      (ctor and isChromeOnly(ctor)))) or
+                      (ctor and isChromeOnly(ctor)) or
+                      desc.interface.hasInterfacePrototypeObject())) or
                     # JS-implemented interfaces with clearable cached
                     # attrs have chromeonly _clearFoo methods.
                     (desc.interface.isJSImplemented() and
@@ -14281,8 +14312,18 @@ class CGBindingRoot(CGThing):
                 dictionary = dictionary.parent
             return False
 
+        def needsNonSystemPrincipal(member):
+            return (
+                member.getExtendedAttribute("NeedsSubjectPrincipal") == ["NonSystem"] or
+                member.getExtendedAttribute("SetterNeedsSubjectPrincipal") == ["NonSystem"] or
+                member.getExtendedAttribute("GetterNeedsSubjectPrincipal") == ["NonSystem"])
+
+        def descriptorNeedsNonSystemPrincipal(d):
+            return any(needsNonSystemPrincipal(m) for m in d.interface.members)
+
         bindingHeaders["nsContentUtils.h"] = (
             any(descriptorHasChromeOnly(d) for d in descriptors) or
+            any(descriptorNeedsNonSystemPrincipal(d) for d in descriptors) or
             any(dictionaryHasChromeOnly(d) for d in dictionaries))
         hasNonEmptyDictionaries = any(
             len(dict.members) > 0 for dict in dictionaries)
@@ -14701,6 +14742,8 @@ class CGNativeMember(ClassMethod):
             # Cheat and assume self.descriptorProvider is a descriptor
             if self.descriptorProvider.interface.isExposedInAnyWorker():
                 args.append(Argument("Maybe<nsIPrincipal*>", "aSubjectPrincipal"))
+            elif 'needsNonSystemSubjectPrincipal' in self.extendedAttrs:
+                args.append(Argument("nsIPrincipal*", "aPrincipal"))
             else:
                 args.append(Argument("nsIPrincipal&", "aPrincipal"))
         # And the caller type, if desired.
@@ -15087,6 +15130,12 @@ class CGBindingImplClass(CGClass):
                                             breakAfterReturnDecl=" ",
                                             override=descriptor.wrapperCache,
                                             body=self.getWrapObjectBody()))
+        if descriptor.hasCEReactions():
+            self.methodDecls.insert(0,
+                                    ClassMethod("GetDocGroup", "DocGroup*", [],
+                                                const=True,
+                                                breakAfterReturnDecl=" ",
+                                                body=self.getGetDocGroupBody()))
         if wantGetParent:
             self.methodDecls.insert(0,
                                     ClassMethod("GetParentObject",
@@ -15105,6 +15154,9 @@ class CGBindingImplClass(CGClass):
                 "%s*" % self.descriptor.nativeType.split('::')[-1])
 
     def getGetParentObjectBody(self):
+        return None
+
+    def getGetDocGroupBody(self):
         return None
 
     def deps(self):
@@ -15246,6 +15298,8 @@ class CGExampleRoot(CGThing):
         self.root = CGNamespace.build(["mozilla", "dom"], self.root)
 
         builder = ForwardDeclarationBuilder()
+        if descriptor.hasCEReactions():
+            builder.addInMozillaDom("DocGroup")
         for member in descriptor.interface.members:
             if not member.isAttr() and not member.isMethod():
                 continue
@@ -15563,7 +15617,7 @@ class CGJSImplClass(CGBindingImplClass):
 
             private:
               RefPtr<${jsImplName}> mImpl;
-              nsCOMPtr<nsISupports> mParent;
+              nsCOMPtr<nsIGlobalObject> mParent;
 
             """,
             isupportsDecl=isupportsDecl,
@@ -15652,6 +15706,16 @@ class CGJSImplClass(CGBindingImplClass):
 
     def getGetParentObjectBody(self):
         return "return mParent;\n"
+
+    def getGetDocGroupBody(self):
+        return dedent(
+            """
+            nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(mParent);
+            if (!window) {
+              return nullptr;
+            }
+            return window->GetDocGroup();
+            """)
 
     def getCreateFromExistingBody(self):
         # XXXbz we could try to get parts of this (e.g. the argument

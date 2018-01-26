@@ -255,7 +255,7 @@ public:
   }
   ~nsMediaEvent() {}
 
-  NS_IMETHOD Run() = 0;
+  NS_IMETHOD Run() override = 0;
 
 protected:
   bool IsCancelled() {
@@ -1218,6 +1218,7 @@ public:
                                            triggeringPrincipal,
                                            securityFlags,
                                            contentPolicyType,
+                                           nullptr,   // aPerformanceStorage
                                            loadGroup,
                                            nullptr,   // aCallbacks
                                            nsICachingChannel::LOAD_BYPASS_LOCAL_CACHE_IF_BUSY |
@@ -1584,6 +1585,11 @@ HTMLMediaElement::MozRequestDebugInfo(ErrorResult& aRv)
 
   nsAutoString result;
   GetMozDebugReaderData(result);
+
+  if (mVideoFrameContainer) {
+    result.AppendPrintf("Compositor dropped frame(including when element's invisible): %u\n",
+                        mVideoFrameContainer->GetDroppedImageCount());
+  }
 
   if (mMediaKeys) {
     nsString EMEInfo;
@@ -2361,7 +2367,7 @@ void HTMLMediaElement::LoadFromSourceChildren()
   AddMutationObserverUnlessExists(this);
 
   while (true) {
-    nsIContent* child = GetNextSource();
+    Element* child = GetNextSource();
     if (!child) {
       // Exhausted candidates, wait for more candidates to be appended to
       // the media element.
@@ -5274,7 +5280,7 @@ public:
   explicit MediaStreamTracksAvailableCallback(HTMLMediaElement* aElement):
       OnTracksAvailableCallback(), mElement(aElement)
     {}
-  virtual void NotifyTracksAvailable(DOMMediaStream* aStream)
+  virtual void NotifyTracksAvailable(DOMMediaStream* aStream) override
   {
     NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
 
@@ -6769,7 +6775,8 @@ void HTMLMediaElement::NotifyAddedSource()
   }
 }
 
-nsIContent* HTMLMediaElement::GetNextSource()
+Element*
+HTMLMediaElement::GetNextSource()
 {
   mSourceLoadCandidate = nullptr;
 
@@ -6788,7 +6795,7 @@ nsIContent* HTMLMediaElement::GetNextSource()
     // If child is a <source> element, it is the next candidate.
     if (child && child->IsHTMLElement(nsGkAtoms::source)) {
       mSourceLoadCandidate = child;
-      return child;
+      return child->AsElement();
     }
   }
   NS_NOTREACHED("Execution should not reach here!");
@@ -8080,3 +8087,6 @@ HTMLMediaElement::ReportCanPlayTelemetry()
 
 } // namespace dom
 } // namespace mozilla
+
+#undef LOG
+#undef LOG_EVENT

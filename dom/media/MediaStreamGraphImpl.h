@@ -32,9 +32,6 @@ class ShutdownTicket;
 
 template <typename T>
 class LinkedList;
-#ifdef MOZ_WEBRTC
-class AudioOutputObserver;
-#endif
 
 /**
  * A per-stream update message passed from the media graph thread to the
@@ -279,12 +276,6 @@ public:
    * mProcessedTime to mStateComputedTime.
    */
   void Process();
-  /**
-   * Extract any state updates pending in aStream, and apply them.
-   */
-  void ExtractPendingInput(SourceMediaStream* aStream,
-                           GraphTime aDesiredUpToTime,
-                           bool* aEnsureNextIteration);
 
   /**
    * For use during ProcessedMediaStream::ProcessInput() or
@@ -394,7 +385,6 @@ public:
   void CloseAudioInputImpl(AudioDataListener *aListener);
   virtual void CloseAudioInput(AudioDataListener *aListener) override;
 
-  void FinishStream(MediaStream* aStream);
   /**
    * Compute how much stream data we would like to buffer for aStream.
    */
@@ -824,9 +814,7 @@ public:
   RefPtr<AsyncLatencyLogger> mLatencyLog;
   AudioMixer mMixer;
   const RefPtr<AbstractThread> mAbstractMainThread;
-#ifdef MOZ_WEBRTC
-  RefPtr<AudioOutputObserver> mFarendObserverRef;
-#endif
+  RefPtr<SharedThreadPool> mThreadPool;
 
   // used to limit graph shutdown time
   // Only accessed on the main thread.

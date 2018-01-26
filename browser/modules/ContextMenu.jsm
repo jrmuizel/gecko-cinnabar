@@ -16,7 +16,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  E10SUtils: "resource:///modules/E10SUtils.jsm",
+  E10SUtils: "resource://gre/modules/E10SUtils.jsm",
   CastingApps: "resource:///modules/CastingApps.jsm",
   BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
   PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
@@ -271,7 +271,7 @@ class ContextMenu {
     if (href) {
       // Handle SVG links:
       if (typeof href == "object" && href.animVal) {
-        return href.animVal;
+        return this._makeURLAbsolute(this.context.link.baseURI, href.animVal);
       }
 
       return href;
@@ -454,8 +454,7 @@ class ContextMenu {
       return true;
     }
 
-    let request = aTarget.QueryInterface(Ci.nsIImageLoadingContent)
-                         .getRequest(Ci.nsIImageLoadingContent.CURRENT_REQUEST);
+    let request = aTarget.getRequest(Ci.nsIImageLoadingContent.CURRENT_REQUEST);
 
     if (!request) {
       return true;
@@ -692,7 +691,7 @@ class ContextMenu {
     context.target = cleanTarget;
 
     if (context.link) {
-      context.link = { href: context.link.href };
+      context.link = { href: context.linkURL };
     }
 
     delete context.linkURI;

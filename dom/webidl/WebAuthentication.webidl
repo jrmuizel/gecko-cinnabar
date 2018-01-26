@@ -4,7 +4,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  * The origin of this IDL file is
- * https://www.w3.org/TR/webauthn/
+ * https://w3c.github.io/webauthn/
  */
 
 /***** Interfaces to Data *****/
@@ -36,7 +36,7 @@ interface AuthenticatorAttestationResponse : AuthenticatorResponse {
 interface AuthenticatorAssertionResponse : AuthenticatorResponse {
     [SameObject] readonly attribute ArrayBuffer      authenticatorData;
     [SameObject] readonly attribute ArrayBuffer      signature;
-    readonly attribute DOMString                     userId;
+    [SameObject] readonly attribute ArrayBuffer      userHandle;
 };
 
 dictionary PublicKeyCredentialParameters {
@@ -54,13 +54,14 @@ dictionary MakePublicKeyCredentialOptions {
     unsigned long                                timeout;
     sequence<PublicKeyCredentialDescriptor>      excludeCredentials = [];
     AuthenticatorSelectionCriteria               authenticatorSelection;
+    AttestationConveyancePreference              attestation = "none";
     // Extensions are not supported yet.
     // AuthenticationExtensions                  extensions; // Add in Bug 1406458
 };
 
 dictionary PublicKeyCredentialEntity {
-    DOMString      name;
-    USVString      icon;
+    required DOMString    name;
+    USVString             icon;
 };
 
 dictionary PublicKeyCredentialRpEntity : PublicKeyCredentialEntity {
@@ -68,8 +69,8 @@ dictionary PublicKeyCredentialRpEntity : PublicKeyCredentialEntity {
 };
 
 dictionary PublicKeyCredentialUserEntity : PublicKeyCredentialEntity {
-    BufferSource   id;
-    DOMString      displayName;
+    required BufferSource   id;
+    required DOMString      displayName;
 };
 
 dictionary AuthenticatorSelectionCriteria {
@@ -83,6 +84,12 @@ enum AuthenticatorAttachment {
     "cross-platform"  // Cross-platform attachment
 };
 
+enum AttestationConveyancePreference {
+    "none",
+    "indirect",
+    "direct"
+};
+
 enum UserVerificationRequirement {
     "required",
     "preferred",
@@ -94,6 +101,7 @@ dictionary PublicKeyCredentialRequestOptions {
     unsigned long                        timeout;
     USVString                            rpId;
     sequence<PublicKeyCredentialDescriptor> allowCredentials = [];
+    UserVerificationRequirement          userVerification = "preferred";
     // Extensions are not supported yet.
     // AuthenticationExtensions             extensions; // Add in Bug 1406458
 };
@@ -115,9 +123,9 @@ enum PublicKeyCredentialType {
 };
 
 dictionary PublicKeyCredentialDescriptor {
-    required PublicKeyCredentialType type;
-    required BufferSource id;
-    sequence<AuthenticatorTransport>   transports;
+    required PublicKeyCredentialType      type;
+    required BufferSource                 id;
+    sequence<AuthenticatorTransport>      transports;
 };
 
 enum AuthenticatorTransport {

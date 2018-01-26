@@ -29,6 +29,7 @@
 
 namespace mozilla {
 namespace dom {
+class DocGroup;
 class Element;
 } // namespace dom
 struct ComputedGridTrackInfo;
@@ -92,6 +93,11 @@ public:
     return mContent;
   }
 
+  virtual mozilla::dom::DocGroup* GetDocGroup() const override
+  {
+    return mContent ? mContent->GetDocGroup() : nullptr;
+  }
+
   static already_AddRefed<nsStyleContext>
   GetStyleContext(mozilla::dom::Element* aElement, nsAtom* aPseudo,
                   nsIPresShell* aPresShell,
@@ -141,7 +147,7 @@ public:
   virtual void GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSParseEnv,
                                         nsIPrincipal* aSubjectPrincipal) override;
   nsDOMCSSDeclaration::ServoCSSParsingEnvironment
-  GetServoCSSParsingEnvironment(nsIPrincipal* aSubjectPrincipal) const final;
+  GetServoCSSParsingEnvironment(nsIPrincipal* aSubjectPrincipal) const final override;
 
   static already_AddRefed<nsROCSSPrimitiveValue>
     MatrixToCSSValue(const mozilla::gfx::Matrix4x4& aMatrix);
@@ -204,8 +210,6 @@ private:
   already_AddRefed<CSSValue> GetStaticOffset(mozilla::Side aSide);
 
   already_AddRefed<CSSValue> GetPaddingWidthFor(mozilla::Side aSide);
-
-  already_AddRefed<CSSValue> GetBorderColorsFor(mozilla::Side aSide);
 
   already_AddRefed<CSSValue> GetBorderStyleFor(mozilla::Side aSide);
 
@@ -388,10 +392,6 @@ private:
   already_AddRefed<CSSValue> DoGetBorderBottomColor();
   already_AddRefed<CSSValue> DoGetBorderLeftColor();
   already_AddRefed<CSSValue> DoGetBorderRightColor();
-  already_AddRefed<CSSValue> DoGetBorderBottomColors();
-  already_AddRefed<CSSValue> DoGetBorderLeftColors();
-  already_AddRefed<CSSValue> DoGetBorderRightColors();
-  already_AddRefed<CSSValue> DoGetBorderTopColors();
   already_AddRefed<CSSValue> DoGetBorderBottomLeftRadius();
   already_AddRefed<CSSValue> DoGetBorderBottomRightRadius();
   already_AddRefed<CSSValue> DoGetBorderTopLeftRadius();

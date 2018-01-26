@@ -58,6 +58,7 @@ const promise = require("promise");
 const defer = require("devtools/shared/defer");
 const {Task} = require("devtools/shared/task");
 const EventEmitter = require("devtools/shared/event-emitter");
+const InspectorUtils = require("InspectorUtils");
 
 const {walkerSpec, inspectorSpec} = require("devtools/shared/specs/inspector");
 const {nodeSpec, nodeListSpec} = require("devtools/shared/specs/node");
@@ -427,7 +428,7 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     }
     let ret = undefined;
     for (let pseudo of PSEUDO_CLASSES) {
-      if (DOMUtils.hasPseudoClassLock(this.rawNode, pseudo)) {
+      if (InspectorUtils.hasPseudoClassLock(this.rawNode, pseudo)) {
         ret = ret || [];
         ret.push(pseudo);
       }
@@ -1843,7 +1844,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     // There can be only one node locked per pseudo, so dismiss all existing
     // ones
     for (let locked of this._activePseudoClassLocks) {
-      if (DOMUtils.hasPseudoClassLock(locked.rawNode, pseudo)) {
+      if (InspectorUtils.hasPseudoClassLock(locked.rawNode, pseudo)) {
         this._removePseudoClassLock(locked, pseudo);
       }
     }
@@ -1876,7 +1877,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     if (node.rawNode.nodeType !== Ci.nsIDOMNode.ELEMENT_NODE) {
       return false;
     }
-    DOMUtils.addPseudoClassLock(node.rawNode, pseudo, enabled);
+    InspectorUtils.addPseudoClassLock(node.rawNode, pseudo, enabled);
     this._activePseudoClassLocks.add(node);
     this._queuePseudoClassMutation(node);
     return true;
@@ -1924,7 +1925,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     // turning it on for some childs without setting it on some parents
     for (let locked of this._activePseudoClassLocks) {
       if (node.rawNode.contains(locked.rawNode) &&
-          DOMUtils.hasPseudoClassLock(locked.rawNode, pseudo)) {
+          InspectorUtils.hasPseudoClassLock(locked.rawNode, pseudo)) {
         this._removePseudoClassLock(locked, pseudo);
       }
     }
@@ -1945,7 +1946,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     if (node.rawNode.nodeType != Ci.nsIDOMNode.ELEMENT_NODE) {
       return false;
     }
-    DOMUtils.removePseudoClassLock(node.rawNode, pseudo);
+    InspectorUtils.removePseudoClassLock(node.rawNode, pseudo);
     if (!node.writePseudoClassLocks()) {
       this._activePseudoClassLocks.delete(node);
     }
@@ -1964,12 +1965,12 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     }
 
     if (node) {
-      DOMUtils.clearPseudoClassLocks(node.rawNode);
+      InspectorUtils.clearPseudoClassLocks(node.rawNode);
       this._activePseudoClassLocks.delete(node);
       this._queuePseudoClassMutation(node);
     } else {
       for (let locked of this._activePseudoClassLocks) {
-        DOMUtils.clearPseudoClassLocks(locked.rawNode);
+        InspectorUtils.clearPseudoClassLocks(locked.rawNode);
         this._activePseudoClassLocks.delete(locked);
         this._queuePseudoClassMutation(locked);
       }
@@ -3233,13 +3234,11 @@ function standardTreeWalkerFilter(node) {
            : nodeFilterConstants.FILTER_SKIP;
   }
 
-  // Ignore all native and XBL anonymous content inside a non-XUL document
+  // Ignore all native and XBL anonymous content inside a non-XUL document.
+  // We need to do this to skip things like form controls, scrollbars,
+  // video controls, etc (see bug 1187482).
   if (!isInXULDocument(node) && (isXBLAnonymous(node) ||
                                   isNativeAnonymous(node))) {
-    // Note: this will skip inspecting the contents of feedSubscribeLine since
-    // that's XUL content injected in an HTML document, but we need to because
-    // this also skips many other elements that need to be skipped - like form
-    // controls, scrollbars, video controls, etc (see bug 1187482).
     return nodeFilterConstants.FILTER_SKIP;
   }
 
@@ -3400,8 +3399,4 @@ var imageToImageData = Task.async(function* (node, maxDim) {
       resized: resizeRatio !== 1
     }
   };
-});
-
-loader.lazyGetter(this, "DOMUtils", function () {
-  return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
 });

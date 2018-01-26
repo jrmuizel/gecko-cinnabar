@@ -5,7 +5,6 @@ EN_US_BINARY_URL = "%(en_us_binary_url)s"
 config = {
     "locales_file": "src/browser/locales/all-locales",
     "tools_repo": "https://hg.mozilla.org/build/tools",
-    "mozconfig": "src/browser/config/mozconfigs/win32/l10n-mozconfig",
     'vcs_share_base': os.path.join('y:', os.sep, 'hg-shared'),
     "bootstrap_env": {
         "NO_MERCURIAL_SETUP_CHECK": "1",
@@ -30,10 +29,4 @@ config = {
 
     "tooltool_url": 'http://relengapi/tooltool/',
     'tooltool_manifest_src': "browser/config/tooltool-manifests/win32/releng.manifest",
-    "mozilla_dir": "src/",
-    "simple_name_move": True,
-    "update_gecko_source_to_enUS": False,
-
-    # Override the buildbot path to not read it
-    "buildbot_json_path": None,
 }

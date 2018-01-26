@@ -14,6 +14,7 @@
 #include "mozilla/RangeBoundary.h"      // for RawRangeBoundary, RangeBoundary
 #include "mozilla/SelectionState.h"     // for RangeUpdater, etc.
 #include "mozilla/StyleSheet.h"         // for StyleSheet
+#include "mozilla/TextEditRules.h"      // for TextEditRules
 #include "mozilla/WeakPtr.h"            // for WeakPtr
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Text.h"
@@ -33,6 +34,7 @@
 #include "nsWeakReference.h"            // for nsSupportsWeakReference
 #include "nscore.h"                     // for nsresult, nsAString, etc.
 
+class mozInlineSpellChecker;
 class nsAtom;
 class nsIContent;
 class nsIDOMDocument;
@@ -43,7 +45,6 @@ class nsIDOMNode;
 class nsIDocumentStateListener;
 class nsIEditActionListener;
 class nsIEditorObserver;
-class nsIInlineSpellChecker;
 class nsINode;
 class nsIPresShell;
 class nsISupports;
@@ -51,57 +52,6 @@ class nsITransaction;
 class nsIWidget;
 class nsRange;
 class nsTransactionManager;
-
-// This is int32_t instead of int16_t because nsIInlineSpellChecker.idl's
-// spellCheckAfterEditorChange is defined to take it as a long.
-// XXX EditAction causes unnecessary include of EditorBase from some places.
-//     Why don't you move this to nsIEditor.idl?
-enum class EditAction : int32_t
-{
-  ignore = -1,
-  none = 0,
-  undo,
-  redo,
-  insertNode,
-  createNode,
-  deleteNode,
-  splitNode,
-  joinNode,
-  deleteText = 1003,
-
-  // text commands
-  insertText         = 2000,
-  insertIMEText      = 2001,
-  deleteSelection    = 2002,
-  setTextProperty    = 2003,
-  removeTextProperty = 2004,
-  outputText         = 2005,
-  setText            = 2006,
-
-  // html only action
-  insertBreak         = 3000,
-  makeList            = 3001,
-  indent              = 3002,
-  outdent             = 3003,
-  align               = 3004,
-  makeBasicBlock      = 3005,
-  removeList          = 3006,
-  makeDefListItem     = 3007,
-  insertElement       = 3008,
-  insertQuotation     = 3009,
-  htmlPaste           = 3012,
-  loadHTML            = 3013,
-  resetTextProperties = 3014,
-  setAbsolutePosition = 3015,
-  removeAbsolutePosition = 3016,
-  decreaseZIndex      = 3017,
-  increaseZIndex      = 3018
-};
-
-inline bool operator!(const EditAction& aOp)
-{
-  return aOp == EditAction::none;
-}
 
 namespace mozilla {
 class AddStyleSheetTransaction;
@@ -117,6 +67,7 @@ class EditAggregateTransaction;
 class EditTransactionBase;
 class ErrorResult;
 class HTMLEditor;
+class IMEContentObserver;
 class InsertNodeTransaction;
 class InsertTextTransaction;
 class JoinNodeTransaction;
@@ -126,6 +77,9 @@ class SplitNodeResult;
 class SplitNodeTransaction;
 class TextComposition;
 class TextEditor;
+class TextInputListener;
+class TextServicesDocument;
+enum class EditAction : int32_t;
 
 namespace dom {
 class DataTransfer;
@@ -300,6 +254,18 @@ public:
   // nsIEditor methods
   NS_DECL_NSIEDITOR
 
+  /**
+   * Set or unset TextInputListener.  If setting non-nullptr when the editor
+   * already has a TextInputListener, this will crash in debug build.
+   */
+  void SetTextInputListener(TextInputListener* aTextInputListener);
+
+  /**
+   * Set or unset IMEContentObserver.  If setting non-nullptr when the editor
+   * already has an IMEContentObserver, this will crash in debug build.
+   */
+  void SetIMEContentObserver(IMEContentObserver* aIMEContentObserver);
+
 public:
   virtual bool IsModifiableNode(nsINode* aNode);
 
@@ -346,7 +312,21 @@ public:
    * Helper routines for node/parent manipulations.
    */
   nsresult DeleteNode(nsINode* aNode);
-  nsresult InsertNode(nsIContent& aNode, nsINode& aParent, int32_t aPosition);
+
+  /**
+   * InsertNode() inserts aContentToInsert before the child specified by
+   * aPointToInsert.
+   *
+   * @param aContentToInsert    The node to be inserted.
+   * @param aPointToInsert      The insertion point of aContentToInsert.
+   *                            If this refers end of the container, the
+   *                            transaction will append the node to the
+   *                            container.  Otherwise, will insert the node
+   *                            before child node referred by this.
+   */
+  nsresult InsertNode(nsIContent& aContentToInsert,
+                      const EditorRawDOMPoint& aPointToInsert);
+
   enum ECloneAttributes { eDontCloneAttributes, eCloneAttributes };
   already_AddRefed<Element> ReplaceContainer(Element* aOldContainer,
                                              nsAtom* aNodeType,
@@ -384,7 +364,7 @@ public:
 
   /**
    * MoveAllChildren() moves all children of aContainer to before
-   * aPointToInsert.GetChildAtOffset().
+   * aPointToInsert.GetChild().
    * See explanation of MoveChildren() for the detail of the behavior.
    *
    * @param aContainer          The container node whose all children should
@@ -400,7 +380,7 @@ public:
 
   /**
    * MovePreviousSiblings() moves all siblings before aChild (i.e., aChild
-   * won't be moved) to before aPointToInsert.GetChildAtOffset().
+   * won't be moved) to before aPointToInsert.GetChild().
    * See explanation of MoveChildren() for the detail of the behavior.
    *
    * @param aChild              The node which is next sibling of the last
@@ -416,7 +396,7 @@ public:
 
   /**
    * MoveChildren() moves all children between aFirstChild and aLastChild to
-   * before aPointToInsert.GetChildAtOffset().
+   * before aPointToInsert.GetChild().
    * If some children are moved to different container while this method
    * moves other children, they are just ignored.
    * If the child node referred by aPointToInsert is moved to different
@@ -483,41 +463,11 @@ public:
 
   void SwitchTextDirectionTo(uint32_t aDirection);
 
+  RangeUpdater& RangeUpdaterRef() { return mRangeUpdater; }
+
 protected:
   nsresult DetermineCurrentDirection();
   void FireInputEvent();
-
-  /**
-   * Create a transaction for setting aAttribute to aValue on aElement.  Never
-   * returns null.
-   */
-  already_AddRefed<ChangeAttributeTransaction>
-    CreateTxnForSetAttribute(Element& aElement, nsAtom& aAttribute,
-                             const nsAString& aValue);
-
-  /**
-   * Create a transaction for removing aAttribute on aElement.  Never returns
-   * null.
-   */
-  already_AddRefed<ChangeAttributeTransaction>
-    CreateTxnForRemoveAttribute(Element& aElement, nsAtom& aAttribute);
-
-  /**
-   * Create a transaction for creating a new child node of the container of
-   * aPointToInsert of type aTag.
-   *
-   * @param aTag            The element name to create.
-   * @param aPointToInsert  The insertion point of new element.  If this refers
-   *                        end of the container or after, the transaction
-   *                        will append the element to the container.
-   *                        Otherwise, will insert the element before the
-   *                        child node referred by this.
-   * @return                A CreateElementTransaction which are initialized
-   *                        with the arguments.
-   */
-  already_AddRefed<CreateElementTransaction>
-    CreateTxnForCreateElement(nsAtom& aTag,
-                              const EditorRawDOMPoint& aPointToInsert);
 
   /**
    * Create an element node whose name is aTag at before aPointToInsert.  When
@@ -536,19 +486,6 @@ protected:
    */
   already_AddRefed<Element> CreateNode(nsAtom* aTag,
                                        const EditorRawDOMPoint& aPointToInsert);
-
-  /**
-   * Create a transaction for inserting aNode as a child of aParent.
-   */
-  already_AddRefed<InsertNodeTransaction>
-    CreateTxnForInsertNode(nsIContent& aNode, nsINode& aParent,
-                           int32_t aOffset);
-
-  /**
-   * Create a transaction for removing aNode from its parent.
-   */
-  already_AddRefed<DeleteNodeTransaction>
-    CreateTxnForDeleteNode(nsINode* aNode);
 
   /**
    * Create an aggregate transaction for delete selection.  The result may
@@ -589,60 +526,8 @@ protected:
                             int32_t* aOffset,
                             int32_t* aLength);
 
-  /**
-   * Create a transaction for inserting aStringToInsert into aTextNode.  Never
-   * returns null.
-   */
-  already_AddRefed<mozilla::InsertTextTransaction>
-    CreateTxnForInsertText(const nsAString& aStringToInsert, Text& aTextNode,
-                           int32_t aOffset);
-
-  /**
-   * Never returns null.
-   */
-  already_AddRefed<mozilla::CompositionTransaction>
-    CreateTxnForComposition(const nsAString& aStringToInsert);
-
-  /**
-   * Create a transaction for adding a style sheet.
-   */
-  already_AddRefed<mozilla::AddStyleSheetTransaction>
-    CreateTxnForAddStyleSheet(StyleSheet* aSheet);
-
-  /**
-   * Create a transaction for removing a style sheet.
-   */
-  already_AddRefed<mozilla::RemoveStyleSheetTransaction>
-    CreateTxnForRemoveStyleSheet(StyleSheet* aSheet);
-
   nsresult DeleteText(nsGenericDOMDataNode& aElement,
                       uint32_t aOffset, uint32_t aLength);
-
-  already_AddRefed<DeleteTextTransaction>
-    CreateTxnForDeleteText(nsGenericDOMDataNode& aElement,
-                           uint32_t aOffset, uint32_t aLength);
-
-  already_AddRefed<DeleteTextTransaction>
-    CreateTxnForDeleteCharacter(nsGenericDOMDataNode& aData, uint32_t aOffset,
-                                EDirection aDirection);
-
-  /**
-   * CreateTxnForSplitNode() creates a transaction to create a new node
-   * (left node) identical to an existing node (right node), and split the
-   * contents between the same point in both nodes.
-   *
-   * @param aStartOfRightNode   The point to split.  Its container will be
-   *                            the right node, i.e., become the new node's
-   *                            next sibling.  And the point will be start
-   *                            of the right node.
-   * @return                    The new transaction to split the container of
-   *                            aStartOfRightNode.
-   */
-  already_AddRefed<SplitNodeTransaction>
-    CreateTxnForSplitNode(const EditorRawDOMPoint& aStartOfRightNode);
-
-  already_AddRefed<JoinNodeTransaction>
-    CreateTxnForJoinNode(nsINode& aLeftNode, nsINode& aRightNode);
 
   /**
    * This method first deletes the selection, if it's not collapsed.  Then if
@@ -886,15 +771,6 @@ public:
   static nsINode* GetNodeLocation(nsINode* aChild, int32_t* aOffset);
 
   /**
-   * Returns the number of things inside aNode in the out-param aCount.
-   * @param  aNode is the node to get the length of.
-   *         If aNode is text, returns number of characters.
-   *         If not, returns number of children nodes.
-   * @param  aCount [OUT] the result of the above calculation.
-   */
-  static nsresult GetLengthOfDOMNode(nsIDOMNode *aNode, uint32_t &aCount);
-
-  /**
    * Get the previous node.
    */
   nsIContent* GetPreviousNode(const EditorRawDOMPoint& aPoint)
@@ -950,7 +826,7 @@ public:
    *   // Do something...
    *   DebugOnly<bool> advanced = point.Advanced();
    *   MOZ_ASSERT(advanced);
-   *   point.Set(point.GetChildAtOffset());
+   *   point.Set(point.GetChild());
    * }
    *
    * On the other hand, the methods taking nsINode behavior must be what
@@ -1039,7 +915,6 @@ public:
    * Returns true if aNode is a container.
    */
   virtual bool IsContainer(nsINode* aNode);
-  virtual bool IsContainer(nsIDOMNode* aNode);
 
   /**
    * returns true if aNode is an editable node.
@@ -1246,7 +1121,7 @@ public:
                                   nsINode* aEndContainer,
                                   uint32_t aEndOffset);
 
-  virtual already_AddRefed<dom::EventTarget> GetDOMEventTarget() = 0;
+  virtual dom::EventTarget* GetDOMEventTarget() = 0;
 
   /**
    * Fast non-refcounting editor root element accessor
@@ -1426,7 +1301,7 @@ public:
   /**
    * Get the focused content, if we're focused.  Returns null otherwise.
    */
-  virtual already_AddRefed<nsIContent> GetFocusedContent();
+  virtual nsIContent* GetFocusedContent();
 
   /**
    * Get the focused content for the argument of some IMEStateManager's
@@ -1524,13 +1399,13 @@ protected:
   // MIME type of the doc we are editing.
   nsCString mContentMIMEType;
 
-  nsCOMPtr<nsIInlineSpellChecker> mInlineSpellChecker;
+  RefPtr<mozInlineSpellChecker> mInlineSpellChecker;
+  // Reference to text services document for mInlineSpellChecker.
+  RefPtr<TextServicesDocument> mTextServicesDocument;
 
   RefPtr<nsTransactionManager> mTxnMgr;
   // Cached root node.
   nsCOMPtr<Element> mRootElement;
-  // Current IME text node.
-  RefPtr<Text> mIMETextNode;
   // The form field as an event receiver.
   nsCOMPtr<dom::EventTarget> mEventTarget;
   nsCOMPtr<nsIDOMEventListener> mEventListener;
@@ -1543,6 +1418,12 @@ protected:
   // IME composition this is not null between compositionstart and
   // compositionend.
   RefPtr<TextComposition> mComposition;
+
+  RefPtr<TextEditRules> mRules;
+
+  RefPtr<TextInputListener> mTextInputListener;
+
+  RefPtr<IMEContentObserver> mIMEContentObserver;
 
   // Listens to all low level actions on the doc.
   typedef AutoTArray<OwningNonNull<nsIEditActionListener>, 5>
@@ -1573,12 +1454,6 @@ protected:
   int32_t mPlaceholderBatch;
   // The current editor action.
   EditAction mAction;
-
-  // Offset in text node where IME comp string begins.
-  uint32_t mIMETextOffset;
-  // The Length of the composition string or commit string.  If this is length
-  // of commit string, the length is truncated by maxlength attribute.
-  uint32_t mIMETextLength;
 
   // The current direction of editor action.
   EDirection mDirection;

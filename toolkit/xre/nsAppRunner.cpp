@@ -20,6 +20,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/intl/LocaleService.h"
+#include "nsNativeCharsetUtils.h"
 
 #include "nsAppRunner.h"
 #include "mozilla/XREAppData.h"
@@ -221,8 +222,8 @@
 #if defined(XP_LINUX) && !defined(ANDROID)
 #include "mozilla/SandboxInfo.h"
 #elif defined(XP_WIN)
-#include "SandboxBroker.h"
-#include "SandboxPermissions.h"
+#include "sandboxBroker.h"
+#include "sandboxPermissions.h"
 #endif
 #endif
 
@@ -280,17 +281,19 @@ nsString gAbsoluteArgv0Path;
 extern "C" MFBT_API bool IsSignalHandlingBroken();
 #endif
 
-#ifdef LIBFUZZER
-#include "LibFuzzerRunner.h"
+#ifdef FUZZING
+#include "FuzzerRunner.h"
 
 namespace mozilla {
-LibFuzzerRunner* libFuzzerRunner = 0;
+FuzzerRunner* fuzzerRunner = 0;
 } // namespace mozilla
 
+#ifdef LIBFUZZER
 void XRE_LibFuzzerSetDriver(LibFuzzerDriver aDriver) {
-  mozilla::libFuzzerRunner->setParams(aDriver);
+  mozilla::fuzzerRunner->setParams(aDriver);
 }
 #endif
+#endif // FUZZING
 
 namespace mozilla {
 int (*RunGTest)(int*, char**) = 0;
@@ -902,9 +905,10 @@ SYNC_ENUMS(CONTENT, Content)
 SYNC_ENUMS(IPDLUNITTEST, IPDLUnitTest)
 SYNC_ENUMS(GMPLUGIN, GMPlugin)
 SYNC_ENUMS(GPU, GPU)
+SYNC_ENUMS(PDFIUM, PDFium)
 
 // .. and ensure that that is all of them:
-static_assert(GeckoProcessType_GPU + 1 == GeckoProcessType_End,
+static_assert(GeckoProcessType_PDFium + 1 == GeckoProcessType_End,
               "Did not find the final GeckoProcessType");
 
 NS_IMETHODIMP
@@ -2980,7 +2984,7 @@ static void MOZ_gdk_display_close(GdkDisplay *display)
     g_free(theme_name);
   }
 
-#if (MOZ_WIDGET_GTK == 3)
+#ifdef MOZ_WIDGET_GTK
   // A workaround for https://bugzilla.gnome.org/show_bug.cgi?id=703257
   if (gtk_check_version(3,9,8) != NULL)
     skip_display_close = true;
@@ -3862,10 +3866,6 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
   // in nsAppShell::Create, but we need to get in before gtk
   // has been initialized to make sure everything is running
   // consistently.
-#if (MOZ_WIDGET_GTK == 2)
-  if (CheckArg("install"))
-    gdk_rgb_set_install(TRUE);
-#endif
 
   // Set program name to the one defined in application.ini.
   {
@@ -3876,8 +3876,11 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
 
   // Initialize GTK here for splash.
 
-#if (MOZ_WIDGET_GTK == 3) && defined(MOZ_X11)
-  // Disable XInput2 support due to focus bugginess. See bugs 1182700, 1170342.
+#if defined(MOZ_WIDGET_GTK) && defined(MOZ_X11)
+  // Disable XInput2 multidevice support due to focus bugginess.
+  // See bugs 1182700, 1170342.
+  // gdk_disable_multidevice() affects Gdk X11 backend only,
+  // the multidevice support is always enabled on Wayland backend.
   const char* useXI2 = PR_GetEnv("MOZ_USE_XINPUT2");
   if (!useXI2 || (*useXI2 == '0'))
     gdk_disable_multidevice();
@@ -3890,10 +3893,10 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
     return 1;
 #endif /* MOZ_WIDGET_GTK */
 
-#ifdef LIBFUZZER
-  if (PR_GetEnv("LIBFUZZER")) {
+#ifdef FUZZING
+  if (PR_GetEnv("FUZZER")) {
     *aExitFlag = true;
-    return mozilla::libFuzzerRunner->Run(&gArgc, &gArgv);
+    return mozilla::fuzzerRunner->Run(&gArgc, &gArgv);
   }
 #endif
 
@@ -3968,7 +3971,7 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
 #endif
       }
     }
-#if (MOZ_WIDGET_GTK == 3)
+#ifdef MOZ_WIDGET_GTK
     else {
       mGdkDisplay = gdk_display_manager_open_display(gdk_display_manager_get(),
                                                      nullptr);
@@ -4070,9 +4073,6 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
   g_set_application_name(mAppData->name);
   gtk_window_set_auto_startup_notification(false);
 
-#if (MOZ_WIDGET_GTK == 2)
-  gtk_widget_set_default_colormap(gdk_rgb_get_colormap());
-#endif /* (MOZ_WIDGET_GTK == 2) */
 #endif /* defined(MOZ_WIDGET_GTK) */
 #ifdef MOZ_X11
   // Do this after initializing GDK, or GDK will install its own handler.
@@ -4515,6 +4515,16 @@ XREMain::XRE_mainRun()
     }
   }
 
+  if (NS_IsNativeUTF8()) {
+    nsCOMPtr<nsIFile> profileDir;
+    nsAutoCString path;
+    rv = mDirProvider.GetProfileStartupDir(getter_AddRefs(profileDir));
+    if (NS_SUCCEEDED(rv) && NS_SUCCEEDED(profileDir->GetNativePath(path)) && !IsUTF8(path)) {
+      PR_fprintf(PR_STDERR, "Error: The profile path is not valid UTF-8. Unable to continue.\n");
+      return NS_ERROR_FAILURE;
+    }
+  }
+
   // Initialize user preferences before notifying startup observers so they're
   // ready in time for early consumers, such as the component loader.
   mDirProvider.InitializeUserPrefs();
@@ -4704,25 +4714,6 @@ XREMain::XRE_mainRun()
   return rv;
 }
 
-#if MOZ_WIDGET_GTK == 2
-void XRE_GlibInit()
-{
-  static bool ran_once = false;
-
-  // glib < 2.24 doesn't want g_thread_init to be invoked twice, so ensure
-  // we only do it once. No need for thread safety here, since this is invoked
-  // well before any thread is spawned.
-  if (!ran_once) {
-    // glib version < 2.36 doesn't initialize g_slice in a static initializer.
-    // Ensure this happens through g_thread_init (glib version < 2.32) or
-    // g_type_init (2.32 <= gLib version < 2.36)."
-    g_thread_init(nullptr);
-    g_type_init();
-    ran_once = true;
-  }
-}
-#endif
-
 /*
  * XRE_main - A class based main entry point used by most platforms.
  *            Note that on OSX, aAppData->xreDirectory will point to
@@ -4734,10 +4725,6 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
   ScopedLogging log;
 
   mozilla::LogModule::Init();
-
-#if defined(MOZ_SANDBOX) && defined(XP_LINUX) && !defined(ANDROID)
-  SandboxInfo::ThreadingCheck();
-#endif
 
 #ifdef MOZ_CODE_COVERAGE
   CodeCoverageHandler::Init();
@@ -4828,10 +4815,6 @@ XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig)
   // stability, we should instantiate COM ASAP so that we can ensure that these
   // global settings are configured before anything can interfere.
   mozilla::mscom::MainThreadRuntime msCOMRuntime;
-#endif
-
-#if MOZ_WIDGET_GTK == 2
-  XRE_GlibInit();
 #endif
 
   // init

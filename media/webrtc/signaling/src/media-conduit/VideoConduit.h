@@ -171,19 +171,8 @@ public:
    * @param width, height: dimensions of the frame
    * @param frame: optional frame to submit for encoding after reconfig
    */
-  bool SelectSendResolution(unsigned short width,
-                            unsigned short height,
-                            webrtc::VideoFrame* frame);
-
-  /**
-   * Function to reconfigure the current send codec for a different
-   * width/height/framerate/etc.
-   * @param width, height: dimensions of the frame
-   * @param frame: optional frame to submit for encoding after reconfig
-   */
-  nsresult ReconfigureSendCodec(unsigned short width,
-                                unsigned short height,
-                                webrtc::VideoFrame* frame);
+  void SelectSendResolution(unsigned short width,
+                            unsigned short height);
 
   /**
    * Function to select and change the encoding frame rate based on incoming frame rate
@@ -207,15 +196,16 @@ public:
    *NOTE: ConfigureSendMediaCodec() SHOULD be called before this function can be invoked
    *       This ensures the inserted video-frames can be transmitted by the conduit
    */
-  virtual MediaConduitErrorCode SendVideoFrame(unsigned char* video_frame,
+  virtual MediaConduitErrorCode SendVideoFrame(const unsigned char* video_frame,
                                                unsigned int video_frame_length,
                                                unsigned short width,
                                                unsigned short height,
                                                VideoType video_type,
                                                uint64_t capture_time) override;
-  virtual MediaConduitErrorCode SendVideoFrame(webrtc::VideoFrame& frame) override;
+  virtual MediaConduitErrorCode SendVideoFrame(
+    const webrtc::VideoFrame& frame) override;
 
- /**
+  /**
    * webrtc::Transport method implementation
    * ---------------------------------------
    * Webrtc transport implementation to send and receive RTP packet.
@@ -457,7 +447,7 @@ private:
   class VideoStreamFactory : public webrtc::VideoEncoderConfig::VideoStreamFactoryInterface
   {
   public:
-    VideoStreamFactory(std::string aCodecName,
+    VideoStreamFactory(const std::string& aCodecName,
                        WebrtcVideoConduit *aConduit)
       : mCodecName(aCodecName),
         mConduit(aConduit) {}
@@ -505,10 +495,9 @@ private:
   //Local database of currently applied receive codecs
   nsTArray<UniquePtr<VideoCodecConfig>> mRecvCodecList;
 
-  // protects mCurSendCodecConfig, mInReconfig,mVideoSend/RecvStreamStats, mSend/RecvStreams, mSendPacketCounts, mRecvPacketCounts
+  // protects mCurSendCodecConfig, mVideoSend/RecvStreamStats, mSend/RecvStreams, mSendPacketCounts, mRecvPacketCounts
   Mutex mCodecMutex;
   nsAutoPtr<VideoCodecConfig> mCurSendCodecConfig;
-  bool mInReconfig;
   SendStreamStatistics mSendStreamStats;
   ReceiveStreamStatistics mRecvStreamStats;
   webrtc::RtcpPacketTypeCounter mSendPacketCounts;

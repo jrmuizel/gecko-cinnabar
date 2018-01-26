@@ -384,9 +384,9 @@ nsXBLPrototypeBinding::AttributeChanged(nsAtom* aAttribute,
                                            kNameSpaceID_XUL) &&
            dstAttr == nsGkAtoms::value)) {
         // Flush out all our kids.
-        uint32_t childCount = realElement->GetChildCount();
-        for (uint32_t i = 0; i < childCount; i++)
-          realElement->RemoveChildAt(0, aNotify);
+        while (realElement->HasChildren()) {
+          realElement->RemoveChildNode(realElement->GetFirstChild(), aNotify);
+        }
 
         if (!aRemoveFlag) {
           // Construct a new text node and insert it.
@@ -483,7 +483,8 @@ nsXBLPrototypeBinding::LocateInstance(Element* aBoundElement,
   if (!copyParent)
     return nullptr;
 
-  nsIContent* child = copyParent->GetChildAt(templParent->IndexOf(aTemplChild));
+  nsIContent* child =
+    copyParent->GetChildAt_Deprecated(templParent->ComputeIndexOf(aTemplChild));
   if (child && child->IsElement()) {
     return child->AsElement();
   }
@@ -1487,7 +1488,7 @@ nsXBLPrototypeBinding::WriteContentNode(nsIObjectOutputStream* aStream,
   NS_ENSURE_SUCCESS(rv, rv);
 
   for (i = 0; i < count; i++) {
-    rv = WriteContentNode(aStream, element->GetChildAt(i));
+    rv = WriteContentNode(aStream, element->GetChildAt_Deprecated(i));
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -1546,7 +1547,7 @@ nsXBLPrototypeBinding::WriteNamespace(nsIObjectOutputStream* aStream,
 
 bool CheckTagNameWhiteList(int32_t aNameSpaceID, nsAtom *aTagName)
 {
-  static nsIContent::AttrValuesArray kValidXULTagNames[] =  {
+  static Element::AttrValuesArray kValidXULTagNames[] =  {
     &nsGkAtoms::autorepeatbutton, &nsGkAtoms::box, &nsGkAtoms::browser,
     &nsGkAtoms::button, &nsGkAtoms::hbox, &nsGkAtoms::image, &nsGkAtoms::menu,
     &nsGkAtoms::menubar, &nsGkAtoms::menuitem, &nsGkAtoms::menupopup,

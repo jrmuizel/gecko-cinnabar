@@ -371,6 +371,8 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
             options += args
         if 'talos_extra_options' in self.config:
             options += self.config['talos_extra_options']
+        if self.config.get('code_coverage', False):
+            options.extend(['--code-coverage'])
         return options
 
     def populate_webroot(self):
@@ -405,38 +407,44 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
                 self.info("Downloading pageset with tooltool...")
                 self.src_talos_webdir = os.path.join(self.talos_path, 'talos')
                 src_talos_pageset = os.path.join(self.src_talos_webdir, 'tests')
-                manifest_file = os.path.join(self.talos_path, 'tp5n-pageset.manifest')
-                self.tooltool_fetch(
-                    manifest_file,
-                    output_dir=src_talos_pageset,
-                    cache=self.config.get('tooltool_cache')
-                )
-                archive = os.path.join(src_talos_pageset, self.pagesets_name)
-                unzip = self.query_exe('unzip')
-                unzip_cmd = [unzip, '-q', '-o', archive, '-d', src_talos_pageset]
-                self.run_command(unzip_cmd, halt_on_failure=True)
+                if not os.path.exists(os.path.join(src_talos_pageset, self.pagesets_name)):
+                    manifest_file = os.path.join(self.talos_path, 'tp5n-pageset.manifest')
+                    self.tooltool_fetch(
+                        manifest_file,
+                        output_dir=src_talos_pageset,
+                        cache=self.config.get('tooltool_cache')
+                    )
+                    archive = os.path.join(src_talos_pageset, self.pagesets_name)
+                    unzip = self.query_exe('unzip')
+                    unzip_cmd = [unzip, '-q', '-o', archive, '-d', src_talos_pageset]
+                    self.run_command(unzip_cmd, halt_on_failure=True)
+                else:
+                    self.info("pageset already available")
             else:
                 self.info("Not downloading pageset because the no-download option was specified")
 
-        # if running speedometer locally, need to copy speedometer source into talos/tests
-        if self.config.get('run_local') and 'speedometer' in self.suite:
-            self.get_speedometer_source()
+        # if running webkit tests locally, need to copy webkit source into talos/tests
+        if self.config.get('run_local') and ('speedometer' in self.suite or
+           'stylebench' in self.suite or
+           'motionmark' in self.suite):
+            self.get_webkit_source()
 
-    def get_speedometer_source(self):
-        # in production the build system auto copies speedometer source into place;
+    def get_webkit_source(self):
+        # in production the build system auto copies webkit source into place;
         # but when run locally we need to do this manually, so that talos can find it
         src = os.path.join(self.repo_path, 'third_party', 'webkit',
-                                 'PerformanceTests', 'Speedometer')
+                                 'PerformanceTests')
         dest = os.path.join(self.talos_path, 'talos', 'tests', 'webkit',
-                                      'PerformanceTests', 'Speedometer')
-        if not os.path.exists(dest):
-            self.info("Copying speedometer source from %s to %s" % (src, dest))
-            try:
-                shutil.copytree(src, dest)
-            except:
-                self.critical("Error copying speedometer source from %s to %s" % (src, dest))
-        else:
-            self.info("Speedometer source already found at %s" % dest)
+                                      'PerformanceTests')
+
+        if os.path.exists(dest):
+            shutil.rmtree(dest)
+
+        self.info("Copying webkit benchmarks from %s to %s" % (src, dest))
+        try:
+            shutil.copytree(src, dest)
+        except:
+            self.critical("Error copying webkit benchmarks from %s to %s" % (src, dest))
 
     def setup_mitmproxy(self):
         """Some talos tests require the use of mitmproxy to playback the pages,
@@ -578,7 +586,7 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin, TooltoolMixin,
             mozbase_requirements = os.path.join(
                 os.path.dirname(self.talos_path),
                 'config',
-                'mozbase_requirements.txt'
+                'mozbase_source_requirements.txt'
             )
         self.register_virtualenv_module(
             requirements=[mozbase_requirements],

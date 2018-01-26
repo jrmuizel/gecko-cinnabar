@@ -22,9 +22,6 @@ with Files('pocket-api-sandbox.token'):
 with Files('android-services.mozbuild'):
     BUG_COMPONENT = ('Android Background Services', 'Android Sync')
 
-with Files('geckoview.ddf'):
-    BUG_COMPONENT = ('Firefox for Android', 'GeckoView')
-
 with Files('crashreporter/**'):
     BUG_COMPONENT = ('Firefox for Android', 'General')
 
@@ -378,8 +375,6 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'GeckoBatteryManager.java',
     'GeckoEditable.java',
     'GeckoEditableChild.java',
-    'GeckoEditableClient.java',
-    'GeckoEditableListener.java',
     'GeckoHalDefines.java',
     'GeckoInputConnection.java',
     'GeckoNetworkManager.java',
@@ -408,7 +403,6 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'gfx/SurfaceTextureListener.java',
     'gfx/VsyncSource.java',
     'HapticFeedbackDelegate.java',
-    'InputConnectionListener.java',
     'InputMethods.java',
     'media/AsyncCodec.java',
     'media/AsyncCodecFactory.java',
@@ -451,6 +445,7 @@ gvjar.sources += [geckoview_source_dir + 'java/org/mozilla/gecko/' + x
     'sqlite/MatrixBlobCursor.java',
     'sqlite/SQLiteBridge.java',
     'sqlite/SQLiteBridgeException.java',
+    'TextInputController.java',
     'TouchEventInterceptor.java',
     'WakeLockDelegate.java',
 ]]
@@ -553,7 +548,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'customtabs/GeckoCustomTabsService.java',
     'customtabs/IntentUtil.java',
     'DataReportingNotification.java',
-    'dawn/DawnHelper.java',
     'db/AbstractPerProfileDatabaseProvider.java',
     'db/AbstractTransactionalProvider.java',
     'db/BaseTable.java',
@@ -883,6 +877,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'telemetry/measurements/SearchCountMeasurements.java',
     'telemetry/measurements/SessionMeasurements.java',
     'telemetry/pingbuilders/TelemetryCorePingBuilder.java',
+    'telemetry/pingbuilders/TelemetryCrashPingBuilder.java',
     'telemetry/pingbuilders/TelemetryLocalPingBuilder.java',
     'telemetry/pingbuilders/TelemetryPingBuilder.java',
     'telemetry/pingbuilders/TelemetrySyncEventPingBuilder.java',

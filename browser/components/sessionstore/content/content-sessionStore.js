@@ -233,16 +233,7 @@ var MessageListener = {
         this.flush(data);
         break;
       case "SessionStore:becomeActiveProcess":
-        let shistory = docShell.QueryInterface(Ci.nsIWebNavigation).sessionHistory;
-        // Check if we are at the end of the current session history, if we are,
-        // it is safe for us to collect and transmit our session history, so
-        // transmit all of it. Otherwise, we only want to transmit our index changes,
-        // so collect from kLastIndex.
-        if (shistory.globalCount - shistory.globalIndexOffset == shistory.count) {
-          SessionHistoryListener.collect();
-        } else {
-          SessionHistoryListener.collectFrom(kLastIndex);
-        }
+        SessionHistoryListener.collect();
         break;
       default:
         debug("received unknown message '" + name + "'");
@@ -629,7 +620,6 @@ var SessionStorageListener = {
     let usage = content.QueryInterface(Ci.nsIInterfaceRequestor)
                        .getInterface(Ci.nsIDOMWindowUtils)
                        .getStorageUsage(event.storageArea);
-    Services.telemetry.getHistogramById("FX_SESSION_RESTORE_DOM_STORAGE_SIZE_ESTIMATE_CHARS").add(usage);
 
     // Don't store any data if we exceed the limit. Wipe any data we previously
     // collected so that we don't confuse websites with partial state.

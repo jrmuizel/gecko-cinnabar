@@ -241,11 +241,8 @@ nsHtml5TreeOperation::Detach(nsIContent* aNode, nsHtml5DocumentBuilder* aBuilder
   MOZ_ASSERT(aBuilder->IsInDocUpdate());
   nsCOMPtr<nsINode> parent = aNode->GetParentNode();
   if (parent) {
-    nsHtml5OtherDocUpdate update(parent->OwnerDoc(),
-        aBuilder->GetDocument());
-    int32_t pos = parent->IndexOf(aNode);
-    NS_ASSERTION((pos >= 0), "Element not found as child of its parent");
-    parent->RemoveChildAt(pos, true);
+    nsHtml5OtherDocUpdate update(parent->OwnerDoc(), aBuilder->GetDocument());
+    parent->RemoveChildNode(aNode, true);
   }
 }
 
@@ -262,7 +259,7 @@ nsHtml5TreeOperation::AppendChildrenToNewParent(nsIContent* aNode,
   bool didAppend = false;
   while (aNode->HasChildren()) {
     nsCOMPtr<nsIContent> child = aNode->GetFirstChild();
-    aNode->RemoveChildAt(0, true);
+    aNode->RemoveChildNode(child, true);
     nsresult rv = aParent->AppendChildTo(child, false);
     NS_ENSURE_SUCCESS(rv, rv);
     didAppend = true;
@@ -288,8 +285,7 @@ nsHtml5TreeOperation::FosterParent(nsIContent* aNode,
     nsHtml5OtherDocUpdate update(foster->OwnerDoc(),
                                  aBuilder->GetDocument());
 
-    uint32_t pos = foster->IndexOf(aTable);
-    nsresult rv = foster->InsertChildAt(aNode, pos, false);
+    nsresult rv = foster->InsertChildBefore(aNode, aTable, false);
     NS_ENSURE_SUCCESS(rv, rv);
     nsNodeUtils::ContentInserted(foster, aNode);
     return rv;
@@ -393,7 +389,7 @@ nsHtml5TreeOperation::CreateHTMLElement(
   nsIDocument* document = nodeInfo->GetDocument();
   bool willExecuteScript = false;
   bool isCustomElement = false;
-  nsString isValue;
+  RefPtr<nsAtom> isAtom;
   dom::CustomElementDefinition* definition = nullptr;
 
   // Avoid overhead by checking if custom elements pref is enabled or not.
@@ -401,15 +397,17 @@ nsHtml5TreeOperation::CreateHTMLElement(
     if (aAttributes) {
       nsHtml5String is = aAttributes->getValue(nsHtml5AttributeName::ATTR_IS);
       if (is) {
+        nsAutoString isValue;
         is.ToString(isValue);
+        isAtom = NS_Atomize(isValue);
       }
     }
 
-    isCustomElement = (aCreator == NS_NewCustomElement || !isValue.IsEmpty());
+    isCustomElement = (aCreator == NS_NewCustomElement || isAtom);
     if (isCustomElement && aFromParser != dom::FROM_PARSER_FRAGMENT) {
       RefPtr<nsAtom> tagAtom = nodeInfo->NameAtom();
       RefPtr<nsAtom> typeAtom =
-        isValue.IsEmpty() ? tagAtom : NS_Atomize(isValue);
+        (aCreator == NS_NewCustomElement) ? tagAtom : isAtom;
 
       definition = nsContentUtils::LookupCustomElementDefinition(document,
         nodeInfo->LocalName(), nodeInfo->NamespaceID(), typeAtom);
@@ -433,8 +431,7 @@ nsHtml5TreeOperation::CreateHTMLElement(
 
     nsCOMPtr<dom::Element> newElement;
     NS_NewHTMLElement(getter_AddRefs(newElement), nodeInfo.forget(),
-                      aFromParser, (isValue.IsEmpty() ? nullptr : &isValue),
-                      definition);
+                      aFromParser, isAtom, definition);
 
     MOZ_ASSERT(newElement, "Element creation created null pointer.");
     newContent = newElement;
@@ -458,8 +455,7 @@ nsHtml5TreeOperation::CreateHTMLElement(
 
     if (isCustomElement) {
       NS_NewHTMLElement(getter_AddRefs(newElement), nodeInfo.forget(),
-                        aFromParser, (isValue.IsEmpty() ? nullptr : &isValue),
-                        definition);
+                        aFromParser, isAtom, definition);
     } else {
       newElement = aCreator(nodeInfo.forget(), aFromParser);
     }
@@ -656,7 +652,7 @@ nsHtml5TreeOperation::SetFormElement(nsIContent* aNode, nsIContent* aParent)
   NS_ASSERTION(formElement, "The form element doesn't implement nsIDOMHTMLFormElement.");
   // avoid crashing on <keygen>
   if (formControl &&
-      !aNode->HasAttr(kNameSpaceID_None, nsGkAtoms::form)) {
+      !aNode->AsElement()->HasAttr(kNameSpaceID_None, nsGkAtoms::form)) {
     formControl->SetForm(formElement);
   } else if (domImageElement) {
     domImageElement->SetForm(formElement);
@@ -679,8 +675,6 @@ nsHtml5TreeOperation::FosterParentText(nsIContent* aStackParent,
     nsHtml5OtherDocUpdate update(foster->OwnerDoc(),
                                  aBuilder->GetDocument());
 
-    uint32_t pos = foster->IndexOf(aTable);
-
     nsIContent* previousSibling = aTable->GetPreviousSibling();
     if (previousSibling && previousSibling->IsNodeOfType(nsINode::eTEXT)) {
       return AppendTextToTextNode(aBuffer,
@@ -695,7 +689,7 @@ nsHtml5TreeOperation::FosterParentText(nsIContent* aStackParent,
     rv = text->SetText(aBuffer, aLength, false);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = foster->InsertChildAt(text, pos, false);
+    rv = foster->InsertChildBefore(text, aTable, false);
     NS_ENSURE_SUCCESS(rv, rv);
     nsNodeUtils::ContentInserted(foster, text);
     return rv;
@@ -1057,7 +1051,7 @@ nsHtml5TreeOperation::Perform(nsHtml5TreeOpExecutor* aBuilder,
       nsCOMPtr<nsIScriptElement> sele = do_QueryInterface(node);
       if (sele) {
         sele->SetScriptLineNumber(mFour.integer);
-        sele->FreezeUriAsyncDefer();
+        sele->FreezeExecutionAttrs(node->OwnerDoc());
       } else {
         MOZ_ASSERT(nsNameSpaceManager::GetInstance()->mSVGDisabled, "Node didn't QI to script, but SVG wasn't disabled.");
       }

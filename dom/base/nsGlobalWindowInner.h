@@ -37,6 +37,7 @@
 #include "nsSize.h"
 #include "mozilla/FlushType.h"
 #include "prclist.h"
+#include "mozilla/dom/DOMPrefs.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
@@ -112,8 +113,6 @@ class IncrementalRunnable;
 class IntlUtils;
 class Location;
 class MediaQueryList;
-class MozSelfSupport;
-class Navigator;
 class OwningExternalOrWindowProxy;
 class Promise;
 class PostMessageEvent;
@@ -348,8 +347,11 @@ public:
   virtual bool IsFrozen() const override;
   void SyncStateFromParentWindow();
 
-  mozilla::Maybe<mozilla::dom::ClientInfo> GetClientInfo() const;
-  mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor> GetController() const;
+  mozilla::Maybe<mozilla::dom::ClientInfo> GetClientInfo() const override;
+  mozilla::Maybe<mozilla::dom::ClientState> GetClientState() const;
+  mozilla::Maybe<mozilla::dom::ServiceWorkerDescriptor> GetController() const override;
+
+  void NoteCalledRegisterForServiceWorkerScope(const nsACString& aScope);
 
   virtual nsresult FireDelayedDOMEvents() override;
 
@@ -673,8 +675,6 @@ public:
        const nsAString& aName,
        const nsAString& aOptions,
        mozilla::ErrorResult& aError);
-  mozilla::dom::Navigator* Navigator();
-  nsIDOMNavigator* GetNavigator() override;
   nsIDOMOfflineResourceList* GetApplicationCache(mozilla::ErrorResult& aError);
   already_AddRefed<nsIDOMOfflineResourceList> GetApplicationCache() override;
 
@@ -682,7 +682,7 @@ public:
   int16_t Orientation(mozilla::dom::CallerType aCallerType) const;
 #endif
 
-  mozilla::dom::Console* GetConsole(mozilla::ErrorResult& aRv);
+  already_AddRefed<mozilla::dom::Console> GetConsole(mozilla::ErrorResult& aRv);
 
   // https://w3c.github.io/webappsec-secure-contexts/#dom-window-issecurecontext
   bool IsSecureContext() const;
@@ -889,8 +889,6 @@ public:
 
   bool ShouldResistFingerprinting();
 
-  mozilla::dom::MozSelfSupport* GetMozSelfSupport(mozilla::ErrorResult& aError);
-
   already_AddRefed<nsPIDOMWindowOuter>
   OpenDialog(JSContext* aCx,
              const nsAString& aUrl,
@@ -898,7 +896,7 @@ public:
              const nsAString& aOptions,
              const mozilla::dom::Sequence<JS::Value>& aExtraArgument,
              mozilla::ErrorResult& aError);
-  nsresult UpdateCommands(const nsAString& anAction, nsISelection* aSel, int16_t aReason) override;
+  void UpdateCommands(const nsAString& anAction, nsISelection* aSel, int16_t aReason);
 
   void GetContent(JSContext* aCx,
                   JS::MutableHandle<JSObject*> aRetval,
@@ -972,6 +970,8 @@ public:
                     mozilla::ErrorResult& aError);
 
   already_AddRefed<nsWindowRoot> GetWindowRoot(mozilla::ErrorResult& aError);
+
+  bool ShouldReportForServiceWorkerScope(const nsAString& aScope);
 
   void UpdateTopInnerWindow();
 
@@ -1097,11 +1097,49 @@ public:
   bool IsPopupSpamWindow();
 
 private:
-  template<typename Method>
-  void CallOnChildren(Method aMethod);
+  // A type that methods called by CallOnChildren can return.  If Stop
+  // is returned then CallOnChildren will stop calling further children.
+  // If Continue is returned then CallOnChildren will keep calling further
+  // children.
+  enum class CallState
+  {
+    Continue,
+    Stop,
+  };
+
+  // Call the given method on the immediate children of this window.  The
+  // CallState returned by the last child method invocation is returned or
+  // CallState::Continue if the method returns void.
+  template<typename Method, typename... Args>
+  CallState CallOnChildren(Method aMethod, Args& ...aArgs);
+
+  // Helper to convert a void returning child method into an implicit
+  // CallState::Continue value.
+  template<typename Return, typename Method, typename... Args>
+  typename std::enable_if<std::is_void<Return>::value,
+                          nsGlobalWindowInner::CallState>::type
+  CallChild(nsGlobalWindowInner* aWindow, Method aMethod, Args& ...aArgs)
+  {
+    (aWindow->*aMethod)(aArgs...);
+    return nsGlobalWindowInner::CallState::Continue;
+  }
+
+  // Helper that passes through the CallState value from a child method.
+  template<typename Return, typename Method, typename... Args>
+  typename std::enable_if<std::is_same<Return,
+                                       nsGlobalWindowInner::CallState>::value,
+                          nsGlobalWindowInner::CallState>::type
+  CallChild(nsGlobalWindowInner* aWindow, Method aMethod, Args& ...aArgs)
+  {
+    return (aWindow->*aMethod)(aArgs...);
+  }
 
   void FreezeInternal();
   void ThawInternal();
+
+  CallState ShouldReportForServiceWorkerScopeInternal(const nsACString& aScope,
+                                                      bool* aResultOut);
+
 
 public:
   // Timeout Functions
@@ -1124,8 +1162,6 @@ public:
   bool IsPrivateBrowsing();
 
   void FireOfflineStatusEventIfChanged();
-
-  bool GetIsPrerendered();
 
 public:
   // Inner windows only.
@@ -1164,6 +1200,10 @@ public:
   // Inner windows only.
   void UpdateCanvasFocus(bool aFocusChanged, nsIContent* aNewContent);
 
+  // See PromiseWindowProxy.h for an explanation.
+  void AddPendingPromise(mozilla::dom::Promise* aPromise);
+  void RemovePendingPromise(mozilla::dom::Promise* aPromise);
+
 public:
   virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() override;
 
@@ -1196,7 +1236,7 @@ protected:
   nsresult GetComputedStyleHelper(nsIDOMElement* aElt,
                                   const nsAString& aPseudoElt,
                                   bool aDefaultStylesOnly,
-                                  nsIDOMCSSStyleDeclaration** aReturn);
+                                  nsICSSDeclaration** aReturn);
 
   nsGlobalWindowInner* InnerForSetTimeoutOrInterval(mozilla::ErrorResult& aError);
 
@@ -1303,7 +1343,6 @@ protected:
   nsRefPtrHashtable<nsUint32HashKey, mozilla::dom::Gamepad> mGamepads;
   bool mHasSeenGamepadInput;
 
-  RefPtr<mozilla::dom::Navigator> mNavigator;
   RefPtr<nsScreen>            mScreen;
 
   RefPtr<mozilla::dom::BarProp> mMenubar;
@@ -1325,8 +1364,6 @@ protected:
   // forward declared here means that ~nsGlobalWindow wouldn't compile because
   // it wouldn't see the ~External function's declaration.
   nsCOMPtr<nsISupports>         mExternal;
-
-  RefPtr<mozilla::dom::MozSelfSupport> mMozSelfSupport;
 
   RefPtr<mozilla::dom::Storage> mLocalStorage;
   RefPtr<mozilla::dom::Storage> mSessionStorage;
@@ -1407,6 +1444,8 @@ protected:
   RefPtr<mozilla::dom::IntlUtils> mIntlUtils;
 
   mozilla::UniquePtr<mozilla::dom::ClientSource> mClientSource;
+
+  nsTArray<RefPtr<mozilla::dom::Promise>> mPendingPromises;
 
   static InnerWindowByIdTable* sInnerWindowsById;
 

@@ -44,6 +44,7 @@
 #endif
 
 #include "mozilla/UniquePtr.h"
+#include "mozilla/ipc/EnvironmentMap.h"
 
 #if defined(OS_MACOSX)
 struct kinfo_proc;
@@ -107,16 +108,27 @@ struct LaunchOptions {
 
 #if defined(OS_WIN)
   bool start_hidden = false;
-#endif
 
-#if defined(OS_POSIX)
   // Environment variables to be applied in addition to the current
   // process's environment, replacing them where necessary.
-  environment_map environ;
+  EnvironmentMap env_map;
+#endif
+#if defined(OS_POSIX)
+  environment_map env_map;
 
   // A mapping of (src fd -> dest fd) to propagate into the child
   // process.  All other fds will be closed, except std{in,out,err}.
   file_handle_mapping_vector fds_to_remap;
+#endif
+
+#if defined(OS_LINUX)
+  struct ForkDelegate {
+    virtual ~ForkDelegate() { }
+    virtual pid_t Fork() = 0;
+  };
+
+  // If non-null, the fork delegate will be called instead of fork().
+  mozilla::UniquePtr<ForkDelegate> fork_delegate = nullptr;
 #endif
 };
 
@@ -167,15 +179,6 @@ bool LaunchApp(const CommandLine& cl,
                const LaunchOptions&,
                ProcessHandle* process_handle);
 
-// Used to filter processes by process ID.
-class ProcessFilter {
- public:
-  // Returns true to indicate set-inclusion and false otherwise.  This method
-  // should not have side-effects and should be idempotent.
-  virtual bool Includes(ProcessId pid, ProcessId parent_pid) const = 0;
-  virtual ~ProcessFilter() { }
-};
-
 // Attempts to kill the process identified by the given process
 // entry structure, giving it the specified exit code. If |wait| is true, wait
 // for the process to be actually terminated before returning.
@@ -190,40 +193,6 @@ bool KillProcess(ProcessHandle process, int exit_code, bool wait);
 // yet. On POSIX, |child_exited| is set correctly since we detect terminate in
 // a different manner on POSIX.
 bool DidProcessCrash(bool* child_exited, ProcessHandle handle);
-
-// Provides performance metrics for a specified process (CPU usage, memory and
-// IO counters). To use it, invoke CreateProcessMetrics() to get an instance
-// for a specific process, then access the information with the different get
-// methods.
-class ProcessMetrics {
- public:
-  // Creates a ProcessMetrics for the specified process.
-  // The caller owns the returned object.
-  static ProcessMetrics* CreateProcessMetrics(ProcessHandle process);
-
-  ~ProcessMetrics();
-
-  // Returns the CPU usage in percent since the last time this method was
-  // called. The first time this method is called it returns 0 and will return
-  // the actual CPU info on subsequent calls.
-  // Note that on multi-processor machines, the CPU usage value is for all
-  // CPUs. So if you have 2 CPUs and your process is using all the cycles
-  // of 1 CPU and not the other CPU, this method returns 50.
-  int GetCPUUsage();
-
- private:
-  explicit ProcessMetrics(ProcessHandle process);
-
-  ProcessHandle process_;
-
-  int processor_count_;
-
-  // Used to store the previous times so we can compute the CPU usage.
-  int64_t last_time_;
-  int64_t last_system_time_;
-
-  DISALLOW_EVIL_CONSTRUCTORS(ProcessMetrics);
-};
 
 }  // namespace base
 

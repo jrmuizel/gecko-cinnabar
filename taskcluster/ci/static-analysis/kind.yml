@@ -30,17 +30,13 @@ jobs:
             platform: linux64/debug
         worker-type: aws-provisioner-v1/gecko-{level}-b-linux
         worker:
-            docker-image: {in-tree: desktop-build}
             max-run-time: 36000
-            env:
-                TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/linux64/releng.manifest"
         run:
             using: mozharness
             actions: [build]
             config:
                 - builds/releng_base_firefox.py
                 - builds/releng_sub_linux_configs/64_stat_and_debug.py
-                - balrog/production.py
             script: "mozharness/scripts/fx_desktop_build.py"
             tooltool-downloads: public
             keep-artifacts: false
@@ -57,17 +53,13 @@ jobs:
             platform: linux64/opt
         worker-type: aws-provisioner-v1/gecko-{level}-b-linux
         worker:
-            docker-image: {in-tree: desktop-build}
             max-run-time: 36000
-            env:
-                TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/linux64/releng.manifest"
         run:
             using: mozharness
             actions: [build]
             config:
                 - builds/releng_base_firefox.py
                 - builds/releng_sub_linux_configs/64_stat_and_opt.py
-                - balrog/production.py
             script: "mozharness/scripts/fx_desktop_build.py"
             tooltool-downloads: public
             keep-artifacts: false
@@ -83,7 +75,7 @@ jobs:
             job-name: win32-st-an-debug
         treeherder:
             platform: windows2012-32/debug
-            symbol: tc(S)
+            symbol: S
             tier: 1
         worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
         worker:
@@ -111,7 +103,7 @@ jobs:
             job-name: win32-st-an-opt
         treeherder:
             platform: windows2012-32/opt
-            symbol: tc(S)
+            symbol: S
             tier: 1
         worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
         worker:
@@ -139,7 +131,7 @@ jobs:
             job-name: win64-st-an-debug
         treeherder:
             platform: windows2012-64/debug
-            symbol: tc(S)
+            symbol: S
             tier: 1
         worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
         worker:
@@ -167,7 +159,7 @@ jobs:
             job-name: win64-st-an-opt
         treeherder:
             platform: windows2012-64/opt
-            symbol: tc(S)
+            symbol: S
             tier: 1
         worker-type: aws-provisioner-v1/gecko-{level}-b-win2012
         worker:

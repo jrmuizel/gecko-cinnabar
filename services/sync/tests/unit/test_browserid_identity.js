@@ -7,7 +7,6 @@ Cu.import("resource://services-sync/resource.js");
 Cu.import("resource://services-sync/util.js");
 Cu.import("resource://services-common/utils.js");
 Cu.import("resource://services-crypto/utils.js");
-Cu.import("resource://testing-common/services/sync/utils.js");
 Cu.import("resource://testing-common/services/sync/fxa_utils.js");
 Cu.import("resource://services-common/hawkclient.js");
 Cu.import("resource://gre/modules/FxAccounts.jsm");
@@ -62,17 +61,10 @@ function MockFxAccounts() {
   return fxa;
 }
 
-function run_test() {
-  initTestLogging("Trace");
-  Log.repository.getLogger("Sync.Identity").level = Log.Level.Trace;
-  Log.repository.getLogger("Sync.BrowserIDManager").level = Log.Level.Trace;
-  run_next_test();
-}
-
 add_test(function test_initial_state() {
     _("Verify initial state");
-    do_check_false(!!globalBrowseridManager._token);
-    do_check_false(globalBrowseridManager.hasValidToken());
+    Assert.ok(!globalBrowseridManager._token);
+    Assert.ok(!globalBrowseridManager.hasValidToken());
     run_next_test();
   }
 );
@@ -81,8 +73,8 @@ add_task(async function test_initialializeWithCurrentIdentity() {
     _("Verify start after initializeWithCurrentIdentity");
     globalBrowseridManager.initializeWithCurrentIdentity();
     await globalBrowseridManager.whenReadyToAuthenticate.promise;
-    do_check_true(!!globalBrowseridManager._token);
-    do_check_true(globalBrowseridManager.hasValidToken());
+    Assert.ok(!!globalBrowseridManager._token);
+    Assert.ok(globalBrowseridManager.hasValidToken());
     Assert.deepEqual(getLoginTelemetryScalar(), {SUCCESS: 1});
   }
 );
@@ -129,42 +121,43 @@ add_task(async function test_initialializeWithAuthErrorAndDeletedAccount() {
     await Assert.rejects(browseridManager.whenReadyToAuthenticate.promise,
                      "should reject due to an auth error");
 
-    do_check_true(signCertificateCalled);
-    do_check_true(accountStatusCalled);
-    do_check_false(browseridManager._token);
-    do_check_false(browseridManager.hasValidToken());
+    Assert.ok(signCertificateCalled);
+    Assert.ok(accountStatusCalled);
+    Assert.ok(!browseridManager._token);
+    Assert.ok(!browseridManager.hasValidToken());
     Assert.deepEqual(getLoginTelemetryScalar(), {REJECTED: 1});
 });
 
 add_task(async function test_initialializeWithNoKeys() {
-    _("Verify start after initializeWithCurrentIdentity without kA, kB or keyFetchToken");
+    _("Verify start after initializeWithCurrentIdentity without kSync, kXCS, kExtSync, kExtKbHash or keyFetchToken");
     let identityConfig = makeIdentityConfig();
-    delete identityConfig.fxaccount.user.kA;
-    delete identityConfig.fxaccount.user.kB;
+    delete identityConfig.fxaccount.user.kSync;
+    delete identityConfig.fxaccount.user.kXCS;
+    delete identityConfig.fxaccount.user.kExtSync;
+    delete identityConfig.fxaccount.user.kExtKbHash;
     // there's no keyFetchToken by default, so the initialize should fail.
     configureFxAccountIdentity(globalBrowseridManager, identityConfig);
 
     await globalBrowseridManager.initializeWithCurrentIdentity();
     await globalBrowseridManager.whenReadyToAuthenticate.promise;
-    do_check_eq(Status.login, LOGIN_SUCCEEDED, "login succeeded even without keys");
-    do_check_false(globalBrowseridManager._canFetchKeys(), "_canFetchKeys reflects lack of keys");
-    do_check_eq(globalBrowseridManager._token, null, "we don't have a token");
+    Assert.equal(Status.login, LOGIN_SUCCEEDED, "login succeeded even without keys");
+    Assert.equal(globalBrowseridManager._token, null, "we don't have a token");
 });
 
 add_test(function test_getResourceAuthenticator() {
     _("BrowserIDManager supplies a Resource Authenticator callback which returns a Hawk header.");
     configureFxAccountIdentity(globalBrowseridManager);
     let authenticator = globalBrowseridManager.getResourceAuthenticator();
-    do_check_true(!!authenticator);
+    Assert.ok(!!authenticator);
     let req = {uri: CommonUtils.makeURI(
       "https://example.net/somewhere/over/the/rainbow"),
                method: "GET"};
     let output = authenticator(req, "GET");
-    do_check_true("headers" in output);
-    do_check_true("authorization" in output.headers);
-    do_check_true(output.headers.authorization.startsWith("Hawk"));
+    Assert.ok("headers" in output);
+    Assert.ok("authorization" in output.headers);
+    Assert.ok(output.headers.authorization.startsWith("Hawk"));
     _("Expected internal state after successful call.");
-    do_check_eq(globalBrowseridManager._token.uid, globalIdentityConfig.fxaccount.token.uid);
+    Assert.equal(globalBrowseridManager._token.uid, globalIdentityConfig.fxaccount.token.uid);
     run_next_test();
   }
 );
@@ -193,38 +186,27 @@ add_test(function test_resourceAuthenticatorSkew() {
   fxaClient.hawk = hawkClient;
 
   // Sanity check
-  do_check_eq(hawkClient.now(), now);
-  do_check_eq(hawkClient.localtimeOffsetMsec, localtimeOffsetMsec);
+  Assert.equal(hawkClient.now(), now);
+  Assert.equal(hawkClient.localtimeOffsetMsec, localtimeOffsetMsec);
 
   // Properly picked up by the client
-  do_check_eq(fxaClient.now(), now);
-  do_check_eq(fxaClient.localtimeOffsetMsec, localtimeOffsetMsec);
+  Assert.equal(fxaClient.now(), now);
+  Assert.equal(fxaClient.localtimeOffsetMsec, localtimeOffsetMsec);
 
-  let fxa = new MockFxAccounts();
-  fxa.internal._now_is = now;
-  fxa.internal.fxAccountsClient = fxaClient;
-
-  // Picked up by the signed-in user module
-  do_check_eq(fxa.internal.now(), now);
-  do_check_eq(fxa.internal.localtimeOffsetMsec, localtimeOffsetMsec);
-
-  do_check_eq(fxa.now(), now);
-  do_check_eq(fxa.localtimeOffsetMsec, localtimeOffsetMsec);
+  let identityConfig = makeIdentityConfig();
+  let fxaInternal = makeFxAccountsInternalMock(identityConfig);
+  fxaInternal._now_is = now;
+  fxaInternal.fxAccountsClient = fxaClient;
 
   // Mocks within mocks...
-  configureFxAccountIdentity(browseridManager, globalIdentityConfig);
+  configureFxAccountIdentity(browseridManager, globalIdentityConfig, fxaInternal);
 
-  // Ensure the new FxAccounts mock has a signed-in user.
-  fxa.internal.currentAccountState.signedInUser = browseridManager._fxaService.internal.currentAccountState.signedInUser;
-
-  browseridManager._fxaService = fxa;
-
-  do_check_eq(browseridManager._fxaService.internal.now(), now);
-  do_check_eq(browseridManager._fxaService.internal.localtimeOffsetMsec,
+  Assert.equal(browseridManager._fxaService.internal.now(), now);
+  Assert.equal(browseridManager._fxaService.internal.localtimeOffsetMsec,
       localtimeOffsetMsec);
 
-  do_check_eq(browseridManager._fxaService.now(), now);
-  do_check_eq(browseridManager._fxaService.localtimeOffsetMsec,
+  Assert.equal(browseridManager._fxaService.now(), now);
+  Assert.equal(browseridManager._fxaService.localtimeOffsetMsec,
       localtimeOffsetMsec);
 
   let request = new Resource("https://example.net/i/like/pie/");
@@ -232,12 +214,12 @@ add_test(function test_resourceAuthenticatorSkew() {
   let output = authenticator(request, "GET");
   dump("output" + JSON.stringify(output));
   let authHeader = output.headers.authorization;
-  do_check_true(authHeader.startsWith("Hawk"));
+  Assert.ok(authHeader.startsWith("Hawk"));
 
   // Skew correction is applied in the header and we're within the two-minute
   // window.
-  do_check_eq(getTimestamp(authHeader), now - 12 * HOUR_MS);
-  do_check_true(
+  Assert.equal(getTimestamp(authHeader), now - 12 * HOUR_MS);
+  Assert.ok(
       (getTimestampDelta(authHeader, now) - 12 * HOUR_MS) < 2 * MINUTE_MS);
 
   run_next_test();
@@ -261,30 +243,27 @@ add_test(function test_RESTResourceAuthenticatorSkew() {
 
   let fxaClient = new MockFxAccountsClient();
   fxaClient.hawk = hawkClient;
-  let fxa = new MockFxAccounts();
-  fxa.internal._now_is = now;
-  fxa.internal.fxAccountsClient = fxaClient;
 
-  configureFxAccountIdentity(browseridManager, globalIdentityConfig);
+  let identityConfig = makeIdentityConfig();
+  let fxaInternal = makeFxAccountsInternalMock(identityConfig);
+  fxaInternal._now_is = now;
+  fxaInternal.fxAccountsClient = fxaClient;
 
-  // Ensure the new FxAccounts mock has a signed-in user.
-  fxa.internal.currentAccountState.signedInUser = browseridManager._fxaService.internal.currentAccountState.signedInUser;
+  configureFxAccountIdentity(browseridManager, globalIdentityConfig, fxaInternal);
 
-  browseridManager._fxaService = fxa;
-
-  do_check_eq(browseridManager._fxaService.internal.now(), now);
+  Assert.equal(browseridManager._fxaService.internal.now(), now);
 
   let request = new Resource("https://example.net/i/like/pie/");
   let authenticator = browseridManager.getResourceAuthenticator();
   let output = authenticator(request, "GET");
   dump("output" + JSON.stringify(output));
   let authHeader = output.headers.authorization;
-  do_check_true(authHeader.startsWith("Hawk"));
+  Assert.ok(authHeader.startsWith("Hawk"));
 
   // Skew correction is applied in the header and we're within the two-minute
   // window.
-  do_check_eq(getTimestamp(authHeader), now - 12 * HOUR_MS);
-  do_check_true(
+  Assert.equal(getTimestamp(authHeader), now - 12 * HOUR_MS);
+  Assert.ok(
       (getTimestampDelta(authHeader, now) - 12 * HOUR_MS) < 2 * MINUTE_MS);
 
   run_next_test();
@@ -329,7 +308,7 @@ add_test(function test_tokenExpiration() {
     configureFxAccountIdentity(bimExp, globalIdentityConfig);
 
     let authenticator = bimExp.getResourceAuthenticator();
-    do_check_true(!!authenticator);
+    Assert.ok(!!authenticator);
     let req = {uri: CommonUtils.makeURI(
       "https://example.net/somewhere/over/the/rainbow"),
                method: "GET"};
@@ -343,50 +322,12 @@ add_test(function test_tokenExpiration() {
       },
       writable: true,
     });
-    do_check_true(bimExp._token.expiration < bimExp._now());
+    Assert.ok(bimExp._token.expiration < bimExp._now());
     _("... means BrowserIDManager knows to re-fetch it on the next call.");
-    do_check_false(bimExp.hasValidToken());
+    Assert.ok(!bimExp.hasValidToken());
     run_next_test();
   }
 );
-
-add_test(function test_sha256() {
-  // Test vectors from http://www.bichlmeier.info/sha256test.html
-  let vectors = [
-    ["",
-     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
-    ["abc",
-     "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"],
-    ["message digest",
-     "f7846f55cf23e14eebeab5b4e1550cad5b509e3348fbc4efa3a1413d393cb650"],
-    ["secure hash algorithm",
-     "f30ceb2bb2829e79e4ca9753d35a8ecc00262d164cc077080295381cbd643f0d"],
-    ["SHA256 is considered to be safe",
-     "6819d915c73f4d1e77e4e1b52d1fa0f9cf9beaead3939f15874bd988e2a23630"],
-    ["abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
-     "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"],
-    ["For this sample, this 63-byte string will be used as input data",
-     "f08a78cbbaee082b052ae0708f32fa1e50c5c421aa772ba5dbb406a2ea6be342"],
-    ["This is exactly 64 bytes long, not counting the terminating byte",
-     "ab64eff7e88e2e46165e29f2bce41826bd4c7b3552f6b382a9e7d3af47c245f8"]
-  ];
-  let bidUser = new BrowserIDManager();
-  for (let [input, output] of vectors) {
-    do_check_eq(CommonUtils.bytesAsHex(bidUser._sha256(input)), output);
-  }
-  run_next_test();
-});
-
-add_test(function test_computeXClientStateHeader() {
-  let kBhex = "fd5c747806c07ce0b9d69dcfea144663e630b65ec4963596a22f24910d7dd15d";
-  let kB = CommonUtils.hexToBytes(kBhex);
-
-  let bidUser = new BrowserIDManager();
-  let header = bidUser._computeXClientState(kB);
-
-  do_check_eq(header, "6ae94683571c7a7c54dab4700aa3995f");
-  run_next_test();
-});
 
 add_task(async function test_getTokenErrors() {
   _("BrowserIDManager correctly handles various failures to get a token.");
@@ -477,11 +418,11 @@ add_task(async function test_refreshCertificateOn401() {
   await browseridManager.initializeWithCurrentIdentity();
   await browseridManager.whenReadyToAuthenticate.promise;
 
-  do_check_eq(getCertCount, 2);
-  do_check_true(didReturn401);
-  do_check_true(didReturn200);
-  do_check_true(browseridManager._token);
-  do_check_true(browseridManager.hasValidToken());
+  Assert.equal(getCertCount, 2);
+  Assert.ok(didReturn401);
+  Assert.ok(didReturn200);
+  Assert.ok(browseridManager._token);
+  Assert.ok(browseridManager.hasValidToken());
 });
 
 
@@ -537,9 +478,11 @@ add_task(async function test_getKeysErrorWithBackoff() {
   _("Arrange for a 503 with a X-Backoff header.");
 
   let config = makeIdentityConfig();
-  // We want no kA or kB so we attempt to fetch them.
-  delete config.fxaccount.user.kA;
-  delete config.fxaccount.user.kB;
+  // We want no kSync, kXCS, kExtSync or kExtKbHash so we attempt to fetch them.
+  delete config.fxaccount.user.kSync;
+  delete config.fxaccount.user.kXCS;
+  delete config.fxaccount.user.kExtSync;
+  delete config.fxaccount.user.kExtKbHash;
   config.fxaccount.user.keyFetchToken = "keyfetchtoken";
   await initializeIdentityWithHAWKResponseFactory(config, function(method, data, uri) {
     Assert.equal(method, "get");
@@ -571,9 +514,11 @@ add_task(async function test_getKeysErrorWithRetry() {
   _("Arrange for a 503 with a Retry-After header.");
 
   let config = makeIdentityConfig();
-  // We want no kA or kB so we attempt to fetch them.
-  delete config.fxaccount.user.kA;
-  delete config.fxaccount.user.kB;
+  // We want no kSync, kXCS, kExtSync or kExtKbHash so we attempt to fetch them.
+  delete config.fxaccount.user.kSync;
+  delete config.fxaccount.user.kXCS;
+  delete config.fxaccount.user.kExtSync;
+  delete config.fxaccount.user.kExtKbHash;
   config.fxaccount.user.keyFetchToken = "keyfetchtoken";
   await initializeIdentityWithHAWKResponseFactory(config, function(method, data, uri) {
     Assert.equal(method, "get");
@@ -634,9 +579,11 @@ add_task(async function test_getGetKeysFailing401() {
 
   _("Arrange for a 401 - Sync should reflect an auth error.");
   let config = makeIdentityConfig();
-  // We want no kA or kB so we attempt to fetch them.
-  delete config.fxaccount.user.kA;
-  delete config.fxaccount.user.kB;
+  // We want no kSync, kXCS, kExtSync or kExtKbHash so we attempt to fetch them.
+  delete config.fxaccount.user.kSync;
+  delete config.fxaccount.user.kXCS;
+  delete config.fxaccount.user.kExtSync;
+  delete config.fxaccount.user.kExtKbHash;
   config.fxaccount.user.keyFetchToken = "keyfetchtoken";
   await initializeIdentityWithHAWKResponseFactory(config, function(method, data, uri) {
     Assert.equal(method, "get");
@@ -655,9 +602,11 @@ add_task(async function test_getGetKeysFailing503() {
 
   _("Arrange for a 503 - Sync should reflect a network error.");
   let config = makeIdentityConfig();
-  // We want no kA or kB so we attempt to fetch them.
-  delete config.fxaccount.user.kA;
-  delete config.fxaccount.user.kB;
+  // We want no kSync, kXCS, kExtSync or kExtKbHash so we attempt to fetch them.
+  delete config.fxaccount.user.kSync;
+  delete config.fxaccount.user.kXCS;
+  delete config.fxaccount.user.kExtSync;
+  delete config.fxaccount.user.kExtKbHash;
   config.fxaccount.user.keyFetchToken = "keyfetchtoken";
   await initializeIdentityWithHAWKResponseFactory(config, function(method, data, uri) {
     Assert.equal(method, "get");
@@ -676,10 +625,12 @@ add_task(async function test_getKeysMissing() {
 
   let browseridManager = new BrowserIDManager();
   let identityConfig = makeIdentityConfig();
-  // our mock identity config already has kA and kB - remove them or we never
+  // our mock identity config already has kSync, kXCS, kExtSync and kExtKbHash - remove them or we never
   // try and fetch them.
-  delete identityConfig.fxaccount.user.kA;
-  delete identityConfig.fxaccount.user.kB;
+  delete identityConfig.fxaccount.user.kSync;
+  delete identityConfig.fxaccount.user.kXCS;
+  delete identityConfig.fxaccount.user.kExtSync;
+  delete identityConfig.fxaccount.user.kExtKbHash;
   identityConfig.fxaccount.user.keyFetchToken = "keyFetchToken";
 
   configureFxAccountIdentity(browseridManager, identityConfig);
@@ -722,7 +673,7 @@ add_task(async function test_getKeysMissing() {
     ex = e;
   }
 
-  Assert.ok(ex.message.indexOf("missing kA or kB") >= 0);
+  Assert.equal(ex.message, "user data missing: kSync, kXCS, kExtSync, kExtKbHash");
 });
 
 add_task(async function test_signedInUserMissing() {
@@ -730,8 +681,10 @@ add_task(async function test_signedInUserMissing() {
 
   let browseridManager = new BrowserIDManager();
   // Delete stored keys and the key fetch token.
-  delete globalIdentityConfig.fxaccount.user.kA;
-  delete globalIdentityConfig.fxaccount.user.kB;
+  delete globalIdentityConfig.fxaccount.user.kSync;
+  delete globalIdentityConfig.fxaccount.user.kXCS;
+  delete globalIdentityConfig.fxaccount.user.kExtSync;
+  delete globalIdentityConfig.fxaccount.user.kExtKbHash;
   delete globalIdentityConfig.fxaccount.user.keyFetchToken;
 
   configureFxAccountIdentity(browseridManager, globalIdentityConfig);

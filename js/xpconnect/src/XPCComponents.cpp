@@ -2294,7 +2294,7 @@ nsXPCComponents_Utils::Import(const nsACString& registryLocation,
     AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING(
       "nsXPCComponents_Utils::Import", OTHER, registryLocation);
 
-    return moduleloader->Import(registryLocation, targetObj, cx, optionalArgc, retval);
+    return moduleloader->ImportInto(registryLocation, targetObj, cx, optionalArgc, retval);
 }
 
 NS_IMETHODIMP
@@ -2457,6 +2457,14 @@ nsXPCComponents_Utils::UnlinkGhostWindows()
 {
 #ifdef DEBUG
     nsWindowMemoryReporter::UnlinkGhostWindows();
+
+    if (XRE_IsParentProcess()) {
+        nsCOMPtr<nsIObserverService> obsvc = services::GetObserverService();
+        if (obsvc) {
+            obsvc->NotifyObservers(nullptr, "child-ghost-request", nullptr);
+        }
+    }
+
     return NS_OK;
 #else
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -3170,7 +3178,7 @@ nsXPCComponents_Utils::AllowCPOWsInAddon(const nsACString& addonIdStr,
 }
 
 NS_IMETHODIMP
-nsXPCComponents_Utils::ReadFile(nsIFile* aFile, nsACString& aResult)
+nsXPCComponents_Utils::ReadUTF8File(nsIFile* aFile, nsACString& aResult)
 {
     NS_ENSURE_TRUE(aFile, NS_ERROR_INVALID_ARG);
 
@@ -3179,7 +3187,7 @@ nsXPCComponents_Utils::ReadFile(nsIFile* aFile, nsACString& aResult)
 }
 
 NS_IMETHODIMP
-nsXPCComponents_Utils::ReadURI(nsIURI* aURI, nsACString& aResult)
+nsXPCComponents_Utils::ReadUTF8URI(nsIURI* aURI, nsACString& aResult)
 {
     NS_ENSURE_TRUE(aURI, NS_ERROR_INVALID_ARG);
 

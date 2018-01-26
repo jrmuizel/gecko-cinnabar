@@ -1757,15 +1757,17 @@ GetNSSProfilePath(nsAutoCString& aProfilePath)
   }
 
 #if defined(XP_WIN)
-  // Native path will drop Unicode characters that cannot be mapped to system's
-  // codepage, using short (canonical) path as workaround.
+  // SQLite always takes UTF-8 file paths regardless of the current system
+  // code page.
   nsCOMPtr<nsILocalFileWin> profileFileWin(do_QueryInterface(profileFile));
   if (!profileFileWin) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Error,
            ("Could not get nsILocalFileWin for profile directory.\n"));
     return NS_ERROR_FAILURE;
   }
-  rv = profileFileWin->GetNativeCanonicalPath(aProfilePath);
+  nsAutoString u16ProfilePath;
+  rv = profileFileWin->GetCanonicalPath(u16ProfilePath);
+  CopyUTF16toUTF8(u16ProfilePath, aProfilePath);
 #else
   rv = profileFile->GetNativePath(aProfilePath);
 #endif
@@ -2143,16 +2145,10 @@ nsNSSComponent::ShutdownNSS()
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::ShutdownNSS\n"));
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
-  // This is idempotent and can happen as a result of observing
-  // profile-before-change and being called from nsNSSComponent's destructor.
-  // We need to do this before other cleanup because we must avoid acquiring
-  // mMutex and then preventing threads holding nsNSSShutDownPreventionLocks
-  // from continuing (which is what evaporateAllNSSResourcesAndShutDown does).
-  MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("evaporating psm resources"));
-  if (NS_FAILED(nsNSSShutDownList::evaporateAllNSSResourcesAndShutDown())) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("failed to evaporate resources"));
-    return;
-  }
+  // If we don't do this we might try to unload the loadable roots while the
+  // loadable roots loading thread is setting up EV information, which can cause
+  // it to fail to find the roots it is expecting.
+  Unused << BlockUntilLoadableRootsLoaded();
 
   // This currently calls GetPIPNSSBundleString, which acquires mMutex, so we
   // can't call it while already holding mMutex. This is fine as mMutex doesn't
@@ -2184,15 +2180,11 @@ nsNSSComponent::ShutdownNSS()
   Unused << SSL_ShutdownServerSessionIDCache();
 
   // Release the default CertVerifier. This will cause any held NSS resources
-  // to be released (it's not an nsNSSShutDownObject, so we have to do this
-  // manually).
+  // to be released.
   mDefaultCertVerifier = nullptr;
-
-  if (NSS_Shutdown() != SECSuccess) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("NSS SHUTDOWN FAILURE"));
-  } else {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS shutdown =====>> OK <<====="));
-  }
+  // We don't actually shut down NSS - XPCOM does, after all threads have been
+  // joined and the component manager has been shut down (and so there shouldn't
+  // be any XPCOM objects holding NSS resources).
 }
 
 nsresult
@@ -2348,7 +2340,12 @@ nsresult nsNSSComponent::LogoutAuthenticatedPK11()
 
   nsClientAuthRememberService::ClearAllRememberedDecisions();
 
-  return nsNSSShutDownList::doPK11Logout();
+  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
+  if (os) {
+    os->NotifyObservers(nullptr, "net:cancel-all-connections", nullptr);
+  }
+
+  return NS_OK;
 }
 
 nsresult
