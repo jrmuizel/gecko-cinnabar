@@ -96,17 +96,22 @@ struct BlobItemData {
     array->AppendElement(this);
   }
 
+  void ClearFrame() {
+    // Delete weak pointer on frame
+    nsTArray<BlobItemData*> *array =
+      reinterpret_cast<nsTArray<BlobItemData*>*>(mFrame->GetProperty(BlobGroupDataProperty()));
+    array->RemoveElement(this);
+
+    // drop the entire property if nothing's left in the array
+    if (array->IsEmpty()) {
+      mFrame->DeleteProperty(BlobGroupDataProperty());
+    }
+    mFrame = nullptr;
+  }
+
   ~BlobItemData() {
     if (mFrame) {
-      // Delete weak pointer on frame
-      nsTArray<BlobItemData*> *array =
-        reinterpret_cast<nsTArray<BlobItemData*>*>(mFrame->GetProperty(BlobGroupDataProperty()));
-      array->RemoveElement(this);
-
-      // drop the entire property if nothing's left in the array
-      if (array->IsEmpty()) {
-        mFrame->DeleteProperty(BlobGroupDataProperty());
-      }
+      ClearFrame();
     }
   }
 };
@@ -784,6 +789,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
         MOZ_RELEASE_ASSERT(data->mGroup->mDisplayItems.Contains(data));
         if (data->mGroup != currentGroup) {
           GP("group don't match %p %p\n", data->mGroup, currentGroup);
+          data->ClearFrame();
           // the item is for another group
           // it should be cleared out as being unused at the end of this paint
           data = nullptr;
@@ -850,6 +856,7 @@ Grouper::ConstructGroupsInsideInactive(WebRenderCommandBuilder* aCommandBuilder,
       MOZ_RELEASE_ASSERT(data->mGroup->mDisplayItems.Contains(data));
       if (data->mGroup != currentGroup) {
         GP("group don't match %p %p\n", data->mGroup, currentGroup);
+        data->ClearFrame();
         // the item is for another group
         // it should be cleared out as being unused at the end of this paint
         data = nullptr;
