@@ -257,6 +257,16 @@ struct DIGroup {
     return data->mRect;
   }
 
+  void ClearItems() {
+    GP("items: %d\n", mDisplayItems.Count());
+    for (auto iter = mDisplayItems.Iter(); !iter.Done(); iter.Next()) {
+      BlobItemData* data = iter.Get()->GetKey();
+      GP("Deleting %p-%d\n", data->mFrame, data->mDisplayItemKey);
+      iter.Remove();
+      delete data;
+    }
+  }
+
   void ComputeGeometryChange(nsDisplayItem *item, BlobItemData *aData, Matrix &mMatrix, nsDisplayListBuilder *builder) {
     // If the frame is marked as invalidated, and didn't specify a rect to invalidate then we want to
     // invalidate both the old and new bounds, otherwise we only want to invalidate the changed areas.
@@ -732,6 +742,8 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
           GP("Inner group size change\n");
           aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
           groupData->mFollowingGroup.mKey = Nothing();
+          groupData->mFollowingGroup.ClearItems();
+
           IntSize size = currentGroup->mGroupBounds.Size().ToNearestPixels(mAppUnitsPerDevPixel);
           groupData->mFollowingGroup.mInvalidRect = IntRect(IntPoint(0, 0), size);
         }
@@ -890,14 +902,8 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
     auto p = group.mGroupBounds;
     auto q = groupBounds;
     GP("Bounds change: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
-    GP("items: %d\n", group.mDisplayItems.Count());
-    for (auto iter = group.mDisplayItems.Iter(); !iter.Done(); iter.Next()) {
-      BlobItemData* data = iter.Get()->GetKey();
-      GP("Deleting %p-%d\n", data->mFrame, data->mDisplayItemKey);
-      iter.Remove();
-      delete data;
-    }
 
+    group.ClearItems();
     if (group.mKey) {
       IntSize size = groupBounds.Size().ToNearestPixels(g.mAppUnitsPerDevPixel);
       group.mInvalidRect = IntRect(IntPoint(0, 0), size);
