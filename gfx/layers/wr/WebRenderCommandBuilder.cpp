@@ -47,6 +47,7 @@ NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(BlobGroupDataProperty,
 // XXX: check that all members are initialized
 struct BlobItemData {
   nsIFrame *mFrame;
+  nsTArray<BlobItemData*> *mArray; // a weak pointer to the array that's owned by the frame property
   IntRect mRect;
   // It would be nice to not need this. We need to be able to call ComputeInvalidationRegion.
   // ComputeInvalidationRegion will sometimes reach into parent style structs to get information
@@ -95,17 +96,20 @@ struct BlobItemData {
       aFrame->SetProperty(BlobGroupDataProperty(), array);
     }
     array->AppendElement(this);
+    mArray = array;
   }
 
   void ClearFrame() {
     // Delete weak pointer on frame
-    nsTArray<BlobItemData*> *array = mFrame->GetProperty(BlobGroupDataProperty());
+    MOZ_RELEASE_ASSERT(mFrame);
     // the property may already be removed if WebRenderUserData got deleted
-    // first
-    array->RemoveElement(this);
+    // first so we use our own mArray pointer.
+    mArray->RemoveElement(this);
 
     // drop the entire property if nothing's left in the array
-    if (array->IsEmpty()) {
+    if (mArray->IsEmpty()) {
+      // If the frame is in the process of being destroyed this will fail
+      // but that's ok, because the the property will be removed then anyways
       mFrame->DeleteProperty(BlobGroupDataProperty());
     }
     mFrame = nullptr;
