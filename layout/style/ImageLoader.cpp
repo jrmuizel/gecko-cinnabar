@@ -345,6 +345,7 @@ void InvalidateImages(nsIFrame* aFrame)
           !IsRenderNoImages(data->GetDisplayItemKey())) {
         static_cast<layers::WebRenderFallbackData*>(data.get())->SetInvalid(true);
       }
+      //XXX: handle Blob data
       invalidateFrame = true;
     }
   }

@@ -17,6 +17,7 @@
 #include "mozilla/layers/ScrollingLayersHelper.h"
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/layers/UpdateImageHelper.h"
+#include "UnitTransforms.h"
 #include "gfxEnv.h"
 #include "nsDisplayListInvalidation.h"
 #include "WebRenderCanvasRenderer.h"
@@ -98,8 +99,9 @@ struct BlobItemData {
 
   void ClearFrame() {
     // Delete weak pointer on frame
-    nsTArray<BlobItemData*> *array =
-      reinterpret_cast<nsTArray<BlobItemData*>*>(mFrame->GetProperty(BlobGroupDataProperty()));
+    nsTArray<BlobItemData*> *array = mFrame->GetProperty(BlobGroupDataProperty());
+    // the property may already be removed if WebRenderUserData got deleted
+    // first
     array->RemoveElement(this);
 
     // drop the entire property if nothing's left in the array
@@ -248,6 +250,7 @@ struct DIGroup {
   nsPoint mLastAnimatedGeometryRootOrigin;
   IntRect mInvalidRect;
   nsRect mGroupBounds;
+  int32_t mAppUnitsPerDevPixel;
   IntPoint mGroupOffset;
   Maybe<wr::ImageKey> mKey;
 
@@ -286,6 +289,7 @@ struct DIGroup {
     if (shift.x != 0 || shift.y != 0)
       GP("shift %d %d\n", shift.x, shift.y);
     int32_t appUnitsPerDevPixel = item->Frame()->PresContext()->AppUnitsPerDevPixel();
+    MOZ_RELEASE_ASSERT(mAppUnitsPerDevPixel == appUnitsPerDevPixel);
     // XXX: we need to compute this properly. This basically just matches the
     // computation for regular fallback. We should be more disciplined.
     LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(mGroupBounds, appUnitsPerDevPixel);
@@ -742,7 +746,11 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
       // We want to ensure the tight bounds are still clipped by area
       // that we're building the display list for.
       if (groupData->mFollowingGroup.mKey) {
-        if (!groupData->mFollowingGroup.mGroupBounds.IsEqualEdges(currentGroup->mGroupBounds)) {
+        if (!groupData->mFollowingGroup.mGroupBounds.IsEqualEdges(currentGroup->mGroupBounds) ||
+            groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
+          if (groupData->mFollowingGroup.mAppUnitsPerDevPixel != currentGroup->mAppUnitsPerDevPixel) {
+            printf("app unit change following: %d %d\n", groupData->mFollowingGroup.mAppUnitsPerDevPixel, currentGroup->mAppUnitsPerDevPixel);
+          }
           // The group changed size
           GP("Inner group size change\n");
           aCommandBuilder->mManager->AddImageKeyForDiscard(groupData->mFollowingGroup.mKey.value());
@@ -754,6 +762,7 @@ Grouper::ConstructGroups(WebRenderCommandBuilder* aCommandBuilder,
         }
       }
       groupData->mFollowingGroup.mGroupBounds = currentGroup->mGroupBounds;
+      groupData->mFollowingGroup.mAppUnitsPerDevPixel = currentGroup->mAppUnitsPerDevPixel;
       groupData->mFollowingGroup.mGroupOffset = currentGroup->mGroupOffset;
 
       currentGroup = &groupData->mFollowingGroup;
@@ -889,7 +898,7 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
 
   mScrollingHelper.BeginList(aSc);
   Grouper g(mScrollingHelper);
-  g.mAppUnitsPerDevPixel = aWrappingItem->Frame()->PresContext()->AppUnitsPerDevPixel();
+  uint32_t appUnitsPerDevPixel = aWrappingItem->Frame()->PresContext()->AppUnitsPerDevPixel();
   GP("DoGroupingForDisplayList\n");
 
   g.mDisplayListBuilder = aDisplayListBuilder;
@@ -903,7 +912,10 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
   auto p = group.mGroupBounds;
   auto q = groupBounds;
   GP("Bounds: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x, q.y, q.width, q.height);
-  if (!group.mGroupBounds.IsEqualEdges(groupBounds)) {
+  if (!group.mGroupBounds.IsEqualEdges(groupBounds) || group.mAppUnitsPerDevPixel != appUnitsPerDevPixel) {
+    if (group.mAppUnitsPerDevPixel != appUnitsPerDevPixel) {
+      printf("app unit %d %d\n", group.mAppUnitsPerDevPixel, appUnitsPerDevPixel);
+    }
     // The bounds have changed so we need to discard the old image and add all
     // the commands again.
     auto p = group.mGroupBounds;
@@ -918,6 +930,8 @@ WebRenderCommandBuilder::DoGroupingForDisplayList(nsDisplayList* aList,
       group.mKey = Nothing();
     }
   }
+  g.mAppUnitsPerDevPixel = appUnitsPerDevPixel;
+  group.mAppUnitsPerDevPixel = appUnitsPerDevPixel;
   group.mGroupBounds = groupBounds;
   group.mGroupOffset = group.mGroupBounds.TopLeft().ToNearestPixels(g.mAppUnitsPerDevPixel);
   group.mAnimatedGeometryRootOrigin = group.mGroupBounds.TopLeft();
